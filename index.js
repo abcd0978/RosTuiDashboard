@@ -114,6 +114,23 @@ function runAction(cmd, onDone) {
 const LEFT_W = 40;               // 왼쪽 트리 패널 폭
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 const pad = (s, n) => (String(s) + ' '.repeat(Math.max(0, n))).slice(0, n);
+const padL = (s, n) => (' '.repeat(Math.max(0, n)) + String(s)).slice(-n);
+
+// ── Hz 스파크라인 — 최근 히스토리를 블록문자 미니그래프로 ──────────────────────
+const SPARK = '▁▂▃▄▅▆▇█';
+function sparkline(arr, w = 5) {
+  if (!arr || !arr.length) return ' '.repeat(w);
+  const recent = arr.slice(-w);
+  const max = Math.max(...recent, 1);
+  const s = recent.map((v) => v <= 0 ? '·' : SPARK[clamp(Math.round(v / max * (SPARK.length - 1)), 0, SPARK.length - 1)]).join('');
+  return padL(s, w);
+}
+// 퍼지(서브시퀀스) 매치 — needle 문자들이 순서대로 hay 에 들어있으면 true. 둘 다 소문자 가정.
+function fuzzy(needle, hay) {
+  let i = 0;
+  for (let j = 0; j < hay.length && i < needle.length; j++) if (hay[j] === needle[i]) i++;
+  return i === needle.length;
+}
 
 // ── 토픽/Hz 스트림 ───────────────────────────────────────────────────────────
 function useTopics(ver) {
@@ -162,14 +179,15 @@ const RATES = [1, 2, 5, 10, 15, 20, 30, 60];   // 선택 가능한 최대 렌더
 //   param   : rosparam get 주기 폴링
 //   service : rosservice info (정적)
 //   node    : rosnode info (주기)
-function useValue(active, capRef, ver) {
+function useValue(active, capRef, ver, frozenRef) {
   const [text, setText] = useState('');
   const kind = active && active.kind;
   const name = active && active.name;
   useEffect(() => {
     if (!active) { setText(''); return; }
     let alive = true, child, timer = null, buf = '', latest = '(수신 대기…)', last = 0;
-    const push = () => { timer = null; last = Date.now(); if (alive) setText(latest); };
+    // frozen 이면 화면 갱신만 멈춤(자식 프로세스는 계속 → 해제 시 다음 메시지부터 재개).
+    const push = () => { timer = null; last = Date.now(); if (alive && !frozenRef.current) setText(latest); };
     if (kind === 'topic') {
       const throttled = () => {
         const cap = capRef.current, now = Date.now();
@@ -193,13 +211,38 @@ function useValue(active, capRef, ver) {
       let out = '';
       child = rosSpawn(cmd);
       child.stdout.on('data', (d) => { out += d.toString(); });
-      child.on('close', () => { if (!alive) return; setText(out.trimEnd() || '(빈 값)'); timer = setTimeout(poll, interval); });
+      child.on('close', () => { if (!alive) return; if (!frozenRef.current) setText(out.trimEnd() || '(빈 값)'); timer = setTimeout(poll, interval); });
       child.on('error', () => { if (alive) { setText('(오류)'); timer = setTimeout(poll, 2000); } });
     };
     poll();
     return () => { alive = false; if (timer) clearTimeout(timer); if (child) child.kill(); };
   }, [kind, name, ver]);
   return text;
+}
+
+// ── 대역폭(bytes/s) — 선택한 토픽에 대해 rostopic/ros2 topic bw 스트림 파싱 ────────
+function useBandwidth(active, ver) {
+  const [bw, setBw] = useState('');
+  const kind = active && active.kind;
+  const name = active && active.name;
+  useEffect(() => {
+    if (!active || kind !== 'topic') { setBw(''); return; }
+    let alive = true, buf = '';
+    const cmd = ver === '2' ? `stdbuf -oL ros2 topic bw '${name}' 2>&1` : `stdbuf -oL rostopic bw '${name}' 2>&1`;
+    const child = rosSpawn(cmd);
+    setBw('…');
+    child.stdout.on('data', (d) => {
+      buf += d.toString();
+      const lines = buf.split('\n'); buf = lines.pop();
+      for (const ln of lines) {
+        const m = ln.match(/([\d.]+\s*[KMG]?B\/s)/);   // "1.23MB/s" (ROS1) / "1.23 MB/s" (ROS2)
+        if (m && alive) setBw(m[1].replace(/\s+/g, ''));
+      }
+    });
+    child.on('error', () => { if (alive) setBw(''); });
+    return () => { alive = false; try { child.kill(); } catch { /* */ } };
+  }, [kind, name, ver]);
+  return bw;
 }
 
 // ── 트리 만들기/펼치기 ───────────────────────────────────────────────────────
@@ -217,12 +260,12 @@ function buildTree(items) {
   }
   return root;
 }
-function flattenTree(node, expanded, depth, out) {
+function flattenTree(node, expanded, depth, out, force) {
   const kids = [...node.children.values()].sort((a, b) => a.name.localeCompare(b.name));
   for (const c of kids) {
     const hasKids = c.children.size > 0;
     out.push({ node: c, depth, hasKids });
-    if (hasKids && expanded.has(c.path)) flattenTree(c, expanded, depth + 1, out);
+    if (hasKids && (force || expanded.has(c.path))) flattenTree(c, expanded, depth + 1, out, force);   // 검색 중엔 전부 펼침
   }
   return out;
 }
@@ -249,6 +292,9 @@ function App() {
   const [valTop, setValTop] = useState(0);       // 오른쪽 값 패널 세로 스크롤 오프셋
   const [edit, setEdit] = useState(null);        // 파라미터 입력창 {name,value} 또는 null
   const [status, setStatus] = useState('');      // 마지막 액션 결과 메시지
+  const [filter, setFilter] = useState('');      // 트리 필터 문자열('/' 검색)
+  const [searching, setSearching] = useState(false);   // 검색 입력 모드
+  const [frozen, setFrozen] = useState(false);   // 값 패널 프리즈(space)
   const [rateIdx, setRateIdx] = useState(() => {
     const i = RATES.indexOf(Number(process.env.RENDER_HZ));
     return i >= 0 ? i : 3;                       // 기본 10Hz
@@ -257,12 +303,30 @@ function App() {
   const capRef = useRef(100);
   capRef.current = Math.max(16, Math.round(1000 / renderHz));
   const valMaxRef = useRef(0);                    // 값 스크롤 최대치(렌더에서 갱신)
-  useEffect(() => { setValTop(0); }, [active && active.p]);   // 항목 바뀌면 맨 위로
+  const frozenRef = useRef(false); frozenRef.current = frozen;
+  useEffect(() => { setValTop(0); setFrozen(false); }, [active && active.p]);   // 항목 바뀌면 맨 위로 + 프리즈 해제
 
-  const list = topics || [];
+  // Hz 히스토리(토픽별) — 스파크라인용. topics 갱신마다 링버퍼에 push.
+  const hzHistRef = useRef(new Map());
+  useEffect(() => {
+    if (!topics) return;
+    const m = hzHistRef.current;
+    for (const it of topics) {
+      if (it.kind !== 'topic') continue;
+      const a = m.get(it.p) || [];
+      a.push(it.hz || 0);
+      if (a.length > 8) a.shift();
+      m.set(it.p, a);
+    }
+  }, [topics]);
+
+  const fullList = topics || [];
+  const filt = filter.trim().toLowerCase();
+  const list = filt ? fullList.filter((it) => fuzzy(filt, it.name.toLowerCase())) : fullList;
   const tree = buildTree(list);
-  const flat = flattenTree(tree, expanded, 0, []);
+  const flat = flattenTree(tree, expanded, 0, [], !!filt);
   const n = flat.length;
+  useEffect(() => { setSel(0); setTop(0); }, [filt]);   // 필터 바뀌면 선택 맨 위로
 
   const VISIBLE = Math.max(3, rows - 7);   // 세로 여유(풋터 줄바꿈까지 대비) → 넘침·깜빡임 방지
   const rightW = Math.max(24, cols - LEFT_W - 5);
@@ -277,8 +341,9 @@ function App() {
   const listPos = useElementPosition(listRef, [topics === null]);
   const R = useRef({}); R.current = { n, dtop, listPos, VISIBLE, flat };
 
-  const echo = useValue(active, capRef, ver);
-  const activeHz = active && active.kind === 'topic' ? ((list.find((i) => i.p === active.p) || active).hz) : null;
+  const echo = useValue(active, capRef, ver, frozenRef);
+  const bw = useBandwidth(active, ver);
+  const activeHz = active && active.kind === 'topic' ? ((fullList.find((i) => i.p === active.p) || active).hz) : null;
 
   const activate = (idx) => {
     const r = R.current.flat[idx];
@@ -353,7 +418,17 @@ function App() {
       else if (ch && !key.ctrl && !key.meta) setEdit((e) => e && ({ ...e, value: e.value + ch }));
       return;
     }
+    if (searching) {                                     // '/' 검색 입력 모드
+      if (key.return) setSearching(false);               // 필터 유지하고 닫기
+      else if (key.escape) { setSearching(false); setFilter(''); }
+      else if (key.backspace || key.delete) setFilter((f) => f.slice(0, -1));
+      else if (ch && !key.ctrl && !key.meta) setFilter((f) => f + ch);
+      return;
+    }
     if (ch === 'q') quit();
+    else if (ch === '/') setSearching(true);             // ★ 트리 검색
+    else if (ch === ' ') setFrozen((f) => !f);           // ★ 값 패널 프리즈
+    else if (key.escape && filter) setFilter('');        // 필터 해제
     else if (key.downArrow || ch === 'j') move(1);
     else if (key.upArrow || ch === 'k') move(-1);
     else if (key.pageDown) move(VISIBLE);
@@ -389,7 +464,8 @@ function App() {
     const mark = !it ? '' : (isTopic ? (live ? '●' : '·') : { param: 'P', service: 'S', node: 'N' }[kind] || '·');
     const nameCol = '  '.repeat(r.depth) + twist + ' ' + (it ? mark + ' ' : '') + r.node.name + (it && it.sub ? ' (sub)' : '');
     const hz = isTopic ? String(it.hz) : '';
-    const line = pad(nameCol, LW - 4) + pad(hz, 4);
+    const spark = isTopic ? sparkline(hzHistRef.current.get(it.p), 5) : '';   // Hz 미니 히스토리
+    const line = pad(nameCol, LW - 10) + pad(spark, 5) + ' ' + padL(hz, 4);
     const kindColor = { param: 'magenta', service: 'blue', node: 'green' }[kind];
     return h(Box, { key: i },
       h(Text, {
@@ -408,7 +484,8 @@ function App() {
   const valLines = Array.from({ length: VISIBLE }, (_, i) => pad(rawLines[dvalTop + i] ?? '', RW));
   const scrollTag = valMax > 0 ? `${dvalTop + 1}-${Math.min(rawLines.length, dvalTop + VISIBLE)}/${rawLines.length} ↕` : '';
   const titleTxt = active
-    ? `${active.name} [${active.kind}]${active.kind === 'topic' ? ` ${activeHz != null ? activeHz : '?'}Hz` : ''}`
+    ? `${active.name} [${active.kind}]${active.kind === 'topic'
+        ? ` ${activeHz != null ? activeHz : '?'}Hz${bw ? ` · ${bw}` : ''}${frozen ? ' ❄' : ''}` : ''}`
     : '(선택 없음)';
 
   return h(Box, { flexDirection: 'column', width: cols },
@@ -423,14 +500,21 @@ function App() {
           h(Text, { bold: true, color: 'green' }, titleTxt.slice(0, Math.max(0, RW - scrollTag.length - 1))),
           h(Text, { color: 'yellow' }, scrollTag)),
         ...valLines.map((l, i) => h(Text, { key: i, color: active ? undefined : 'gray' }, l)))),
-    edit
+    searching
       ? h(Box, null,
-          h(Text, { color: 'yellow' }, ` set ${edit.name} = `),
-          h(Text, { backgroundColor: 'yellow', color: 'black' }, `${edit.value} `),
-          h(Text, { dimColor: true }, '  Enter=적용 Esc=취소'))
-      : h(Text, { color: status ? 'cyan' : 'gray' }, status ? ` ⚑ ${status}` : (actHint ? ` x = ${actHint}` : '')),
+          h(Text, { color: 'yellow' }, ' 🔍 '),
+          h(Text, { backgroundColor: 'yellow', color: 'black' }, `${filter} `),
+          h(Text, { dimColor: true }, `  Enter=적용 Esc=취소  (${list.length}건)`))
+      : edit
+        ? h(Box, null,
+            h(Text, { color: 'yellow' }, ` set ${edit.name} = `),
+            h(Text, { backgroundColor: 'yellow', color: 'black' }, `${edit.value} `),
+            h(Text, { dimColor: true }, '  Enter=적용 Esc=취소'))
+        : filter
+          ? h(Text, { color: 'cyan' }, ` 🔍 "${filter}" — ${list.length}건  (Esc 해제)`)
+          : h(Text, { color: status ? 'cyan' : 'gray' }, status ? ` ⚑ ${status}` : (actHint ? ` x = ${actHint}` : '')),
     h(Box, null,
-      h(Text, { dimColor: true }, ` ↑↓ move | Enter open | x action | r restart | [ ] value | +/- rate | q quit `),
+      h(Text, { dimColor: true }, ` ↑↓ move | Enter open | / search | x action | r restart | space freeze | [ ] value | q quit `),
       h(Button, { label: '✕ Quit', onPress: quit })));
 }
 

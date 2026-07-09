@@ -23,7 +23,10 @@ A terminal dashboard (TUI) for browsing **ROS topics / services / params / nodes
   - param → `rosparam get`
   - service → `rosservice info` / `ros2 service type`
   - node → `rosnode info` / `ros2 node info`
-- **Live Hz** per topic (incl. subscriber-only topics, marked `(sub)`).
+- **Live Hz** per topic (incl. subscriber-only topics, marked `(sub)`), with a **mini Hz sparkline** (recent history) in the tree.
+- **Bandwidth** (bytes/s) for the selected topic (`rostopic bw` / `ros2 topic bw`), shown in the value-pane header.
+- **Fuzzy search** (`/`) to filter the tree by name — folders auto-expand to reveal matches (`Esc` clears).
+- **Freeze** the value pane (`space`) to inspect a fast-scrolling message without it moving.
 - **Control actions** (`x` on a selection): kill node (ROS1 `rosnode kill`; ROS2 SIGINT by node→PID, best-effort), call service, set param — the rqt-style *control* half.
 - **ROS1 & ROS2 auto-detected** from the environment.
 - **Keyboard + mouse** (click to select/expand, wheel to scroll, hover on buttons).
@@ -55,6 +58,8 @@ node index.js
 |---|---|
 | `↑↓` / `j` `k` | move selection |
 | `Enter` / click | expand folder / select item |
+| `/` | fuzzy-search the tree (`Esc` clears) |
+| `space` | freeze / unfreeze the value pane |
 | wheel | scroll (over left = tree, over right = value) |
 | `[` `]` | scroll value pane |
 | `g` / `G` | top / bottom |
