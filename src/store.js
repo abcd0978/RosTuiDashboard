@@ -122,14 +122,17 @@ export function StoreProvider({ children }) {
     if (!fields.length) { setStatus('숫자 필드 없음(메시지 수신 대기 중일 수 있음)'); return; }
     setPlotPick({ fields, idx: 0 });
   };
-  const launchPlot = (field) => {
-    const title = `${active.name} / ${field}`;
-    const cmd = `${echoFullCmd(ver, active.name)} | python3 ${shq(PLOT_PY)} --field ${shq(field)} --title ${shq(title)}`;
+  // fields: 문자열 또는 배열. mode: 'time'(원값/미분·적분/FFT, 다중=오버레이) | 'xy'(2필드 산점도+선형회귀)
+  const launchPlot = (fields, mode = 'time') => {
+    const fl = Array.isArray(fields) ? fields : [fields];
+    const title = `${active.name} / ${fl.join(', ')}${mode === 'xy' ? ' (xy)' : ''}`;
+    const fieldArgs = fl.map((f) => `--field ${shq(f)}`).join(' ');
+    const cmd = `${echoFullCmd(ver, active.name)} | python3 ${shq(PLOT_PY)} ${fieldArgs} --mode ${mode} --title ${shq(title)}`;
     const child = rosSpawn(cmd);
     if (child.stderr) child.stderr.on('data', () => {});
     child.on('error', () => setStatus('플롯 실행 오류(python3/matplotlib 확인)'));
     plotsRef.current.push(child);
-    setStatus(`📈 plot: ${field}`);
+    setStatus(`📈 plot ${mode}: ${fl.join(', ')}`);
   };
   const actHint = active ? ((actionFor(ver, active.kind, active.name) || {}).label || '') : '';
 

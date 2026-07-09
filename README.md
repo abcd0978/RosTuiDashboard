@@ -27,6 +27,11 @@ A terminal dashboard (TUI) for browsing **ROS topics / services / params / nodes
 - **Bandwidth** (bytes/s) for the selected topic (`rostopic bw` / `ros2 topic bw`), shown in the value-pane header.
 - **Fuzzy search** (`/`) to filter the tree by name — folders auto-expand to reveal matches (`Esc` clears).
 - **Freeze** the value pane (`space`) to inspect a fast-scrolling message without it moving.
+- **Plotting** (`p` on a topic): opens a native **matplotlib** window fed by the topic's echo stream. General-purpose — works on any numeric field(s):
+  - **time** mode: raw value + **n-th derivative / integral** (`↑`/`↓` in the window; e.g. velocity→acceleration) + **FFT** spectrum. Multiple fields overlay on one time axis.
+  - **xy** mode (2 fields): parametric/correlation plot with equal aspect (a circular trajectory shows as a circle) + **linear regression** line & R² (toggle with `f`).
+  - **xyz** mode (3 fields): 3D trajectory.
+  - Pick fields in the picker: `space` to multi-select, `Enter` for time, `x` for spatial (2=XY, 3=3D). Requires `python3` with `numpy`/`matplotlib` and a display.
 - **Control actions** (`x` on a selection): kill node (ROS1 `rosnode kill`; ROS2 SIGINT by node→PID, best-effort), call service, set param — the rqt-style *control* half.
 - **ROS1 & ROS2 auto-detected** from the environment.
 - **Keyboard + mouse** (click to select/expand, wheel to scroll, hover on buttons).
@@ -59,6 +64,7 @@ node index.js
 | `↑↓` / `j` `k` | move selection |
 | `Enter` / click | expand folder / select item |
 | `/` | fuzzy-search the tree (`Esc` clears) |
+| `p` | plot the selected topic (matplotlib: raw / n-th d·∫ / FFT / XY+regression / 3D) |
 | `space` | freeze / unfreeze the value pane |
 | wheel | scroll (over left = tree, over right = value) |
 | `[` `]` | scroll value pane |
