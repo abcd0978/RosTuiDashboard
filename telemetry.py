@@ -50,12 +50,14 @@ master = rosgraph.Master("/ros_tui")
 _lock = threading.Lock()
 counts = {}   # topic -> 수신 수(윈도우)
 subs = {}     # topic -> Subscriber
+last_seen = {}   # topic -> 마지막 메시지 수신 시각
 
 
 def make_cb(name):
     def cb(_msg):
         with _lock:
             counts[name] = counts.get(name, 0) + 1
+            last_seen[name] = time.time()
     return cb
 
 
@@ -125,9 +127,10 @@ while not rospy.is_shutdown():
     # 통합 item 리스트 — p 는 카테고리 접두 경로(트리용), name 은 실제 ROS 이름
     items = []
     for t in sorted(all_t):
+        age = round(now - last_seen[t], 2) if t in last_seen else None   # 마지막 수신 후 경과(초)
         items.append({"p": "topics" + t, "kind": "topic", "name": t,
                       "ty": ttypes.get(t, "?"), "hz": rates.get(t, 0.0),
-                      "sub": t not in pub_t})   # 구독전용 표시
+                      "sub": t not in pub_t, "age": age})   # 구독전용 표시
     for s in services:
         items.append({"p": "services" + s, "kind": "service", "name": s})
     for p in params:

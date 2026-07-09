@@ -49,11 +49,13 @@ QOS = QoSProfile(reliability=ReliabilityPolicy.BEST_EFFORT,
 
 counts = {}
 subs = {}
+last_seen = {}   # topic → 마지막 메시지 수신 시각(수신 기준 age 계산용)
 
 
 def make_cb(name):
     def cb(_msg):
         counts[name] = counts.get(name, 0) + 1
+        last_seen[name] = time.time()
     return cb
 
 
@@ -101,10 +103,12 @@ while rclpy.ok():
     dt = max(1e-3, time.time() - t0)
     rates = {n: round(counts.get(n, 0) / dt, 1) for n in types}
 
+    now = time.time()
     items = []
     for n in sorted(types):
+        age = round(now - last_seen[n], 2) if n in last_seen else None   # 마지막 수신 후 경과(초)
         items.append({"p": "topics" + n, "kind": "topic", "name": n,
-                      "ty": types[n], "hz": rates.get(n, 0.0)})
+                      "ty": types[n], "hz": rates.get(n, 0.0), "age": age})
     for s in services:
         items.append({"p": "services" + s, "kind": "service", "name": s})
     for nd in nodes:

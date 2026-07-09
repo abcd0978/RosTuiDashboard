@@ -16,8 +16,9 @@ export function TreePanel() {
     const kind = it && it.kind;
     const isTopic = kind === 'topic';
     const live = isTopic && (it.hz || 0) > 0.1;
+    const stale = isTopic && !live && it.age != null && it.age > 3;   // 발행하다 멈춤(수신 후 3s+)
     const twist = r.hasKids ? (expanded.has(r.node.path) ? '▼' : '▶') : ' ';
-    const mark = !it ? '' : (isTopic ? (live ? '●' : '·') : { param: 'P', service: 'S', node: 'N' }[kind] || '·');
+    const mark = !it ? '' : (isTopic ? (live ? '●' : stale ? '⚠' : '·') : { param: 'P', service: 'S', node: 'N' }[kind] || '·');
     const nameCol = '  '.repeat(r.depth) + twist + ' ' + (it ? mark + ' ' : '') + r.node.name + (it && it.sub ? ' (sub)' : '');
     const hz = isTopic ? String(it.hz) : '';
     const spark = isTopic ? sparkline(hzHistRef.current.get(it.p), 5) : '';   // Hz 미니 히스토리
@@ -26,7 +27,7 @@ export function TreePanel() {
     return h(Box, { key: i },
       h(Text, {
         backgroundColor: selected ? 'cyan' : undefined,
-        color: selected ? 'black' : (it ? (isTopic ? (live ? undefined : 'gray') : kindColor) : 'yellow'),
+        color: selected ? 'black' : (it ? (isTopic ? (live ? undefined : stale ? 'red' : 'gray') : kindColor) : 'yellow'),
         bold: selected || (r.hasKids && !it),
       }, pad(line, LW)));
   });

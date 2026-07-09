@@ -122,7 +122,9 @@ export function StoreProvider({ children }) {
 
   const echo = useValue(active, capRef, ver, frozenRef);
   const bw = useBandwidth(active, ver);
-  const activeHz = active && active.kind === 'topic' ? ((fullList.find((i) => i.p === active.p) || active).hz) : null;
+  const activeItem = active && active.kind === 'topic' ? (fullList.find((i) => i.p === active.p) || active) : null;
+  const activeHz = activeItem ? activeItem.hz : null;
+  const activeAge = activeItem ? activeItem.age : null;
 
   const activate = (idx) => {
     const r = R.current.flat[idx];
@@ -324,7 +326,7 @@ export function StoreProvider({ children }) {
   const ctx = {
     ver, conn, topics, cols, rows,
     sel: dsel, top: dtop, n, maxTop, flat, list, VISIBLE, LW, RW, rightW,
-    expanded, active, echo, bw, activeHz, valTop, valMaxRef, frozen, renderHz,
+    expanded, active, echo, bw, activeHz, activeAge, valTop, valMaxRef, frozen, renderHz,
     edit, searching, filter, plotPick, status, actHint, hzHistRef, listRef,
     hzMode, domain, domainEdit, env: rosEnv(ver, domain),
     bookmarks, bmOpen, bmAdd, infoView, rec, bagPlay, jobs, jobsOpen, jobLogsRef,
