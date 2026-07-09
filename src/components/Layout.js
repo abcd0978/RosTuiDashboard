@@ -6,6 +6,7 @@ import { useDashboard } from '../store.js';
 import { TreePanel } from './TreePanel.js';
 import { ValuePanel } from './ValuePanel.js';
 import { Overlay } from './Overlay.js';
+import { EnvBar } from './EnvBar.js';
 import { Footer } from './Footer.js';
 import { Loading } from './Loading.js';
 
@@ -15,5 +16,6 @@ export function Layout() {
   return h(Box, { flexDirection: 'column', width: cols },
     h(Box, { flexDirection: 'row' }, h(TreePanel), h(ValuePanel)),
     h(Overlay),
+    h(EnvBar),
     h(Footer));
 }

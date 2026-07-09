@@ -1,6 +1,9 @@
 // 대시보드 중앙 상태 store — 모든 공유 state·파생값·액션·스트림/마우스 효과를 한 곳에 모아
 // Context 로 제공한다. 각 컴포넌트는 useDashboard() 로 필요한 값만 꺼내 쓰고,
 // 키보드 입력은 컴포넌트별 useInput(모드 게이팅)으로 자기 책임에서 처리한다.
+import { writeFileSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
 import { h, createContext, useContext, useState, useEffect, useRef } from './react.js';
 import { useApp } from 'ink';
 import { useMouse, useElementPosition } from '@zenobius/ink-mouse';
@@ -9,11 +12,15 @@ import { buildTree, flattenTree } from './lib/tree.js';
 import { actionFor, restartFor, runAction, numericFields, rosSpawn, echoFullCmd } from './lib/ros.js';
 import { shq } from './lib/util.js';
 import { PLOT_PY } from './lib/paths.js';
+import { rosEnv } from './lib/env.js';
+import { loadBookmarks, saveBookmarks } from './lib/bookmarks.js';
 import { useRosVersion } from './hooks/useRosVersion.js';
 import { useTopics } from './hooks/useTopics.js';
 import { useTermSize } from './hooks/useTermSize.js';
 import { useValue } from './hooks/useValue.js';
 import { useBandwidth } from './hooks/useBandwidth.js';
+
+const HZ_MODES = ['all', 'selected', 'off'];   // Hz 측정 정책 순환
 
 const DashboardContext = createContext(null);
 export const useDashboard = () => useContext(DashboardContext);
@@ -21,7 +28,14 @@ export const useDashboard = () => useContext(DashboardContext);
 export function StoreProvider({ children }) {
   const { exit } = useApp();
   const ver = useRosVersion();
-  const { topics, conn } = useTopics(ver);
+  const [domain, setDomain] = useState(process.env.ROS_DOMAIN_ID ?? null);   // 컨테이너/도메인 전환
+  const [domainEdit, setDomainEdit] = useState(null);   // 도메인 입력창 {value} 또는 null
+  const [hzMode, setHzMode] = useState('all');          // Hz 측정 정책 all|selected|off
+  const [bookmarks, setBookmarks] = useState(() => loadBookmarks());   // 명령 북마크 리스트
+  const [bmOpen, setBmOpen] = useState(null);           // 북마크 오버레이 {idx} 또는 null
+  const [bmAdd, setBmAdd] = useState(null);             // 북마크 추가 입력 {step,name,cmd} 또는 null
+  const ctrlPathRef = useRef(join(tmpdir(), `rdash-ctrl-${process.pid}.json`));
+  const { topics, conn } = useTopics(ver, ctrlPathRef.current, domain);
   const { cols, rows } = useTermSize();
   const mouse = useMouse();
 
@@ -69,6 +83,17 @@ export function StoreProvider({ children }) {
   const flat = flattenTree(buildTree(list), expanded, 0, [], !!filt);
   const n = flat.length;
   useEffect(() => { setSel(0); setTop(0); }, [filt]);   // 필터 바뀌면 선택 맨 위로
+
+  // 선택적 Hz: 정책을 제어 파일에 기록(telemetry 가 폴링). all=전체 / off=없음 / selected=보이는 토픽+active.
+  const visTopics = flat.filter((r) => r.node.item && r.node.item.kind === 'topic').map((r) => r.node.item.name);
+  if (active && active.kind === 'topic') visTopics.push(active.name);
+  const visKey = hzMode === 'selected' ? [...new Set(visTopics)].sort().join(',') : hzMode;
+  useEffect(() => {
+    let measure = 'all';
+    if (hzMode === 'off') measure = 'none';
+    else if (hzMode === 'selected') measure = [...new Set(visTopics)];
+    try { writeFileSync(ctrlPathRef.current, JSON.stringify({ measure })); } catch { /* */ }
+  }, [visKey]);
 
   const VISIBLE = Math.max(3, rows - 7);          // 세로 여유(풋터 줄바꿈 대비)
   const rightW = Math.max(24, cols - LEFT_W - 5);
@@ -141,6 +166,32 @@ export function StoreProvider({ children }) {
     setSel(ns);
     setTop((t) => { let nt = clamp(t, 0, maxTop); if (ns < nt) nt = ns; else if (ns >= nt + VISIBLE) nt = ns - VISIBLE + 1; return nt; });
   };
+  const cycleHz = () => setHzMode((m) => HZ_MODES[(HZ_MODES.indexOf(m) + 1) % HZ_MODES.length]);
+  // ── 북마크(명령 단축) ──────────────────────────────────────────────────────
+  const runBookmark = (bm) => {
+    if (!bm || !bm.cmd) return;
+    setStatus(`▶ ${bm.name} …`);
+    runAction(bm.cmd, (o) => setStatus(`${bm.name}: ${o}`));
+  };
+  const runBookmarkKey = (ch) => {
+    const bm = bookmarks.find((b) => b.key === ch);
+    if (bm) runBookmark(bm);
+  };
+  const addBookmark = (name, cmd) => {
+    const key = String((bookmarks.length + 1) % 10);   // 1..9,0 자동 단축키 배정
+    const next = [...bookmarks, { name: name || cmd, cmd, key }];
+    setBookmarks(next); saveBookmarks(next);
+    setStatus(`북마크 추가: [${key}] ${name || cmd}`);
+  };
+  const deleteBookmark = (i) => {
+    const next = bookmarks.filter((_, j) => j !== i);
+    setBookmarks(next); saveBookmarks(next);
+  };
+  const submitDomain = (v) => {
+    const s = String(v).trim();
+    setDomain(s === '' ? null : s);
+    setStatus(`ROS_DOMAIN_ID = ${s || '(unset)'} — 재연결`);
+  };
   const killPlots = () => { for (const c of plotsRef.current) { try { c.kill(); } catch { /* */ } } };
   const quit = () => { try { mouse.disable(); } catch { /* */ } killPlots(); exit(); };
 
@@ -179,9 +230,13 @@ export function StoreProvider({ children }) {
     sel: dsel, top: dtop, n, maxTop, flat, list, VISIBLE, LW, RW, rightW,
     expanded, active, echo, bw, activeHz, valTop, valMaxRef, frozen, renderHz,
     edit, searching, filter, plotPick, status, actHint, hzHistRef, listRef,
+    hzMode, domain, domainEdit, env: rosEnv(ver, domain),
+    bookmarks, bmOpen, bmAdd,
     setSel, setTop, setValTop, setExpanded, setActive, setEdit, setSearching,
-    setFilter, setFrozen, setPlotPick, setRateIdx, setStatus,
+    setFilter, setFrozen, setPlotPick, setRateIdx, setStatus, setDomainEdit,
+    setBmOpen, setBmAdd,
     activate, move, doAction, doRestart, submitSet, doPlot, launchPlot, quit,
+    cycleHz, submitDomain, runBookmark, runBookmarkKey, addBookmark, deleteBookmark,
   };
   return h(DashboardContext.Provider, { value: ctx }, children);
 }

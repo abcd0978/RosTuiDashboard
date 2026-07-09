@@ -3,8 +3,9 @@
 // 현재 셸의 ROS 환경(ROS_MASTER_URI 등)을 그대로 상속 — 도커/런치/프로젝트 스크립트는 모른다.
 import { spawn } from 'child_process';
 
-export function rosSpawn(inner) {
-  return spawn('bash', ['-c', inner]);   // 로그인셸(-l) 아님 → 현재 env 그대로 상속
+export function rosSpawn(inner, env) {
+  // 로그인셸(-l) 아님 → 현재 env 그대로 상속. env 지정 시 덧씌움(RDASH_CTRL, ROS_DOMAIN_ID 등).
+  return spawn('bash', ['-c', inner], env ? { env: { ...process.env, ...env } } : undefined);
 }
 
 // 값/정보 조회 명령 (버전별)

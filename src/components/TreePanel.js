@@ -8,12 +8,16 @@ export function TreePanel() {
   const d = useDashboard();
   const { flat, top: dtop, sel: dsel, VISIBLE, LW, expanded, hzHistRef } = d;
 
-  // 오버레이(편집/필드선택/검색)가 없을 때만 트리 키 활성 → 입력이 올바른 컴포넌트로 전파
-  const navActive = !!process.stdin.isTTY && !d.edit && !d.plotPick && !d.searching;
+  // 오버레이가 없을 때만 트리 키 활성 → 입력이 올바른 컴포넌트로 전파
+  const navActive = !!process.stdin.isTTY && !d.edit && !d.plotPick && !d.searching && !d.domainEdit && !d.bmOpen && !d.bmAdd;
   useInput((ch, key) => {
     if (ch === 'q') d.quit();
     else if (ch === '/') d.setSearching(true);
     else if (ch === ' ') d.setFrozen((f) => !f);
+    else if (ch === 'h') d.cycleHz();                    // ★ Hz 측정 정책 all/selected/off
+    else if (ch === 'D') d.setDomainEdit({ value: d.domain || '' });   // ★ ROS_DOMAIN_ID 전환
+    else if (ch === 'b') d.setBmOpen({ idx: 0 });        // ★ 북마크(명령 단축)
+    else if (ch >= '1' && ch <= '9') d.runBookmarkKey(ch);   // ★ 숫자 = 북마크 즉시 실행
     else if (key.escape && d.filter) d.setFilter('');
     else if (key.downArrow || ch === 'j') d.move(1);
     else if (key.upArrow || ch === 'k') d.move(-1);

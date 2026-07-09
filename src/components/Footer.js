@@ -7,6 +7,6 @@ import { Button } from './Button.js';
 export function Footer() {
   const { quit } = useDashboard();
   return h(Box, null,
-    h(Text, { dimColor: true }, ` ↑↓ move | Enter open | / search | p plot | x action | r restart | space freeze | q quit `),
+    h(Text, { dimColor: true }, ` ↑↓ move | Enter | / search | p plot | x act | b bookmarks | h Hz | D domain | q quit `),
     h(Button, { label: '✕ Quit', onPress: quit }));
 }

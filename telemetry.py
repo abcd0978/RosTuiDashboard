@@ -4,6 +4,7 @@
 프런트(Ink)가 이걸로 트리를 만들고, 선택 시 rostopic echo / rosparam get /
 rosservice info / rosnode info 를 직접 호출한다. master 없으면 {"nomaster":true}."""
 import json
+import os
 import sys
 import time
 import threading
@@ -14,6 +15,26 @@ import rosgraph
 def emit(o):
     sys.stdout.write(json.dumps(o) + "\n")
     sys.stdout.flush()
+
+
+# 선택적 Hz 측정 — RDash 가 RDASH_CTRL 파일에 측정 정책을 쓰면 그것만 구독.
+CTRL = os.environ.get("RDASH_CTRL")
+
+
+def measure_policy():
+    """None=전체 측정, set()=측정 안 함, set([...])=지정 토픽만."""
+    if not CTRL:
+        return None
+    try:
+        with open(CTRL) as f:
+            m = json.load(f).get("measure", "all")
+    except Exception:
+        return None
+    if m == "all":
+        return None
+    if m == "none":
+        return set()
+    return set(m) if isinstance(m, list) else None
 
 
 while not rosgraph.is_master_online():
@@ -66,14 +87,28 @@ while not rospy.is_shutdown():
     except Exception:
         params = []
 
-    # 발행 중인 토픽만 Hz 측정(구독전용은 데이터가 없어 hz=0)
+    # 발행 중인 토픽만 Hz 측정(구독전용은 데이터가 없어 hz=0). AnyMsg 는 역직렬화 안 함.
+    pol = measure_policy()
     for t in pub_t:
-        if t not in subs:
+        allowed = (pol is None) or (t in pol)
+        if allowed and t not in subs:
             counts[t] = 0
             try:
                 subs[t] = rospy.Subscriber(t, AnyMsg, make_cb(t))
             except Exception:
                 pass
+        elif not allowed and t in subs:
+            try:
+                subs.pop(t).unregister()
+            except Exception:
+                pass
+            counts.pop(t, None)
+    for t in [t for t in subs if t not in pub_t]:   # 사라진 토픽 구독 정리(누수 방지)
+        try:
+            subs.pop(t).unregister()
+        except Exception:
+            pass
+        counts.pop(t, None)
 
     time.sleep(1.0)
     if not rosgraph.is_master_online():

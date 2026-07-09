@@ -20,6 +20,26 @@ def emit(o):
     sys.stdout.flush()
 
 
+# 선택적 Hz 측정 — RDash 가 RDASH_CTRL 파일에 측정 정책을 쓰면 그것만 구독(관측자 부하↓).
+CTRL = os.environ.get("RDASH_CTRL")
+
+
+def measure_policy():
+    """None=전체 측정, set()=측정 안 함, set([...])=지정 토픽만."""
+    if not CTRL:
+        return None
+    try:
+        with open(CTRL) as f:
+            m = json.load(f).get("measure", "all")
+    except Exception:
+        return None
+    if m == "all":
+        return None
+    if m == "none":
+        return set()
+    return set(m) if isinstance(m, list) else None
+
+
 rclpy.init()
 node = Node("ros_tui")
 # best-effort 구독 → reliable/best-effort 발행자 양쪽에서 라이브 메시지 수신
@@ -37,11 +57,24 @@ def make_cb(name):
     return cb
 
 
+def drop(name):
+    """구독 해제 + 카운터 정리(사라진/측정중단 토픽)."""
+    s = subs.pop(name, None)
+    if s is not None:
+        try:
+            node.destroy_subscription(s)
+        except Exception:
+            pass
+    counts.pop(name, None)
+
+
 while rclpy.ok():
     tnt = node.get_topic_names_and_types()          # [(name, [types]), ...]
     types = {n: (ts[0] if ts else "?") for n, ts in tnt}
+    pol = measure_policy()                          # 측정 정책(선택적 Hz)
     for n, ty in types.items():
-        if n not in subs:
+        allowed = (pol is None) or (n in pol)
+        if allowed and n not in subs:
             counts[n] = 0
             try:
                 # raw=True → 역직렬화 없이 직렬화 바이트만 콜백에 전달(카운트 전용).
@@ -52,6 +85,10 @@ while rclpy.ok():
                     subs[n] = node.create_subscription(get_message(ty), n, make_cb(n), QOS)
             except Exception:
                 subs[n] = None                      # 타입 로드 실패 → hz 만 0
+        elif not allowed and n in subs:
+            drop(n)                                 # 정책에서 빠진 토픽 구독 해제
+    for n in [n for n in subs if n not in types]:   # 사라진 토픽 정리(누수 방지)
+        drop(n)
     services = sorted({s for s, _ in node.get_service_names_and_types()})
     nodes = sorted({(ns.rstrip("/") + "/" + nm) for nm, ns in node.get_node_names_and_namespaces()})
 

@@ -3,14 +3,16 @@ import { useState, useEffect } from '../react.js';
 import { rosSpawn } from '../lib/ros.js';
 import { TELEM, TELEM2 } from '../lib/paths.js';
 
-export function useTopics(ver) {
+export function useTopics(ver, ctrlPath, domain) {
   const [topics, setTopics] = useState(null);
   const [conn, setConn] = useState('starting');
   useEffect(() => {
     if (!ver) return;                          // 버전 감지 전엔 대기
     let child, buf = '', alive = true, timer;
+    const env = { RDASH_CTRL: ctrlPath };      // 선택적 Hz 제어 파일 경로
+    if (domain != null && domain !== '') env.ROS_DOMAIN_ID = String(domain);   // 도메인 전환(다른 컨테이너)
     const start = () => {
-      child = rosSpawn('python3 -');
+      child = rosSpawn('python3 -', env);
       child.stdin.on('error', () => {});
       if (child.stderr) child.stderr.on('data', () => {});   // stderr 버림(파이프 막힘 방지)
       child.stdin.write(ver === '2' ? TELEM2 : TELEM); child.stdin.end();
@@ -27,6 +29,6 @@ export function useTopics(ver) {
     };
     start();
     return () => { alive = false; clearTimeout(timer); if (child) child.kill(); };
-  }, [ver]);
+  }, [ver, domain]);                           // 도메인 바뀌면 재시작(제어파일은 재시작 불필요)
   return { topics, conn };
 }
