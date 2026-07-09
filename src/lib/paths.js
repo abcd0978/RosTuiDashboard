@@ -1,0 +1,9 @@
+// 저장소 루트 기준 경로 + 텔레메트리 스크립트 로드(한 번). src/lib → 루트는 두 단계 위.
+import { readFileSync } from 'fs';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
+
+export const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
+export const PLOT_PY = join(ROOT, 'plot.py');   // matplotlib 라이브 플로터(원값/미분/적분/FFT)
+export const TELEM = readFileSync(join(ROOT, 'telemetry.py'), 'utf8');
+export const TELEM2 = readFileSync(join(ROOT, 'telemetry_ros2.py'), 'utf8');
