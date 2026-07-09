@@ -14,6 +14,7 @@ import { shq } from './lib/util.js';
 import { PLOT_PY } from './lib/paths.js';
 import { rosEnv } from './lib/env.js';
 import { loadBookmarks, saveBookmarks } from './lib/bookmarks.js';
+import { loadPreflight } from './lib/preflight.js';
 import { connectionsCmd, resourceCmd, tfTreeCmd, tfEchoCmd, bagRecordCmd, bagPlayCmd } from './lib/commands.js';
 import { useRosVersion } from './hooks/useRosVersion.js';
 import { useTopics } from './hooks/useTopics.js';
@@ -45,6 +46,8 @@ export function StoreProvider({ children }) {
   const [help, setHelp] = useState(false);              // 도움말 오버레이(?)
   const [watches, setWatches] = useState([]);           // 워치리스트 [{topic, field}]
   const [watchOpen, setWatchOpen] = useState(false);    // 워치 오버레이
+  const [preflight] = useState(() => loadPreflight());  // 프리플라이트 체크 정의
+  const [preflightOpen, setPreflightOpen] = useState(false);
   const jobsRef = useRef([]); jobsRef.current = jobs;    // 종료 시 정리용 최신 참조
   const jobLogsRef = useRef(new Map());                 // id → 출력 라인 링버퍼(리렌더 폭주 방지)
   const jobSeqRef = useRef(0);
@@ -335,10 +338,10 @@ export function StoreProvider({ children }) {
     edit, searching, filter, plotPick, status, actHint, hzHistRef, listRef,
     hzMode, domain, domainEdit, env: rosEnv(ver, domain),
     bookmarks, bmOpen, bmAdd, infoView, rec, bagPlay, tfEcho, jobs, jobsOpen, jobLogsRef,
-    treeHidden, help, watches, watchOpen,
+    treeHidden, help, watches, watchOpen, preflight, preflightOpen,
     setSel, setTop, setValTop, setExpanded, setActive, setEdit, setSearching,
     setFilter, setFrozen, setPlotPick, setRateIdx, setStatus, setDomainEdit,
-    setBmOpen, setBmAdd, setInfoView, setBagPlay, setJobsOpen, setHelp, setWatchOpen, setTfEcho,
+    setBmOpen, setBmAdd, setInfoView, setBagPlay, setJobsOpen, setHelp, setWatchOpen, setTfEcho, setPreflightOpen,
     openFieldPicker, addWatch, removeWatch, submitTfEcho,
     toggleTree: () => setTreeHidden((v) => !v),
     activate, move, doAction, doRestart, submitSet, submitEdit, doPlot, launchPlot, quit,
