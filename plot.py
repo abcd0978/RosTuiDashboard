@@ -46,8 +46,12 @@ def parse_args():
     ap.add_argument("--window", type=int, default=512, help="유지할 최근 샘플 수")
     ap.add_argument("--interval", type=int, default=100, help="렌더 주기(ms)")
     ap.add_argument("--order", type=int, default=1, help="time 모드 변환 차수: +미분 / -적분 / 0 원값")
+    ap.add_argument("--seconds", type=int, default=10, help="time 모드 시간 창(최근 N초). 창에서 +/- 로 5초씩")
     ap.add_argument("--save", default="", help="지정 시 GUI 대신 한 프레임 PNG 저장(헤드리스/데모)")
     return ap.parse_args()
+
+
+WIN_MIN, WIN_MAX, WIN_STEP = 5, 60, 5   # time 창 범위/스텝(초)
 
 
 def extract(doc, path):
@@ -114,8 +118,10 @@ def main():
         sys.stderr.write(f"plot.py: --mode {args.mode} 는 --field {need}개 필요\n")
         sys.exit(2)
 
-    buf_t = collections.deque(maxlen=args.window)
-    buf = {f: collections.deque(maxlen=args.window) for f in fields}
+    # time 모드는 시간 창을 위해 넉넉히(고레이트 60초 커버), 공간 모드는 샘플 수 창
+    bufmax = 20000 if args.mode == "time" else args.window
+    buf_t = collections.deque(maxlen=bufmax)
+    buf = {f: collections.deque(maxlen=bufmax) for f in fields}
     lock = threading.Lock()
     t0 = time.monotonic()
 
@@ -159,7 +165,8 @@ def main():
 
     threading.Thread(target=reader, daemon=True).start()
 
-    state = {"order": int(np.clip(args.order, ORDER_MIN, ORDER_MAX))}
+    state = {"order": int(np.clip(args.order, ORDER_MIN, ORDER_MAX)),
+             "tspan": int(np.clip(args.seconds, WIN_MIN, WIN_MAX))}
     single = (args.mode == "time" and len(fields) == 1)
 
     def snapshot():
@@ -240,16 +247,20 @@ def main():
         for ax in axes:
             ax.grid(True, alpha=0.3)
         fig.text(0.5, 0.005,
-                 "up/down: order  (+ = derivative, - = integral)   0: raw   |   n-th order supported",
+                 "up/down: order (+deriv / -integral)  ·  0: raw  ·  +/-: time window ±5s",
                  ha="center", va="bottom", fontsize=8, color="gray")
 
         def on_key(ev):
-            if ev.key in ("up", "+", "="):
+            if ev.key == "up":
                 state["order"] = min(ORDER_MAX, state["order"] + 1)
-            elif ev.key in ("down", "-"):
+            elif ev.key == "down":
                 state["order"] = max(ORDER_MIN, state["order"] - 1)
             elif ev.key == "0":
                 state["order"] = 0
+            elif ev.key in ("+", "="):
+                state["tspan"] = min(WIN_MAX, state["tspan"] + WIN_STEP)
+            elif ev.key == "-":
+                state["tspan"] = max(WIN_MIN, state["tspan"] - WIN_STEP)
 
         fig.canvas.mpl_connect("key_press_event", on_key)
 
@@ -257,19 +268,24 @@ def main():
             t, cols = snapshot()
             if t.size < 2:
                 return []
+            tmax = t[-1]; tmin = tmax - state["tspan"]      # 최근 tspan 초 창(시간 기준)
+            vis = t >= tmin
+            tv = t[vis]
             label = "value"
             for f in fields:
-                v = cols[f]
-                lines_r[f].set_data(t, v)
-                yv, label = apply_order(v, t, state["order"])
-                lines_d[f].set_data(t, yv)
-            ax_d.set_ylabel(label)
-            ax_r.relim(); ax_r.autoscale_view(); ax_d.relim(); ax_d.autoscale_view()
-            if ax_f is not None and t.size >= 8:
-                v = cols[fields[0]]
-                dt = (t[-1] - t[0]) / (t.size - 1)
+                v = cols[f][vis]
+                lines_r[f].set_data(tv, v)
+                yv, label = apply_order(v, tv, state["order"])
+                lines_d[f].set_data(tv, yv)
+            ax_r.set_ylabel("value"); ax_d.set_ylabel(label)
+            ax_r.set_title(f"last {state['tspan']}s", fontsize=9, loc="right", color="gray")
+            for ax in (ax_r, ax_d):
+                ax.relim(); ax.autoscale_view(scalex=False); ax.set_xlim(tmin, tmax)   # X 고정, Y 오토
+            if ax_f is not None and tv.size >= 8:
+                v = cols[fields[0]][vis]
+                dt = (tv[-1] - tv[0]) / (tv.size - 1)
                 if dt > 0:
-                    vu = np.interp(np.linspace(t[0], t[-1], t.size), t, v)
+                    vu = np.interp(np.linspace(tv[0], tv[-1], tv.size), tv, v)
                     vu = vu - np.nanmean(vu)
                     spec = np.abs(np.fft.rfft(np.nan_to_num(vu) * np.hanning(vu.size)))
                     ln_f.set_data(np.fft.rfftfreq(vu.size, d=dt), spec)
