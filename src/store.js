@@ -14,6 +14,7 @@ import { shq } from './lib/util.js';
 import { PLOT_PY } from './lib/paths.js';
 import { rosEnv } from './lib/env.js';
 import { loadBookmarks, saveBookmarks } from './lib/bookmarks.js';
+import { connectionsCmd, resourceCmd, tfTreeCmd, bagRecordCmd, bagPlayCmd } from './lib/commands.js';
 import { useRosVersion } from './hooks/useRosVersion.js';
 import { useTopics } from './hooks/useTopics.js';
 import { useTermSize } from './hooks/useTermSize.js';
@@ -34,6 +35,10 @@ export function StoreProvider({ children }) {
   const [bookmarks, setBookmarks] = useState(() => loadBookmarks());   // 명령 북마크 리스트
   const [bmOpen, setBmOpen] = useState(null);           // 북마크 오버레이 {idx} 또는 null
   const [bmAdd, setBmAdd] = useState(null);             // 북마크 추가 입력 {step,name,cmd} 또는 null
+  const [infoView, setInfoView] = useState(null);       // 정보 오버레이 {title,lines,top} (연결/리소스/TF)
+  const [rec, setRec] = useState(null);                 // rosbag 녹화 {child,out,started,n} 또는 null
+  const [bagPlay, setBagPlay] = useState(null);         // rosbag 재생 경로 입력 {value} 또는 null
+  const infoRef = useRef({ alive: false, timer: null });
   const ctrlPathRef = useRef(join(tmpdir(), `rdash-ctrl-${process.pid}.json`));
   const { topics, conn } = useTopics(ver, ctrlPathRef.current, domain);
   const { cols, rows } = useTermSize();
@@ -187,6 +192,57 @@ export function StoreProvider({ children }) {
     const next = bookmarks.filter((_, j) => j !== i);
     setBookmarks(next); saveBookmarks(next);
   };
+  // ── 정보 오버레이(연결/리소스/TF) — 명령 실행 결과를 스크롤 표시, 선택적 주기 갱신 ──
+  const openInfo = (title, cmd, refreshMs) => {
+    clearTimeout(infoRef.current.timer);
+    infoRef.current.alive = true;
+    const run = () => {
+      const p = rosSpawn(cmd);
+      let out = '';
+      if (p.stderr) p.stderr.on('data', () => {});
+      p.stdout.on('data', (d) => { out += d.toString(); });
+      p.on('close', () => {
+        if (!infoRef.current.alive) return;
+        setInfoView((v) => v && ({ ...v, lines: (out.trim() || '(빈 값)').split('\n') }));
+        if (refreshMs) infoRef.current.timer = setTimeout(run, refreshMs);
+      });
+      p.on('error', () => setInfoView((v) => v && ({ ...v, lines: ['(오류)'] })));
+    };
+    setInfoView({ title, lines: ['(조회 중…)'], top: 0 });
+    run();
+  };
+  const closeInfo = () => { infoRef.current.alive = false; clearTimeout(infoRef.current.timer); setInfoView(null); };
+  const openConnections = () => {
+    if (!active) { setStatus('선택 항목 없음 (Enter 로 선택)'); return; }
+    openInfo(`🔗 ${active.name} [${active.kind}]`, connectionsCmd(ver, active.kind, active.name));
+  };
+  const openResource = () => {
+    const nodes = fullList.filter((i) => i.kind === 'node').map((i) => i.name);
+    if (!nodes.length) { setStatus('노드 없음'); return; }
+    openInfo('📊 node resources (CPU%/RSS)', resourceCmd(nodes), 2000);   // 2초마다 갱신
+  };
+  const openTf = () => openInfo('🌳 TF tree (/tf 수집 중, ~3s)', tfTreeCmd(ver));
+  // ── rosbag 녹화/재생 ───────────────────────────────────────────────────────
+  const toggleRec = () => {
+    if (rec) { try { rec.child.kill('SIGINT'); } catch { /* */ } setRec(null); setStatus('■ 녹화 정지'); return; }
+    const recTopics = filt ? list.filter((i) => i.kind === 'topic').map((i) => i.name) : null;
+    const out = `rdash_rec_${Date.now()}`;
+    const child = rosSpawn(bagRecordCmd(ver, recTopics, out));
+    if (child.stderr) child.stderr.on('data', () => {});
+    child.on('error', () => setStatus('rosbag 오류(설치 확인)'));
+    plotsRef.current.push(child);                        // 종료 시 정리
+    setRec({ child, out, started: Date.now(), n: recTopics ? recTopics.length : 0 });
+    setStatus(`● 녹화: ${recTopics ? recTopics.length + ' 토픽(필터)' : '전체 -a'} → ${out}`);
+  };
+  const submitBagPlay = (path) => {
+    const s = String(path).trim();
+    if (!s) return;
+    const p = rosSpawn(bagPlayCmd(ver, s));
+    if (p.stderr) p.stderr.on('data', () => {});
+    p.on('error', () => setStatus('rosbag play 오류'));
+    plotsRef.current.push(p);
+    setStatus(`▶ play: ${s}`);
+  };
   const submitDomain = (v) => {
     const s = String(v).trim();
     setDomain(s === '' ? null : s);
@@ -231,12 +287,13 @@ export function StoreProvider({ children }) {
     expanded, active, echo, bw, activeHz, valTop, valMaxRef, frozen, renderHz,
     edit, searching, filter, plotPick, status, actHint, hzHistRef, listRef,
     hzMode, domain, domainEdit, env: rosEnv(ver, domain),
-    bookmarks, bmOpen, bmAdd,
+    bookmarks, bmOpen, bmAdd, infoView, rec, bagPlay,
     setSel, setTop, setValTop, setExpanded, setActive, setEdit, setSearching,
     setFilter, setFrozen, setPlotPick, setRateIdx, setStatus, setDomainEdit,
-    setBmOpen, setBmAdd,
+    setBmOpen, setBmAdd, setInfoView, setBagPlay,
     activate, move, doAction, doRestart, submitSet, doPlot, launchPlot, quit,
     cycleHz, submitDomain, runBookmark, runBookmarkKey, addBookmark, deleteBookmark,
+    openConnections, openResource, openTf, closeInfo, toggleRec, submitBagPlay,
   };
   return h(DashboardContext.Provider, { value: ctx }, children);
 }

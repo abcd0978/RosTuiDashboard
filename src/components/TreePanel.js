@@ -9,7 +9,8 @@ export function TreePanel() {
   const { flat, top: dtop, sel: dsel, VISIBLE, LW, expanded, hzHistRef } = d;
 
   // 오버레이가 없을 때만 트리 키 활성 → 입력이 올바른 컴포넌트로 전파
-  const navActive = !!process.stdin.isTTY && !d.edit && !d.plotPick && !d.searching && !d.domainEdit && !d.bmOpen && !d.bmAdd;
+  const navActive = !!process.stdin.isTTY && !d.edit && !d.plotPick && !d.searching
+    && !d.domainEdit && !d.bmOpen && !d.bmAdd && !d.infoView && !d.bagPlay;
   useInput((ch, key) => {
     if (ch === 'q') d.quit();
     else if (ch === '/') d.setSearching(true);
@@ -17,6 +18,11 @@ export function TreePanel() {
     else if (ch === 'h') d.cycleHz();                    // ★ Hz 측정 정책 all/selected/off
     else if (ch === 'D') d.setDomainEdit({ value: d.domain || '' });   // ★ ROS_DOMAIN_ID 전환
     else if (ch === 'b') d.setBmOpen({ idx: 0 });        // ★ 북마크(명령 단축)
+    else if (ch === 'c') d.openConnections();            // ★ 연결 뷰(pub/sub)
+    else if (ch === 't') d.openTf();                     // ★ TF 프레임 트리
+    else if (ch === 'S') d.openResource();               // ★ 노드 리소스(CPU/RSS)
+    else if (ch === 'R') d.toggleRec();                  // ★ rosbag 녹화 토글
+    else if (ch === 'P') d.setBagPlay({ value: '' });    // ★ rosbag 재생(경로)
     else if (ch >= '1' && ch <= '9') d.runBookmarkKey(ch);   // ★ 숫자 = 북마크 즉시 실행
     else if (key.escape && d.filter) d.setFilter('');
     else if (key.downArrow || ch === 'j') d.move(1);

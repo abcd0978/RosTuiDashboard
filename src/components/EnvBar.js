@@ -1,13 +1,18 @@
 // 컨테이너/환경 컨텍스트 줄 — 어느 host·도메인·rmw 의 그래프를 보는지 + Hz 측정 모드.
 import { h } from '../react.js';
-import { Text } from 'ink';
+import { Box, Text } from 'ink';
 import { useDashboard } from '../store.js';
 
 export function EnvBar() {
-  const { env, hzMode } = useDashboard();
+  const { env, hzMode, rec } = useDashboard();
   const parts = [`⬢ ${env.host}`, `ROS${env.ver || '?'}`];
   if (env.ver === '2') parts.push(`dom:${env.domain}`, `rmw:${env.rmw}`);
   else if (env.master) parts.push(`master:${env.master.replace(/^https?:\/\//, '')}`);
   parts.push(`Hz:${hzMode}`);
-  return h(Text, { dimColor: true }, ' ' + parts.join('  ·  '));
+  const base = h(Text, { dimColor: true }, ' ' + parts.join('  ·  '));
+  if (!rec) return base;
+  const el = Math.floor((Date.now() - rec.started) / 1000);   // 경과(초)
+  const mmss = `${Math.floor(el / 60)}:${String(el % 60).padStart(2, '0')}`;
+  return h(Box, null, base,
+    h(Text, { color: 'red', bold: true }, `   ● REC ${rec.n ? rec.n + 't' : 'all'} ${mmss} ${rec.out}`));
 }

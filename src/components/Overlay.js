@@ -8,12 +8,16 @@ import { ParamEdit } from './ParamEdit.js';
 import { DomainEdit } from './DomainEdit.js';
 import { Bookmarks } from './Bookmarks.js';
 import { BookmarkAdd } from './BookmarkAdd.js';
+import { InfoView } from './InfoView.js';
+import { BagPlay } from './BagPlay.js';
 import { StatusLine } from './StatusLine.js';
 
 export function Overlay() {
-  const { plotPick, searching, edit, domainEdit, bmOpen, bmAdd } = useDashboard();
+  const { plotPick, searching, edit, domainEdit, bmOpen, bmAdd, infoView, bagPlay } = useDashboard();
   if (bmAdd) return h(BookmarkAdd);
   if (bmOpen) return h(Bookmarks);
+  if (infoView) return h(InfoView);
+  if (bagPlay) return h(BagPlay);
   if (domainEdit) return h(DomainEdit);
   if (plotPick) return h(FieldPicker);
   if (searching) return h(SearchBar);
