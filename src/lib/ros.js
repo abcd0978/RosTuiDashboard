@@ -2,6 +2,7 @@
 // 이 프로그램은 "ROS 가 되는 셸(rostopic/rospy·ros2 동작)"에서 실행된다고만 가정한다.
 // 현재 셸의 ROS 환경(ROS_MASTER_URI 등)을 그대로 상속 — 도커/런치/프로젝트 스크립트는 모른다.
 import { spawn } from 'child_process';
+import { shq } from './util.js';
 
 export function rosSpawn(inner, env) {
   // 로그인셸(-l) 아님 → 현재 env 그대로 상속. env 지정 시 덧씌움(RDASH_CTRL, ROS_DOMAIN_ID 등).
@@ -41,9 +42,13 @@ export function actionFor(ver, kind, name, arg) {
     return { label: 'set param', needsInput: true, cmd: arg != null ? `rosparam set '${name}' '${arg}'` : null };
   }
   if (kind === 'service') {
+    // 인자 있는 호출 지원 — x → 요청(YAML/JSON) 입력창(기본 '{}'). Gazebo spawn/set_entity_state 등에 유용.
+    const req = arg != null ? arg : '{}';
     return ver === '2'
-      ? { label: 'call service', cmd: `ros2 service call '${name}' $(ros2 service type '${name}') '{}'` }
-      : { label: 'call service', cmd: `rosservice call '${name}'` };
+      ? { label: 'call service', needsInput: true, defaultVal: '{}',
+        cmd: arg != null ? `ros2 service call ${shq(name)} $(ros2 service type ${shq(name)}) ${shq(req)} 2>&1` : null }
+      : { label: 'call service', needsInput: true, defaultVal: '{}',
+        cmd: arg != null ? `rosservice call ${shq(name)} ${shq(req)} 2>&1` : null };
   }
   if (kind === 'node') {
     if (ver === '2') {

@@ -134,7 +134,7 @@ export function StoreProvider({ children }) {
     if (!active) { setStatus('선택된 항목 없음 (Enter 로 선택)'); return; }
     const act = actionFor(ver, active.kind, active.name);
     if (!act) { setStatus(`(${active.kind}) 액션 없음`); return; }
-    if (act.needsInput) { setEdit({ name: active.name, value: '' }); return; }
+    if (act.needsInput) { setEdit({ name: active.name, value: act.defaultVal || '', kind: active.kind }); return; }
     if (!act.cmd) { setStatus(act.label); return; }
     setStatus(`${act.label} …`);
     runAction(act.cmd, (o) => setStatus(`${active.name}: ${o}`));
@@ -150,6 +150,11 @@ export function StoreProvider({ children }) {
     const act = actionFor(ver, 'param', name, value);
     if (act && act.cmd) { setStatus(`set ${name} …`); runAction(act.cmd, (o) => setStatus(`${name} = ${value}  (${o})`)); }
   };
+  const submitServiceCall = (name, req) => {
+    const act = actionFor(ver, 'service', name, req);
+    if (act && act.cmd) { setStatus(`call ${name} …`); runAction(act.cmd, (o) => setStatus(`${name}: ${o}`)); }
+  };
+  const submitEdit = (kind, name, value) => (kind === 'service' ? submitServiceCall(name, value) : submitSet(name, value));
   // p: 선택 토픽의 숫자 필드로 플롯 창(matplotlib) 열기 — 먼저 필드 선택 오버레이
   const doPlot = () => {
     if (!active || active.kind !== 'topic') { setStatus('플롯은 토픽만 (토픽 선택 후 p)'); return; }
@@ -306,7 +311,7 @@ export function StoreProvider({ children }) {
     setFilter, setFrozen, setPlotPick, setRateIdx, setStatus, setDomainEdit,
     setBmOpen, setBmAdd, setInfoView, setBagPlay, setJobsOpen, setHelp,
     toggleTree: () => setTreeHidden((v) => !v),
-    activate, move, doAction, doRestart, submitSet, doPlot, launchPlot, quit,
+    activate, move, doAction, doRestart, submitSet, submitEdit, doPlot, launchPlot, quit,
     cycleHz, submitDomain, runBookmark, runBookmarkKey, addBookmark, deleteBookmark,
     openConnections, openResource, openTf, closeInfo, toggleRec, submitBagPlay,
     killJob, removeJob,
