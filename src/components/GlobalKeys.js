@@ -7,7 +7,7 @@ import { clamp, RATES } from '../lib/util.js';
 export function GlobalKeys() {
   const d = useDashboard();
   const active = !!process.stdin.isTTY && !d.edit && !d.plotPick && !d.searching && !d.domainEdit
-    && !d.bmOpen && !d.bmAdd && !d.infoView && !d.bagPlay && !d.jobsOpen && !d.help && !d.watchOpen && !d.tfEcho && !d.preflightOpen;
+    && !d.bmOpen && !d.bmAdd && !d.infoView && !d.bagPlay && !d.jobsOpen && !d.help && !d.watchOpen && !d.tfEcho && !d.preflightOpen && !d.bagCmp;
   useInput((ch, key) => {
     if (ch === 'q') d.quit();
     else if (ch === '?') d.setHelp(true);                // 도움말
@@ -20,6 +20,7 @@ export function GlobalKeys() {
     else if (ch === 'J') d.setJobsOpen({ idx: 0 });      // 실행 중 작업(Jobs)
     else if (ch === 'w') d.setWatchOpen(true);           // 워치리스트
     else if (ch === 'F') d.setPreflightOpen(true);       // 프리플라이트 헬스체크
+    else if (ch === 'B') d.setBagCmp({ step: 'a', a: '', b: '' });   // A/B bag 비교
     else if (ch === 'c') d.openConnections();
     else if (ch === 't') d.openTf();
     else if (ch === 'T') d.setTfEcho({ step: 'src', src: '', tgt: '' });   // 두 프레임 tf echo

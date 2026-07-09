@@ -40,3 +40,9 @@ export const bagRecordCmd = (ver, topics, out) => {
 };
 export const bagPlayCmd = (ver, path) =>
   ver === '2' ? `ros2 bag play ${shq(path)} 2>&1` : `rosbag play ${shq(path)} 2>&1`;
+
+// A/B bag 비교 — 두 bag 의 info(토픽·기간·메시지 수·크기)를 나란히 출력.
+export const bagCompareCmd = (ver, a, b) => {
+  const info = (p) => (ver === '2' ? `ros2 bag info ${shq(p)}` : `rosbag info ${shq(p)}`);
+  return `{ echo '===== A ====='; ${info(a)}; echo; echo '===== B ====='; ${info(b)}; } 2>&1`;
+};
