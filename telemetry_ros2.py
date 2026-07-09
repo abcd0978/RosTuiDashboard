@@ -44,7 +44,12 @@ while rclpy.ok():
         if n not in subs:
             counts[n] = 0
             try:
-                subs[n] = node.create_subscription(get_message(ty), n, make_cb(n), QOS)
+                # raw=True → 역직렬화 없이 직렬화 바이트만 콜백에 전달(카운트 전용).
+                # PointCloud2/Image 같은 대용량·고빈도 토픽에서 CPU 를 크게 절약(관측자 부하↓).
+                try:
+                    subs[n] = node.create_subscription(get_message(ty), n, make_cb(n), QOS, raw=True)
+                except TypeError:                   # 구버전 rclpy: raw 인자 미지원 → 일반 구독 폴백
+                    subs[n] = node.create_subscription(get_message(ty), n, make_cb(n), QOS)
             except Exception:
                 subs[n] = None                      # 타입 로드 실패 → hz 만 0
     services = sorted({s for s, _ in node.get_service_names_and_types()})
