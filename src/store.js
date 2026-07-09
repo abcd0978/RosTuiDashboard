@@ -14,7 +14,7 @@ import { shq } from './lib/util.js';
 import { PLOT_PY } from './lib/paths.js';
 import { rosEnv } from './lib/env.js';
 import { loadBookmarks, saveBookmarks } from './lib/bookmarks.js';
-import { connectionsCmd, resourceCmd, tfTreeCmd, bagRecordCmd, bagPlayCmd } from './lib/commands.js';
+import { connectionsCmd, resourceCmd, tfTreeCmd, tfEchoCmd, bagRecordCmd, bagPlayCmd } from './lib/commands.js';
 import { useRosVersion } from './hooks/useRosVersion.js';
 import { useTopics } from './hooks/useTopics.js';
 import { useTermSize } from './hooks/useTermSize.js';
@@ -38,6 +38,7 @@ export function StoreProvider({ children }) {
   const [infoView, setInfoView] = useState(null);       // 정보 오버레이 {title,lines,top} (연결/리소스/TF)
   const [rec, setRec] = useState(null);                 // rosbag 녹화 {id,out,started,n} 또는 null
   const [bagPlay, setBagPlay] = useState(null);         // rosbag 재생 경로 입력 {value} 또는 null
+  const [tfEcho, setTfEcho] = useState(null);           // tf echo 프레임 입력 {step,src,tgt} 또는 null
   const [jobs, setJobs] = useState([]);                 // 실행 중/종료 작업(북마크·rosbag·플롯…)
   const [jobsOpen, setJobsOpen] = useState(null);       // Jobs 오버레이 {idx} 또는 null
   const [treeHidden, setTreeHidden] = useState(false);  // 트리 숨김(값 패널 전체폭) — Tab 토글
@@ -271,6 +272,10 @@ export function StoreProvider({ children }) {
     openInfo('📊 node resources (CPU%/RSS)', resourceCmd(nodes), 2000);   // 2초마다 갱신
   };
   const openTf = () => openInfo('🌳 TF tree (/tf 수집 중, ~3s)', tfTreeCmd(ver));
+  const submitTfEcho = (src, tgt) => {
+    if (!src.trim() || !tgt.trim()) { setStatus('두 프레임 필요'); return; }
+    openInfo(`🧭 tf ${src} → ${tgt}`, tfEchoCmd(ver, src.trim(), tgt.trim()), 1500);   // 1.5s 주기 갱신
+  };
   // ── rosbag 녹화/재생 ───────────────────────────────────────────────────────
   const toggleRec = () => {
     if (rec) { killJob(rec.id, 'SIGINT'); setRec(null); setStatus('■ 녹화 정지'); return; }
@@ -329,12 +334,12 @@ export function StoreProvider({ children }) {
     expanded, active, echo, bw, activeHz, activeAge, valTop, valMaxRef, frozen, renderHz,
     edit, searching, filter, plotPick, status, actHint, hzHistRef, listRef,
     hzMode, domain, domainEdit, env: rosEnv(ver, domain),
-    bookmarks, bmOpen, bmAdd, infoView, rec, bagPlay, jobs, jobsOpen, jobLogsRef,
+    bookmarks, bmOpen, bmAdd, infoView, rec, bagPlay, tfEcho, jobs, jobsOpen, jobLogsRef,
     treeHidden, help, watches, watchOpen,
     setSel, setTop, setValTop, setExpanded, setActive, setEdit, setSearching,
     setFilter, setFrozen, setPlotPick, setRateIdx, setStatus, setDomainEdit,
-    setBmOpen, setBmAdd, setInfoView, setBagPlay, setJobsOpen, setHelp, setWatchOpen,
-    openFieldPicker, addWatch, removeWatch,
+    setBmOpen, setBmAdd, setInfoView, setBagPlay, setJobsOpen, setHelp, setWatchOpen, setTfEcho,
+    openFieldPicker, addWatch, removeWatch, submitTfEcho,
     toggleTree: () => setTreeHidden((v) => !v),
     activate, move, doAction, doRestart, submitSet, submitEdit, doPlot, launchPlot, quit,
     cycleHz, submitDomain, runBookmark, runBookmarkKey, addBookmark, deleteBookmark,

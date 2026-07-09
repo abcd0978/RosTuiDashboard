@@ -22,6 +22,11 @@ export const resourceCmd = (nodes) => {
     + `done; done | sort -t% -k1 2>/dev/null; echo '(CPU% = ps 평균, 독립 프로세스 노드만)'`;
 };
 
+// 두 프레임 간 실시간 변환(translation/rotation + 거리). 잠깐 실행 후 openInfo 가 주기 갱신.
+export const tfEchoCmd = (ver, src, tgt) => ver === '2'
+  ? `timeout 2 ros2 run tf2_ros tf2_echo ${shq(src)} ${shq(tgt)} 2>&1`
+  : `timeout 2 rosrun tf tf_echo ${shq(src)} ${shq(tgt)} 2>&1`;
+
 // TF 트리: /tf(+/tf_static) 를 잠깐 수집해 tf_tree.py 로 계층 출력.
 export const tfTreeCmd = (ver) => {
   const echo = (t) => ver === '2' ? `timeout 3 ros2 topic echo ${t} 2>/dev/null` : `timeout 3 rostopic echo ${t} 2>/dev/null`;

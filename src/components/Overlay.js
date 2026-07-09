@@ -10,16 +10,18 @@ import { Bookmarks } from './Bookmarks.js';
 import { BookmarkAdd } from './BookmarkAdd.js';
 import { InfoView } from './InfoView.js';
 import { BagPlay } from './BagPlay.js';
+import { TfEcho } from './TfEcho.js';
 import { Jobs } from './Jobs.js';
 import { Help } from './Help.js';
 import { WatchList } from './WatchList.js';
 import { StatusLine } from './StatusLine.js';
 
 export function Overlay() {
-  const { plotPick, searching, edit, domainEdit, bmOpen, bmAdd, infoView, bagPlay, jobsOpen, help, watchOpen } = useDashboard();
+  const { plotPick, searching, edit, domainEdit, bmOpen, bmAdd, infoView, bagPlay, tfEcho, jobsOpen, help, watchOpen } = useDashboard();
   if (help) return h(Help);
   if (watchOpen) return h(WatchList);
   if (jobsOpen) return h(Jobs);
+  if (tfEcho) return h(TfEcho);
   if (bmAdd) return h(BookmarkAdd);
   if (bmOpen) return h(Bookmarks);
   if (infoView) return h(InfoView);
