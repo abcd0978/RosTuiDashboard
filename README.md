@@ -27,14 +27,17 @@ A terminal dashboard (TUI) for browsing **ROS topics / services / params / nodes
 - **Bandwidth** (bytes/s) for the selected topic (`rostopic bw` / `ros2 topic bw`), shown in the value-pane header.
 - **Fuzzy search** (`/`) to filter the tree by name — folders auto-expand to reveal matches (`Esc` clears).
 - **Freeze** the value pane (`space`) to inspect a fast-scrolling message without it moving.
-- **Plotting** (`p` on a topic): opens a native **matplotlib** window fed by the topic's echo stream. General-purpose — works on any numeric field(s):
-  - **time** mode: raw value + **n-th derivative / integral** (`↑`/`↓` in the window; e.g. velocity→acceleration) + **FFT** spectrum. Multiple fields overlay on one time axis.
+- **Plotting** (`p` on a topic): opens a native **matplotlib** window fed by the topic's echo stream (multiple windows allowed). General-purpose — works on any numeric field(s):
+  - **time** mode: raw value + **n-th derivative / integral** (`↑`/`↓` in the window; e.g. velocity→acceleration) + **FFT** spectrum. Multiple fields overlay on one time axis. A **sliding time window** (last N seconds; `+`/`-` change it by 5s) keeps the span predictable regardless of topic rate.
   - **xy** mode (2 fields): parametric/correlation plot with equal aspect (a circular trajectory shows as a circle) + **linear regression** line & R² (toggle with `f`).
   - **xyz** mode (3 fields): 3D trajectory.
   - Pick fields in the picker: `space` to multi-select, `Enter` for time, `x` for spatial (2=XY, 3=3D). Requires `python3` with `numpy`/`matplotlib` and a display.
+- **Watch list** (`w`): pin numeric fields from several topics and see them all live in one panel — no windows, works headless/SSH.
+- **Message age / latency**: the tree marks topics that stopped publishing (red `⚠`); the value header shows the active topic's `header.stamp` latency (ms) or arrival age (s), color-coded — dead sensor / sync issues at a glance.
+- **Preflight / health check** (`F`): evaluate expected conditions (topic present + min Hz, node up, service up) against the live graph → ✓/✗ checklist. "Is the stack ready before arming?" Checks live in `~/.rdash_preflight.json`.
 - **Jobs manager** (`J`): every process RDash spawns (bookmarks, rosbag, plots) is tracked — view its output, kill (SIGINT/SIGKILL), or remove it. All jobs are killed on quit.
-- **Connection view** (`c`): publishers/subscribers of a topic, or a node's in/out topics (rqt_graph-lite). **TF frame tree** (`t`) and **node resource monitor** (`S`, CPU%/RSS).
-- **rosbag** — record (`R`) the filtered topics (or `-a`) with a live REC indicator; play (`P`) a bag by path.
+- **Connection view** (`c`): publishers/subscribers of a topic, or a node's in/out topics (rqt_graph-lite). **TF frame tree** (`t`), **tf echo between two frames** (`T`), and **node resource monitor** (`S`, CPU%/RSS).
+- **rosbag** — record (`R`) the filtered topics (or `-a`) with a live REC indicator; play (`P`) a bag by path; **A/B compare** (`B`) two bags' info side by side.
 - **Help overlay** (`?`) with categorized shortcuts, a **clickable footer** button bar, and **`Tab`** to hide the tree so the value pane spans full width.
 - **Command bookmarks** (`b`): name frequently-used shell commands and run them by shortcut (number keys `1`-`9`). Persisted per-container to `~/.rdashrc`.
 - **Selective Hz measurement** (`h` cycles `all`/`selected`/`off`): only subscribe to the topics you're looking at (or none), cutting the observer-effect bandwidth of measuring every topic. High-rate topics are counted via raw (non-deserialized) subscriptions.
@@ -79,8 +82,10 @@ node index.js
 | `p` | plot the selected topic (matplotlib: raw / n-th d·∫ / FFT / XY+regression / 3D) |
 | `b` / `1`-`9` | bookmarks: open manager / run bookmark by shortcut |
 | `J` | jobs manager (view output / kill spawned processes) |
-| `c` / `t` / `S` | connections (pub/sub) / TF tree / node resource monitor |
-| `R` / `P` | rosbag record toggle / play (path) |
+| `w` | watch list (pin fields from several topics) |
+| `F` | preflight / health check (✓/✗ vs `~/.rdash_preflight.json`) |
+| `c` / `t` / `T` / `S` | connections (pub/sub) / TF tree / tf echo (two frames) / node resource monitor |
+| `R` / `P` / `B` | rosbag record toggle / play (path) / A·B compare |
 | `h` | cycle Hz measurement: all / selected / off |
 | `D` | switch `ROS_DOMAIN_ID` (view another container's graph) |
 | `Tab` | hide/show the tree (value pane full width) |
@@ -101,6 +106,7 @@ node index.js
 
 ### Files
 - `~/.rdashrc` — saved command bookmarks (JSON).
+- `~/.rdash_preflight.json` — preflight check definitions, e.g. `{"checks":[{"type":"topic","name":"/livox/imu","minHz":150},{"type":"node","name":"/fast_lio_mapping"}]}`.
 - `rdash_rec_<ts>` — rosbag output directories created by `R`.
 
 ## Testing

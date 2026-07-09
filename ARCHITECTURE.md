@@ -25,16 +25,19 @@ src/
     util.js            #   clamp, pad/padL, sparkline, fuzzy, shq, constants (LEFT_W, RATES, MIN_COLS/ROWS)
     tree.js            #   buildTree / flattenTree (item list → namespace tree)
     ros.js             #   command builders, rosSpawn(env), control actions, numericFields
-    commands.js        #   builders for connections / resource / tf / rosbag
+    commands.js        #   builders for connections / resource / tf tree+echo / rosbag rec·play·compare
     paths.js           #   repo-root paths; loads telemetry(.py), plot.py, tf_tree.py
     env.js             #   host / ROS version / ROS_DOMAIN_ID / RMW context
     bookmarks.js       #   load/save ~/.rdashrc
+    preflight.js       #   load ~/.rdash_preflight.json + evaluate checks vs graph
+    fieldValue (ros.js) #  extract one dotted field value from echo YAML (watch/age)
     screen.js          #   alt-screen enter/restore + exit wiring
   hooks/               # React hooks that own a data stream / subprocess
     useRosVersion.js   #   detect ROS 1 vs 2
     useTopics.js       #   run telemetry(.py) via python3, parse JSON stream (env: RDASH_CTRL, ROS_DOMAIN_ID)
     useValue.js        #   selected item's live value (echo stream / info poll), freeze-aware
     useBandwidth.js    #   `rostopic/ros2 topic bw` for the selected topic
+    useWatches.js      #   watch-list: one echo per watched topic → latest field values
     useTermSize.js     #   terminal cols/rows (resize)
   components/
     Layout.js          #   composition root: size guard / Loading / GlobalKeys + panels + Overlay + EnvBar + Footer
@@ -52,7 +55,11 @@ src/
     BookmarkAdd.js     #   two-step bookmark add (name → cmd)
     DomainEdit.js      #   ROS_DOMAIN_ID switch input
     BagPlay.js         #   rosbag play path input
-    InfoView.js        #   scrollable command output (connections / resource / tf)
+    TfEcho.js          #   two-frame input → live transform (T)
+    BagCompare.js      #   two bag-path input → side-by-side bag info (B)
+    WatchList.js       #   watch-list overlay: pinned fields + live values (w)
+    Preflight.js       #   health-check overlay: expected conditions ✓/✗ (F)
+    InfoView.js        #   scrollable command output (connections / resource / tf / bag compare)
     Jobs.js            #   jobs manager (list + output + kill/remove)
     Help.js            #   categorized shortcut reference (?)
     Button.js          #   hover/click mouse button
@@ -115,14 +122,16 @@ mode, so input lands in the right place with no central dispatcher.
 
 | Handler        | active when                                   | keys |
 |----------------|-----------------------------------------------|------|
-| `GlobalKeys`   | no overlay open (headless, always mounted)    | nav (↑↓/jk, Enter, g/G), `/ space p x r c t S R P b J h D Tab ? 1-9 [ ] +/- q` |
+| `GlobalKeys`   | no overlay open (headless, always mounted)    | nav (↑↓/jk, Enter, g/G), `/ space p x r c t T S R P B b w J F h D Tab ? 1-9 [ ] +/- q` |
 | `SearchBar`    | `searching`                                   | text, Enter, Esc, Backspace |
 | `ParamEdit`    | `edit`                                         | text, Enter, Esc (param set or service request) |
 | `FieldPicker`  | `plotPick`                                     | ↑↓, space (multi-select), Enter (time), `x` (xy/xyz), Esc |
 | `Bookmarks`    | `bmOpen`                                       | ↑↓, Enter (run), `a` add, `d` delete, Esc |
 | `BookmarkAdd`  | `bmAdd`                                         | text, Enter (next/save), Esc |
-| `DomainEdit`   | `domainEdit`                                   | digits, Enter, Esc |
-| `BagPlay`      | `bagPlay`                                       | text, Enter, Esc |
+| `DomainEdit` / `BagPlay` | `domainEdit` / `bagPlay`             | text, Enter, Esc |
+| `TfEcho` / `BagCompare` | `tfEcho` / `bagCmp`                  | two-step text input, Enter/Esc |
+| `WatchList`    | `watchOpen`                                     | ↑↓, `a` add, `d` remove, Esc |
+| `Preflight`    | `preflightOpen`                                 | Esc |
 | `InfoView`     | `infoView`                                      | ↑↓/PgUp/PgDn scroll, Esc |
 | `Jobs`         | `jobsOpen`                                      | ↑↓, `k`/`K` kill, `d` remove, Esc |
 | `Help`         | `help`                                          | Esc / `?` |
@@ -171,6 +180,36 @@ goes through `spawnJob(label, cmd)`: the child is tracked with a status
 (`run`/`done`/`error`) and a bounded output ring buffer (in a ref to avoid
 re-render storms). The `Jobs` overlay (`J`) lists them, shows output, and kills
 (SIGINT/SIGKILL) or removes them. `quit` kills every job.
+
+### Message age / latency
+The telemetry scripts record each topic's last-arrival time and emit `age`
+(seconds since last message). The tree marks topics that were publishing but went
+stale (`age > 3s`) with a red `⚠`. The value header shows the active topic's
+`header.stamp` latency (ms) when wall-clock stamped (absurd values → fall back to
+arrival age, so sim-time stamps don't mislead).
+
+### Watch list
+`useWatches` (mounted only while the `w` overlay is open) subscribes one `echo`
+per distinct watched topic and extracts each pinned field with `fieldValue()` at
+~3 Hz — many live values in one panel, no windows, headless-friendly. Fields are
+pinned via the shared `FieldPicker` in `target: 'watch'` mode.
+
+### Health check (preflight)
+`preflight.js` loads checks from `~/.rdash_preflight.json` and `evalCheck()`
+scores each (topic present + min Hz, node up, service up) against the live graph;
+the `F` overlay renders ✓/✗ and turns green when all pass.
+
+### Command palette files (config loaders)
+Two tiny JSON loaders read from `$HOME`, each `readFileSync` + `JSON.parse` with a
+graceful empty fallback: `bookmarks.js` (`~/.rdashrc`, bookmarks list, also saved)
+and `preflight.js` (`~/.rdash_preflight.json`, check definitions, read-only).
+These are the only user-editable config files. (`RDASH_CTRL` is a separate
+runtime control file RDash *writes* for selective-Hz — not user config.)
+
+### TF echo & A/B bag compare
+`T` and `B` open two-step text inputs (`TfEcho`, `BagCompare`); on submit they run
+`tf2_echo <src> <tgt>` (refreshing) / `ros2 bag info` on two paths and show the
+result in the shared `InfoView`.
 
 ### Container / domain
 `EnvBar` shows host / ROS version / `ROS_DOMAIN_ID` / RMW (ROS_MASTER_URI on
