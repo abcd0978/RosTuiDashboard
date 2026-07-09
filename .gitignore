@@ -1,0 +1,6 @@
+node_modules/
+*.log
+*.zip
+.DS_Store
+HANDOFF.md
+ROBOTICS_ROADMAP.md
