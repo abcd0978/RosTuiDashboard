@@ -32,6 +32,10 @@ A terminal dashboard (TUI) for browsing **ROS topics / services / params / nodes
   - **xy** mode (2 fields): parametric/correlation plot with equal aspect (a circular trajectory shows as a circle) + **linear regression** line & R² (toggle with `f`).
   - **xyz** mode (3 fields): 3D trajectory.
   - Pick fields in the picker: `space` to multi-select, `Enter` for time, `x` for spatial (2=XY, 3=3D). Requires `python3` with `numpy`/`matplotlib` and a display.
+- **Jobs manager** (`J`): every process RDash spawns (bookmarks, rosbag, plots) is tracked — view its output, kill (SIGINT/SIGKILL), or remove it. All jobs are killed on quit.
+- **Connection view** (`c`): publishers/subscribers of a topic, or a node's in/out topics (rqt_graph-lite). **TF frame tree** (`t`) and **node resource monitor** (`S`, CPU%/RSS).
+- **rosbag** — record (`R`) the filtered topics (or `-a`) with a live REC indicator; play (`P`) a bag by path.
+- **Help overlay** (`?`) with categorized shortcuts, a **clickable footer** button bar, and **`Tab`** to hide the tree so the value pane spans full width.
 - **Command bookmarks** (`b`): name frequently-used shell commands and run them by shortcut (number keys `1`-`9`). Persisted per-container to `~/.rdashrc`.
 - **Selective Hz measurement** (`h` cycles `all`/`selected`/`off`): only subscribe to the topics you're looking at (or none), cutting the observer-effect bandwidth of measuring every topic. High-rate topics are counted via raw (non-deserialized) subscriptions.
 - **Container / domain awareness**: an env bar shows host, ROS version, `ROS_DOMAIN_ID`, and RMW. `D` switches `ROS_DOMAIN_ID` and reconnects — to peek at another container's ROS2 graph reachable over DDS.
@@ -69,8 +73,13 @@ node index.js
 | `/` | fuzzy-search the tree (`Esc` clears) |
 | `p` | plot the selected topic (matplotlib: raw / n-th d·∫ / FFT / XY+regression / 3D) |
 | `b` / `1`-`9` | bookmarks: open manager / run bookmark by shortcut |
+| `J` | jobs manager (view output / kill spawned processes) |
+| `c` / `t` / `S` | connections (pub/sub) / TF tree / node resource monitor |
+| `R` / `P` | rosbag record toggle / play (path) |
 | `h` | cycle Hz measurement: all / selected / off |
 | `D` | switch `ROS_DOMAIN_ID` (view another container's graph) |
+| `Tab` | hide/show the tree (value pane full width) |
+| `?` | help overlay (all shortcuts) |
 | `space` | freeze / unfreeze the value pane |
 | wheel | scroll (over left = tree, over right = value) |
 | `[` `]` | scroll value pane |
