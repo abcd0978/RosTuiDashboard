@@ -12,11 +12,13 @@ import { InfoView } from './InfoView.js';
 import { BagPlay } from './BagPlay.js';
 import { Jobs } from './Jobs.js';
 import { Help } from './Help.js';
+import { WatchList } from './WatchList.js';
 import { StatusLine } from './StatusLine.js';
 
 export function Overlay() {
-  const { plotPick, searching, edit, domainEdit, bmOpen, bmAdd, infoView, bagPlay, jobsOpen, help } = useDashboard();
+  const { plotPick, searching, edit, domainEdit, bmOpen, bmAdd, infoView, bagPlay, jobsOpen, help, watchOpen } = useDashboard();
   if (help) return h(Help);
+  if (watchOpen) return h(WatchList);
   if (jobsOpen) return h(Jobs);
   if (bmAdd) return h(BookmarkAdd);
   if (bmOpen) return h(Bookmarks);

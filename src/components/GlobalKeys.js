@@ -7,7 +7,7 @@ import { clamp, RATES } from '../lib/util.js';
 export function GlobalKeys() {
   const d = useDashboard();
   const active = !!process.stdin.isTTY && !d.edit && !d.plotPick && !d.searching && !d.domainEdit
-    && !d.bmOpen && !d.bmAdd && !d.infoView && !d.bagPlay && !d.jobsOpen && !d.help;
+    && !d.bmOpen && !d.bmAdd && !d.infoView && !d.bagPlay && !d.jobsOpen && !d.help && !d.watchOpen;
   useInput((ch, key) => {
     if (ch === 'q') d.quit();
     else if (ch === '?') d.setHelp(true);                // 도움말
@@ -18,6 +18,7 @@ export function GlobalKeys() {
     else if (ch === 'D') d.setDomainEdit({ value: d.domain || '' });
     else if (ch === 'b') d.setBmOpen({ idx: 0 });
     else if (ch === 'J') d.setJobsOpen({ idx: 0 });      // 실행 중 작업(Jobs)
+    else if (ch === 'w') d.setWatchOpen(true);           // 워치리스트
     else if (ch === 'c') d.openConnections();
     else if (ch === 't') d.openTf();
     else if (ch === 'S') d.openResource();

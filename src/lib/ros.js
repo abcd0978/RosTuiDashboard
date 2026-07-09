@@ -100,6 +100,24 @@ export function runAction(cmd, onDone) {
   p.on('error', () => onDone('action error'));
 }
 
+// echo YAML 텍스트에서 지정 점(.) 경로의 값 문자열을 추출(워치리스트용). 없으면 undefined.
+export function fieldValue(text, dotted) {
+  const target = dotted.split('.');
+  const stack = [];
+  for (const raw of String(text || '').split('\n')) {
+    if (!raw.trim() || raw.trim() === '---') continue;
+    const indent = raw.length - raw.trimStart().length;
+    const m = raw.trimStart().match(/^([A-Za-z0-9_]+):\s*(.*)$/);
+    if (!m) continue;
+    const key = m[1], val = m[2].trim();
+    while (stack.length && stack[stack.length - 1].indent >= indent) stack.pop();
+    const path = [...stack.map((s) => s.key), key];
+    if (val === '') { stack.push({ indent, key }); continue; }
+    if (path.length === target.length && path.every((p, i) => p === target[i])) return val;
+  }
+  return undefined;
+}
+
 // echo YAML 텍스트에서 "숫자 leaf" 필드들의 점(.) 경로 목록 추출(플롯 대상 선택용).
 export function numericFields(text) {
   const out = [];

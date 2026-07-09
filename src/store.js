@@ -42,6 +42,8 @@ export function StoreProvider({ children }) {
   const [jobsOpen, setJobsOpen] = useState(null);       // Jobs 오버레이 {idx} 또는 null
   const [treeHidden, setTreeHidden] = useState(false);  // 트리 숨김(값 패널 전체폭) — Tab 토글
   const [help, setHelp] = useState(false);              // 도움말 오버레이(?)
+  const [watches, setWatches] = useState([]);           // 워치리스트 [{topic, field}]
+  const [watchOpen, setWatchOpen] = useState(false);    // 워치 오버레이
   const jobsRef = useRef([]); jobsRef.current = jobs;    // 종료 시 정리용 최신 참조
   const jobLogsRef = useRef(new Map());                 // id → 출력 라인 링버퍼(리렌더 폭주 방지)
   const jobSeqRef = useRef(0);
@@ -162,14 +164,27 @@ export function StoreProvider({ children }) {
     kind === 'service' ? submitServiceCall(name, value)
       : kind === 'topic' ? submitPublish(name, value)
         : submitSet(name, value));
-  // p: 선택 토픽의 숫자 필드로 플롯 창(matplotlib) 열기 — 먼저 필드 선택 오버레이
-  const doPlot = () => {
-    if (!active || active.kind !== 'topic') { setStatus('플롯은 토픽만 (토픽 선택 후 p)'); return; }
-    if (!process.env.DISPLAY && process.platform === 'linux') { setStatus('플롯: $DISPLAY 없음 — GUI(matplotlib) 표시 불가'); return; }
+  // 필드 선택 오버레이 — target 'plot'(matplotlib) 또는 'watch'(워치리스트 핀)
+  const openFieldPicker = (target) => {
+    if (!active || active.kind !== 'topic') { setStatus('토픽을 선택하세요'); return; }
+    if (target === 'plot' && !process.env.DISPLAY && process.platform === 'linux') {
+      setStatus('플롯: $DISPLAY 없음 — GUI(matplotlib) 표시 불가'); return;
+    }
     const fields = numericFields(echo);
     if (!fields.length) { setStatus('숫자 필드 없음(메시지 수신 대기 중일 수 있음)'); return; }
-    setPlotPick({ fields, idx: 0 });
+    setWatchOpen(false);
+    setPlotPick({ fields, idx: 0, target });
   };
+  const doPlot = () => openFieldPicker('plot');
+  const addWatch = (topic, fields) => {
+    setWatches((ws) => {
+      const next = [...ws];
+      for (const f of fields) if (!next.some((w) => w.topic === topic && w.field === f)) next.push({ topic, field: f });
+      return next;
+    });
+    setStatus(`👁 watch +${fields.length}`);
+  };
+  const removeWatch = (i) => setWatches((ws) => ws.filter((_, j) => j !== i));
   // fields: 문자열 또는 배열. mode: 'time'(원값/미분·적분/FFT, 다중=오버레이) | 'xy'(2필드 산점도+선형회귀)
   const launchPlot = (fields, mode = 'time') => {
     const fl = Array.isArray(fields) ? fields : [fields];
@@ -313,10 +328,11 @@ export function StoreProvider({ children }) {
     edit, searching, filter, plotPick, status, actHint, hzHistRef, listRef,
     hzMode, domain, domainEdit, env: rosEnv(ver, domain),
     bookmarks, bmOpen, bmAdd, infoView, rec, bagPlay, jobs, jobsOpen, jobLogsRef,
-    treeHidden, help,
+    treeHidden, help, watches, watchOpen,
     setSel, setTop, setValTop, setExpanded, setActive, setEdit, setSearching,
     setFilter, setFrozen, setPlotPick, setRateIdx, setStatus, setDomainEdit,
-    setBmOpen, setBmAdd, setInfoView, setBagPlay, setJobsOpen, setHelp,
+    setBmOpen, setBmAdd, setInfoView, setBagPlay, setJobsOpen, setHelp, setWatchOpen,
+    openFieldPicker, addWatch, removeWatch,
     toggleTree: () => setTreeHidden((v) => !v),
     activate, move, doAction, doRestart, submitSet, submitEdit, doPlot, launchPlot, quit,
     cycleHz, submitDomain, runBookmark, runBookmarkKey, addBookmark, deleteBookmark,
