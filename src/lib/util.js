@@ -5,6 +5,8 @@ export const padL = (s, n) => (' '.repeat(Math.max(0, n)) + String(s)).slice(-n)
 
 export const LEFT_W = 40;                       // 왼쪽 트리 패널 폭
 export const RATES = [1, 2, 5, 10, 15, 20, 30, 60];   // 선택 가능한 최대 렌더 rate(Hz)
+export const MIN_COLS = 65;                     // 이 아래로는 오른쪽 패널이 넘쳐 깨짐
+export const MIN_ROWS = 10;                     // 이 아래로는 세로가 부족
 
 // ── Hz 스파크라인 — 최근 히스토리를 블록문자 미니그래프로 ──────────────────────
 const SPARK = '▁▂▃▄▅▆▇█';
