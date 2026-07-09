@@ -32,6 +32,9 @@ A terminal dashboard (TUI) for browsing **ROS topics / services / params / nodes
   - **xy** mode (2 fields): parametric/correlation plot with equal aspect (a circular trajectory shows as a circle) + **linear regression** line & R² (toggle with `f`).
   - **xyz** mode (3 fields): 3D trajectory.
   - Pick fields in the picker: `space` to multi-select, `Enter` for time, `x` for spatial (2=XY, 3=3D). Requires `python3` with `numpy`/`matplotlib` and a display.
+- **Command bookmarks** (`b`): name frequently-used shell commands and run them by shortcut (number keys `1`-`9`). Persisted per-container to `~/.rdashrc`.
+- **Selective Hz measurement** (`h` cycles `all`/`selected`/`off`): only subscribe to the topics you're looking at (or none), cutting the observer-effect bandwidth of measuring every topic. High-rate topics are counted via raw (non-deserialized) subscriptions.
+- **Container / domain awareness**: an env bar shows host, ROS version, `ROS_DOMAIN_ID`, and RMW. `D` switches `ROS_DOMAIN_ID` and reconnects — to peek at another container's ROS2 graph reachable over DDS.
 - **Control actions** (`x` on a selection): kill node (ROS1 `rosnode kill`; ROS2 SIGINT by node→PID, best-effort), call service, set param — the rqt-style *control* half.
 - **ROS1 & ROS2 auto-detected** from the environment.
 - **Keyboard + mouse** (click to select/expand, wheel to scroll, hover on buttons).
@@ -65,6 +68,9 @@ node index.js
 | `Enter` / click | expand folder / select item |
 | `/` | fuzzy-search the tree (`Esc` clears) |
 | `p` | plot the selected topic (matplotlib: raw / n-th d·∫ / FFT / XY+regression / 3D) |
+| `b` / `1`-`9` | bookmarks: open manager / run bookmark by shortcut |
+| `h` | cycle Hz measurement: all / selected / off |
+| `D` | switch `ROS_DOMAIN_ID` (view another container's graph) |
 | `space` | freeze / unfreeze the value pane |
 | wheel | scroll (over left = tree, over right = value) |
 | `[` `]` | scroll value pane |
