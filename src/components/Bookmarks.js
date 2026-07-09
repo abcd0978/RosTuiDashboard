@@ -28,5 +28,5 @@ export function Bookmarks() {
           return h(Text, { key: i, backgroundColor: on ? 'magenta' : undefined, color: on ? 'black' : undefined },
             ` ${on ? '▶' : ' '} [${b.key || '·'}] ${b.name}  —  ${b.cmd} `);
         })
-      : [h(Text, { key: 'e', dimColor: true }, ' (없음) a 로 추가 — 예: name "rosbag rec", cmd "rosbag record -a" ')]));
+      : [h(Text, { key: 'e', dimColor: true }, ' (없음) a 로 추가 — launch·스크립트·자주 쓰는 명령(arm 등). 예: "ros2 launch fast_lio mapping.launch.py" ')]));
 }

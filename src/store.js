@@ -154,7 +154,14 @@ export function StoreProvider({ children }) {
     const act = actionFor(ver, 'service', name, req);
     if (act && act.cmd) { setStatus(`call ${name} …`); runAction(act.cmd, (o) => setStatus(`${name}: ${o}`)); }
   };
-  const submitEdit = (kind, name, value) => (kind === 'service' ? submitServiceCall(name, value) : submitSet(name, value));
+  const submitPublish = (name, msg) => {
+    const act = actionFor(ver, 'topic', name, msg);
+    if (act && act.cmd) { setStatus(`pub ${name} …`); runAction(act.cmd, (o) => setStatus(`${name}: ${o}`)); }
+  };
+  const submitEdit = (kind, name, value) => (
+    kind === 'service' ? submitServiceCall(name, value)
+      : kind === 'topic' ? submitPublish(name, value)
+        : submitSet(name, value));
   // p: 선택 토픽의 숫자 필드로 플롯 창(matplotlib) 열기 — 먼저 필드 선택 오버레이
   const doPlot = () => {
     if (!active || active.kind !== 'topic') { setStatus('플롯은 토픽만 (토픽 선택 후 p)'); return; }

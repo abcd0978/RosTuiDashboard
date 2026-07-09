@@ -3,9 +3,15 @@ import { h } from '../react.js';
 import { Box, Text, useInput } from 'ink';
 import { useDashboard } from '../store.js';
 
+const LABELS = {
+  service: ['call', 'req', 'Enter=호출 Esc=취소  (YAML 요청, 예: {data: true})'],
+  topic: ['pub', 'msg', 'Enter=발행(1회) Esc=취소  (YAML 메시지)'],
+  param: ['set', '=', 'Enter=적용 Esc=취소'],
+};
+
 export function ParamEdit() {
   const d = useDashboard();
-  const isSvc = d.edit.kind === 'service';
+  const [verb, field, hint] = LABELS[d.edit.kind] || LABELS.param;
   useInput((ch, key) => {
     if (key.return) { d.submitEdit(d.edit.kind, d.edit.name, d.edit.value); d.setEdit(null); }
     else if (key.escape) d.setEdit(null);
@@ -14,7 +20,7 @@ export function ParamEdit() {
   }, { isActive: !!process.stdin.isTTY });
 
   return h(Box, null,
-    h(Text, { color: 'yellow' }, isSvc ? ` call ${d.edit.name}  req = ` : ` set ${d.edit.name} = `),
+    h(Text, { color: 'yellow' }, ` ${verb} ${d.edit.name}  ${field} `),
     h(Text, { backgroundColor: 'yellow', color: 'black' }, `${d.edit.value} `),
-    h(Text, { dimColor: true }, isSvc ? '  Enter=호출 Esc=취소  (YAML 요청, 예: {name: box, ...})' : '  Enter=적용 Esc=취소'));
+    h(Text, { dimColor: true }, '  ' + hint));
 }

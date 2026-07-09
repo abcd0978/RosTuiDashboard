@@ -64,6 +64,15 @@ export function actionFor(ver, kind, name, arg) {
     }
     return { label: 'kill node', cmd: `rosnode kill '${name}'` };
   }
+  if (kind === 'topic') {
+    // 토픽 publish(1회) — arm/disarm, 테스트 메시지 등. 연속 스트림은 북마크/launch 로.
+    const msg = arg != null ? arg : '{}';
+    return ver === '2'
+      ? { label: 'publish (once)', needsInput: true, defaultVal: '{}',
+        cmd: arg != null ? `ros2 topic pub --once ${shq(name)} $(ros2 topic type ${shq(name)}) ${shq(msg)} 2>&1` : null }
+      : { label: 'publish (once)', needsInput: true, defaultVal: '{}',
+        cmd: arg != null ? `rostopic pub -1 ${shq(name)} $(rostopic type ${shq(name)}) ${shq(msg)} 2>&1` : null };
+  }
   return null;
 }
 
