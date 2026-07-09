@@ -13,7 +13,7 @@ A terminal dashboard (TUI) for browsing **ROS topics / services / params / nodes
 │   ● /iris/imu 99 │ │ angular_velocity: ...                       │
 │ ▶ nodes          │ │                                             │
 ╰──────────────────╯ ╰─────────────────────────────────────────────╯
- ↑↓ move | Enter select | wheel: L=tree R=value | [ ] value | q quit
+ ↑↓ move | Enter select | p plot | c conn | t tf | b marks | ? help | q quit
 ```
 
 ## Features
@@ -39,7 +39,7 @@ A terminal dashboard (TUI) for browsing **ROS topics / services / params / nodes
 - **Command bookmarks** (`b`): name frequently-used shell commands and run them by shortcut (number keys `1`-`9`). Persisted per-container to `~/.rdashrc`.
 - **Selective Hz measurement** (`h` cycles `all`/`selected`/`off`): only subscribe to the topics you're looking at (or none), cutting the observer-effect bandwidth of measuring every topic. High-rate topics are counted via raw (non-deserialized) subscriptions.
 - **Container / domain awareness**: an env bar shows host, ROS version, `ROS_DOMAIN_ID`, and RMW. `D` switches `ROS_DOMAIN_ID` and reconnects — to peek at another container's ROS2 graph reachable over DDS.
-- **Control actions** (`x` on a selection): kill node (ROS1 `rosnode kill`; ROS2 SIGINT by node→PID, best-effort), call service, set param — the rqt-style *control* half.
+- **Control actions** (`x` on a selection): kill node (ROS1 `rosnode kill`; ROS2 SIGINT by node→PID, best-effort), **call a service with a request argument** (YAML/JSON, e.g. Gazebo `spawn_entity` / `set_entity_state`), set param — the rqt-style *control* half.
 - **ROS1 & ROS2 auto-detected** from the environment.
 - **Keyboard + mouse** (click to select/expand, wheel to scroll, hover on buttons).
 - Configurable **max render rate** (fast topics don't flood the screen).
@@ -47,6 +47,11 @@ A terminal dashboard (TUI) for browsing **ROS topics / services / params / nodes
 ## Requirements
 - **Node.js ≥ 18**
 - A shell where **ROS works** (`rostopic`/`rospy` for ROS1, or `ros2` for ROS2) — i.e. run it after `source`-ing your ROS setup. RDash inherits that environment; it knows nothing about how ROS is deployed (native, Docker, …).
+- **Per-feature (optional):**
+  - Plotting (`p`): `python3` with **numpy** + **matplotlib**, and a display for the window.
+  - TF tree (`t`): `python3` with **PyYAML** (usually present with ROS).
+  - rosbag (`R`/`P`): `ros2 bag` / `rosbag` on `PATH`.
+  - Bandwidth / resource monitor: standard `ros2 topic bw` / `rostopic bw`, `ps`, `/proc`.
 
 ## Install
 ```bash
@@ -92,6 +97,11 @@ node index.js
 |---|---|---|
 | `RENDER_HZ` | `10` | max screen refresh rate (1–60) |
 | `ROS_VER` | auto | force `1` or `2` |
+| `ROS_DOMAIN_ID` | inherited | ROS2 domain (also switchable at runtime with `D`) |
+
+### Files
+- `~/.rdashrc` — saved command bookmarks (JSON).
+- `rdash_rec_<ts>` — rosbag output directories created by `R`.
 
 ## Testing
 Provide some ROS data, then run RDash in another shell.
