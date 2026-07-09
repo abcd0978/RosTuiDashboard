@@ -36,8 +36,15 @@ export function StoreProvider({ children }) {
   const [bmOpen, setBmOpen] = useState(null);           // 북마크 오버레이 {idx} 또는 null
   const [bmAdd, setBmAdd] = useState(null);             // 북마크 추가 입력 {step,name,cmd} 또는 null
   const [infoView, setInfoView] = useState(null);       // 정보 오버레이 {title,lines,top} (연결/리소스/TF)
-  const [rec, setRec] = useState(null);                 // rosbag 녹화 {child,out,started,n} 또는 null
+  const [rec, setRec] = useState(null);                 // rosbag 녹화 {id,out,started,n} 또는 null
   const [bagPlay, setBagPlay] = useState(null);         // rosbag 재생 경로 입력 {value} 또는 null
+  const [jobs, setJobs] = useState([]);                 // 실행 중/종료 작업(북마크·rosbag·플롯…)
+  const [jobsOpen, setJobsOpen] = useState(null);       // Jobs 오버레이 {idx} 또는 null
+  const [treeHidden, setTreeHidden] = useState(false);  // 트리 숨김(값 패널 전체폭) — Tab 토글
+  const [help, setHelp] = useState(false);              // 도움말 오버레이(?)
+  const jobsRef = useRef([]); jobsRef.current = jobs;    // 종료 시 정리용 최신 참조
+  const jobLogsRef = useRef(new Map());                 // id → 출력 라인 링버퍼(리렌더 폭주 방지)
+  const jobSeqRef = useRef(0);
   const infoRef = useRef({ alive: false, timer: null });
   const ctrlPathRef = useRef(join(tmpdir(), `rdash-ctrl-${process.pid}.json`));
   const { topics, conn } = useTopics(ver, ctrlPathRef.current, domain);
@@ -65,7 +72,6 @@ export function StoreProvider({ children }) {
   capRef.current = Math.max(16, Math.round(1000 / renderHz));
   const valMaxRef = useRef(0);                    // 값 스크롤 최대치(ValuePanel 에서 갱신)
   const frozenRef = useRef(false); frozenRef.current = frozen;
-  const plotsRef = useRef([]);                    // 스폰한 plot.py 자식들(종료 시 정리)
   useEffect(() => { setValTop(0); setFrozen(false); }, [active && active.p]);   // 항목 바뀌면 맨 위 + 프리즈 해제
 
   // Hz 히스토리(토픽별) — 스파크라인용
@@ -101,7 +107,7 @@ export function StoreProvider({ children }) {
   }, [visKey]);
 
   const VISIBLE = Math.max(3, rows - 7);          // 세로 여유(풋터 줄바꿈 대비)
-  const rightW = Math.max(24, cols - LEFT_W - 5);
+  const rightW = treeHidden ? Math.max(24, cols - 2) : Math.max(24, cols - LEFT_W - 5);   // 트리 숨기면 전체폭
   const RW = rightW - 4;                           // 오른쪽 안쪽 폭(테두리2+패딩2)
   const LW = LEFT_W - 6;                           // 왼쪽 안쪽 폭
   const maxTop = Math.max(0, n - VISIBLE);
@@ -158,10 +164,7 @@ export function StoreProvider({ children }) {
     const title = `${active.name} / ${fl.join(', ')}${mode === 'xy' ? ' (xy)' : ''}`;
     const fieldArgs = fl.map((f) => `--field ${shq(f)}`).join(' ');
     const cmd = `${echoFullCmd(ver, active.name)} | python3 ${shq(PLOT_PY)} ${fieldArgs} --mode ${mode} --title ${shq(title)}`;
-    const child = rosSpawn(cmd);
-    if (child.stderr) child.stderr.on('data', () => {});
-    child.on('error', () => setStatus('플롯 실행 오류(python3/matplotlib 확인)'));
-    plotsRef.current.push(child);
+    spawnJob(`plot ${mode}: ${fl.join(',')}`, cmd);
     setStatus(`📈 plot ${mode}: ${fl.join(', ')}`);
   };
   const actHint = active ? ((actionFor(ver, active.kind, active.name) || {}).label || '') : '';
@@ -171,12 +174,29 @@ export function StoreProvider({ children }) {
     setSel(ns);
     setTop((t) => { let nt = clamp(t, 0, maxTop); if (ns < nt) nt = ns; else if (ns >= nt + VISIBLE) nt = ns - VISIBLE + 1; return nt; });
   };
+  // ── 작업(Jobs) 레지스트리 — RDash 가 띄운 프로세스를 추적/조회/종료 ──────────────
+  const spawnJob = (label, cmd) => {
+    const id = ++jobSeqRef.current;
+    const child = rosSpawn(cmd);
+    const lines = []; jobLogsRef.current.set(id, lines);
+    const push = (s) => { for (const ln of String(s).split('\n')) { if (ln !== '') { lines.push(ln); if (lines.length > 300) lines.shift(); } } };
+    if (child.stdout) child.stdout.on('data', (d) => push(d.toString()));
+    if (child.stderr) child.stderr.on('data', (d) => push(d.toString()));
+    child.on('close', (code) => setJobs((js) => js.map((j) => (j.id === id ? { ...j, status: 'done', code } : j))));
+    child.on('error', () => { push('(실행 오류)'); setJobs((js) => js.map((j) => (j.id === id ? { ...j, status: 'error' } : j))); });
+    setJobs((js) => [...js, { id, label, pid: child.pid, status: 'run', child }]);
+    return id;
+  };
+  const killJob = (id, sig = 'SIGINT') => { const j = jobsRef.current.find((x) => x.id === id); if (j && j.child) { try { j.child.kill(sig); } catch { /* */ } } };
+  const removeJob = (id) => { jobLogsRef.current.delete(id); setJobs((js) => js.filter((j) => j.id !== id)); };
+  const killAllJobs = () => { for (const j of jobsRef.current) { try { j.child && j.child.kill(); } catch { /* */ } } };
+
   const cycleHz = () => setHzMode((m) => HZ_MODES[(HZ_MODES.indexOf(m) + 1) % HZ_MODES.length]);
   // ── 북마크(명령 단축) ──────────────────────────────────────────────────────
   const runBookmark = (bm) => {
     if (!bm || !bm.cmd) return;
-    setStatus(`▶ ${bm.name} …`);
-    runAction(bm.cmd, (o) => setStatus(`${bm.name}: ${o}`));
+    spawnJob(bm.name || bm.cmd, bm.cmd);               // 작업으로 추적 → J 에서 조회/종료
+    setStatus(`▶ ${bm.name} (J 로 확인)`);
   };
   const runBookmarkKey = (ch) => {
     const bm = bookmarks.find((b) => b.key === ch);
@@ -224,23 +244,17 @@ export function StoreProvider({ children }) {
   const openTf = () => openInfo('🌳 TF tree (/tf 수집 중, ~3s)', tfTreeCmd(ver));
   // ── rosbag 녹화/재생 ───────────────────────────────────────────────────────
   const toggleRec = () => {
-    if (rec) { try { rec.child.kill('SIGINT'); } catch { /* */ } setRec(null); setStatus('■ 녹화 정지'); return; }
+    if (rec) { killJob(rec.id, 'SIGINT'); setRec(null); setStatus('■ 녹화 정지'); return; }
     const recTopics = filt ? list.filter((i) => i.kind === 'topic').map((i) => i.name) : null;
     const out = `rdash_rec_${Date.now()}`;
-    const child = rosSpawn(bagRecordCmd(ver, recTopics, out));
-    if (child.stderr) child.stderr.on('data', () => {});
-    child.on('error', () => setStatus('rosbag 오류(설치 확인)'));
-    plotsRef.current.push(child);                        // 종료 시 정리
-    setRec({ child, out, started: Date.now(), n: recTopics ? recTopics.length : 0 });
+    const id = spawnJob(`rosbag rec → ${out}`, bagRecordCmd(ver, recTopics, out));
+    setRec({ id, out, started: Date.now(), n: recTopics ? recTopics.length : 0 });
     setStatus(`● 녹화: ${recTopics ? recTopics.length + ' 토픽(필터)' : '전체 -a'} → ${out}`);
   };
   const submitBagPlay = (path) => {
     const s = String(path).trim();
     if (!s) return;
-    const p = rosSpawn(bagPlayCmd(ver, s));
-    if (p.stderr) p.stderr.on('data', () => {});
-    p.on('error', () => setStatus('rosbag play 오류'));
-    plotsRef.current.push(p);
+    spawnJob(`rosbag play ${s}`, bagPlayCmd(ver, s));
     setStatus(`▶ play: ${s}`);
   };
   const submitDomain = (v) => {
@@ -248,11 +262,10 @@ export function StoreProvider({ children }) {
     setDomain(s === '' ? null : s);
     setStatus(`ROS_DOMAIN_ID = ${s || '(unset)'} — 재연결`);
   };
-  const killPlots = () => { for (const c of plotsRef.current) { try { c.kill(); } catch { /* */ } } };
-  const quit = () => { try { mouse.disable(); } catch { /* */ } killPlots(); exit(); };
+  const quit = () => { try { mouse.disable(); } catch { /* */ } killAllJobs(); exit(); };
 
-  // 종료(언마운트) 시 플롯 자식 정리
-  useEffect(() => () => killPlots(), []);
+  // 종료(언마운트) 시 모든 작업 정리
+  useEffect(() => () => killAllJobs(), []);
 
   // 마우스: 스크롤(트리/값) + 클릭(트리 행 선택/펼침)
   useEffect(() => {
@@ -287,13 +300,16 @@ export function StoreProvider({ children }) {
     expanded, active, echo, bw, activeHz, valTop, valMaxRef, frozen, renderHz,
     edit, searching, filter, plotPick, status, actHint, hzHistRef, listRef,
     hzMode, domain, domainEdit, env: rosEnv(ver, domain),
-    bookmarks, bmOpen, bmAdd, infoView, rec, bagPlay,
+    bookmarks, bmOpen, bmAdd, infoView, rec, bagPlay, jobs, jobsOpen, jobLogsRef,
+    treeHidden, help,
     setSel, setTop, setValTop, setExpanded, setActive, setEdit, setSearching,
     setFilter, setFrozen, setPlotPick, setRateIdx, setStatus, setDomainEdit,
-    setBmOpen, setBmAdd, setInfoView, setBagPlay,
+    setBmOpen, setBmAdd, setInfoView, setBagPlay, setJobsOpen, setHelp,
+    toggleTree: () => setTreeHidden((v) => !v),
     activate, move, doAction, doRestart, submitSet, doPlot, launchPlot, quit,
     cycleHz, submitDomain, runBookmark, runBookmarkKey, addBookmark, deleteBookmark,
     openConnections, openResource, openTf, closeInfo, toggleRec, submitBagPlay,
+    killJob, removeJob,
   };
   return h(DashboardContext.Provider, { value: ctx }, children);
 }
