@@ -2,6 +2,7 @@
 import { h } from '../react.js';
 import { Box, Text, useInput } from 'ink';
 import { useDashboard } from '../store.js';
+import { typable } from '../lib/util.js';
 
 export function BagPlay() {
   const d = useDashboard();
@@ -9,7 +10,7 @@ export function BagPlay() {
     if (key.return) { d.submitBagPlay(d.bagPlay.value); d.setBagPlay(null); }
     else if (key.escape) d.setBagPlay(null);
     else if (key.backspace || key.delete) d.setBagPlay((e) => e && ({ ...e, value: e.value.slice(0, -1) }));
-    else if (ch && !key.ctrl && !key.meta) d.setBagPlay((e) => e && ({ ...e, value: e.value + ch }));
+    else if (typable(ch, key)) d.setBagPlay((e) => e && ({ ...e, value: e.value + ch }));
   }, { isActive: !!process.stdin.isTTY });
 
   return h(Box, null,

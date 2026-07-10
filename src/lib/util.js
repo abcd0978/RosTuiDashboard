@@ -27,3 +27,7 @@ export function fuzzy(needle, hay) {
 
 // 셸 인용부호 이스케이프(작은따옴표 안전)
 export const shq = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
+
+// 텍스트 입력에 통과시킬 "실제 타이핑 한 글자"인지. 마우스 리포트 잔재(예: "[<35;76;33M")는
+// 여러 글자로 들어와 걸러진다. 제어문자/ctrl/meta 도 제외.
+export const typable = (ch, key) => !!ch && ch.length === 1 && ch >= ' ' && !key.ctrl && !key.meta;

@@ -103,6 +103,7 @@ node index.js
 | `RENDER_HZ` | `10` | max screen refresh rate (1–60) |
 | `ROS_VER` | auto | force `1` or `2` |
 | `ROS_DOMAIN_ID` | inherited | ROS2 domain (also switchable at runtime with `D`) |
+| `RDASH_MOUSE` | `1` | set `0` to disable mouse entirely (for terminals where mouse tracking misbehaves) |
 
 ### Files
 - `~/.rdashrc` — saved command bookmarks (JSON).

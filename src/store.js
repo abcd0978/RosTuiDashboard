@@ -309,10 +309,15 @@ export function StoreProvider({ children }) {
   // 종료(언마운트) 시 모든 작업 정리
   useEffect(() => () => killAllJobs(), []);
 
-  // 마우스: 스크롤(트리/값) + 클릭(트리 행 선택/펼침)
+  // 마우스: 스크롤(트리/값) + 클릭(트리 행 선택/펼침).  RDASH_MOUSE=0 이면 완전 비활성.
   useEffect(() => {
-    if (!process.stdin.isTTY) return;
+    if (!process.stdin.isTTY || process.env.RDASH_MOUSE === '0') return;
     mouse.enable();
+    // any-motion(1003) 추적은 터미널(WSL/Windows Terminal 등)에서 마우스 움직임마다 리포트를
+    // 쏟아 입력창 오염·화면 깜빡임을 유발 → 끄고 버튼/휠(1000)+SGR(1006)만 유지(클릭·스크롤은 정상).
+    const noMotion = () => { try { process.stdout.write('\x1b[?1003l'); } catch { /* */ } };
+    noMotion();
+    const suppress = [80, 250, 600].map((ms) => setTimeout(noMotion, ms));   // 라이브러리 재활성 대비
     const onScroll = (p, dir) => {
       if (dir !== 'scrolldown' && dir !== 'scrollup') return;
       const d = dir === 'scrolldown' ? 3 : -3;
@@ -333,7 +338,11 @@ export function StoreProvider({ children }) {
     };
     mouse.events.on('scroll', onScroll);
     mouse.events.on('click', onClick);
-    return () => { mouse.events.off('scroll', onScroll); mouse.events.off('click', onClick); try { mouse.disable(); } catch { /* */ } };
+    return () => {
+      suppress.forEach(clearTimeout);
+      mouse.events.off('scroll', onScroll); mouse.events.off('click', onClick);
+      try { mouse.disable(); } catch { /* */ }
+    };
   }, []);
 
   const ctx = {

@@ -2,6 +2,7 @@
 import { h } from '../react.js';
 import { Box, Text, useInput } from 'ink';
 import { useDashboard } from '../store.js';
+import { typable } from '../lib/util.js';
 
 export function TfEcho() {
   const d = useDashboard();
@@ -15,7 +16,7 @@ export function TfEcho() {
     }
     const field = a.step === 'src' ? 'src' : 'tgt';
     if (key.backspace || key.delete) d.setTfEcho((e) => e && ({ ...e, [field]: e[field].slice(0, -1) }));
-    else if (ch && !key.ctrl && !key.meta) d.setTfEcho((e) => e && ({ ...e, [field]: e[field] + ch }));
+    else if (typable(ch, key)) d.setTfEcho((e) => e && ({ ...e, [field]: e[field] + ch }));
   }, { isActive: !!process.stdin.isTTY });
 
   const cur = a.step === 'src' ? a.src : a.tgt;

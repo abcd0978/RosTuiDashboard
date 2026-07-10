@@ -2,6 +2,7 @@
 import { h } from '../react.js';
 import { Box, Text, useInput } from 'ink';
 import { useDashboard } from '../store.js';
+import { typable } from '../lib/util.js';
 
 export function SearchBar() {
   const d = useDashboard();
@@ -9,7 +10,7 @@ export function SearchBar() {
     if (key.return) d.setSearching(false);               // 필터 유지하고 닫기
     else if (key.escape) { d.setSearching(false); d.setFilter(''); }
     else if (key.backspace || key.delete) d.setFilter((f) => f.slice(0, -1));
-    else if (ch && !key.ctrl && !key.meta) d.setFilter((f) => f + ch);
+    else if (typable(ch, key)) d.setFilter((f) => f + ch);
   }, { isActive: !!process.stdin.isTTY });
 
   return h(Box, null,

@@ -2,6 +2,7 @@
 import { h } from '../react.js';
 import { Box, Text, useInput } from 'ink';
 import { useDashboard } from '../store.js';
+import { typable } from '../lib/util.js';
 
 export function BagCompare() {
   const d = useDashboard();
@@ -15,7 +16,7 @@ export function BagCompare() {
     }
     const field = a.step === 'a' ? 'a' : 'b';
     if (key.backspace || key.delete) d.setBagCmp((e) => e && ({ ...e, [field]: e[field].slice(0, -1) }));
-    else if (ch && !key.ctrl && !key.meta) d.setBagCmp((e) => e && ({ ...e, [field]: e[field] + ch }));
+    else if (typable(ch, key)) d.setBagCmp((e) => e && ({ ...e, [field]: e[field] + ch }));
   }, { isActive: !!process.stdin.isTTY });
 
   const cur = a.step === 'a' ? a.a : a.b;
