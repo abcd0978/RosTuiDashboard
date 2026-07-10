@@ -141,6 +141,10 @@ export function StoreProvider({ children }) {
   };
   const activateRef = useRef(activate); activateRef.current = activate;
 
+  // 마지막으로 실행한 셸 명령 기억 → 북마크 추가 시 자동 채움(명령 안 외워도 됨)
+  const lastCmdRef = useRef('');
+  const run = (cmd, onDone) => { lastCmdRef.current = cmd; runAction(cmd, onDone); };
+
   const doAction = () => {
     if (!active) { setStatus('선택된 항목 없음 (Enter 로 선택)'); return; }
     const act = actionFor(ver, active.kind, active.name);
@@ -148,26 +152,26 @@ export function StoreProvider({ children }) {
     if (act.needsInput) { setEdit({ name: active.name, value: act.defaultVal || '', kind: active.kind }); return; }
     if (!act.cmd) { setStatus(act.label); return; }
     setStatus(`${act.label} …`);
-    runAction(act.cmd, (o) => setStatus(`${active.name}: ${o}`));
+    run(act.cmd, (o) => setStatus(`${active.name}: ${o}`));
   };
   const doRestart = () => {
     if (!active) { setStatus('선택된 항목 없음 (Enter 로 선택)'); return; }
     const act = restartFor(active.kind, active.name);
     if (!act) { setStatus(`(${active.kind}) 재시작 대상 아님 (노드만)`); return; }
     setStatus(`${act.label} …`);
-    runAction(act.cmd, (o) => setStatus(`${active.name}: ${o}`));
+    run(act.cmd, (o) => setStatus(`${active.name}: ${o}`));
   };
   const submitSet = (name, value) => {
     const act = actionFor(ver, 'param', name, value);
-    if (act && act.cmd) { setStatus(`set ${name} …`); runAction(act.cmd, (o) => setStatus(`${name} = ${value}  (${o})`)); }
+    if (act && act.cmd) { setStatus(`set ${name} …`); run(act.cmd, (o) => setStatus(`${name} = ${value}  (${o})`)); }
   };
   const submitServiceCall = (name, req) => {
     const act = actionFor(ver, 'service', name, req);
-    if (act && act.cmd) { setStatus(`call ${name} …`); runAction(act.cmd, (o) => setStatus(`${name}: ${o}`)); }
+    if (act && act.cmd) { setStatus(`call ${name} …`); run(act.cmd, (o) => setStatus(`${name}: ${o}`)); }
   };
   const submitPublish = (name, msg) => {
     const act = actionFor(ver, 'topic', name, msg);
-    if (act && act.cmd) { setStatus(`pub ${name} …`); runAction(act.cmd, (o) => setStatus(`${name}: ${o}`)); }
+    if (act && act.cmd) { setStatus(`pub ${name} …`); run(act.cmd, (o) => setStatus(`${name}: ${o}`)); }
   };
   const submitEdit = (kind, name, value) => (
     kind === 'service' ? submitServiceCall(name, value)
@@ -212,6 +216,7 @@ export function StoreProvider({ children }) {
   };
   // ── 작업(Jobs) 레지스트리 — RDash 가 띄운 프로세스를 추적/조회/종료 ──────────────
   const spawnJob = (label, cmd) => {
+    lastCmdRef.current = cmd;               // 북마크 자동채움용
     const id = ++jobSeqRef.current;
     const child = rosSpawn(cmd);
     const lines = []; jobLogsRef.current.set(id, lines);
@@ -248,6 +253,16 @@ export function StoreProvider({ children }) {
     const next = bookmarks.filter((_, j) => j !== i);
     setBookmarks(next); saveBookmarks(next);
   };
+  // 북마크 cmd 자동채움: 마지막 실행 명령 → 없으면 선택 항목 기준 스캐폴드(명령 안 외워도 됨)
+  const scaffoldCmd = () => {
+    if (!active) return '';
+    const nm = active.name, two = ver === '2';
+    if (active.kind === 'service') return two ? `ros2 service call ${shq(nm)} $(ros2 service type ${shq(nm)}) '{}'` : `rosservice call ${shq(nm)}`;
+    if (active.kind === 'topic') return two ? `ros2 topic echo ${shq(nm)}` : `rostopic echo ${shq(nm)}`;
+    if (active.kind === 'node') return two ? `ros2 node info ${shq(nm)}` : `rosnode info ${shq(nm)}`;
+    return '';
+  };
+  const bmSeedCmd = () => lastCmdRef.current || scaffoldCmd();
   // ── 정보 오버레이(연결/리소스/TF) — 명령 실행 결과를 스크롤 표시, 선택적 주기 갱신 ──
   const openInfo = (title, cmd, refreshMs) => {
     clearTimeout(infoRef.current.timer);
@@ -357,7 +372,7 @@ export function StoreProvider({ children }) {
     openFieldPicker, addWatch, removeWatch, submitTfEcho, submitBagCompare,
     toggleTree: () => setTreeHidden((v) => !v),
     activate, move, doAction, doRestart, submitSet, submitEdit, doPlot, launchPlot, quit,
-    cycleHz, submitDomain, runBookmark, runBookmarkKey, addBookmark, deleteBookmark,
+    cycleHz, submitDomain, runBookmark, runBookmarkKey, addBookmark, deleteBookmark, bmSeedCmd,
     openConnections, openResource, openTf, closeInfo, toggleRec, submitBagPlay,
     killJob, removeJob,
   };

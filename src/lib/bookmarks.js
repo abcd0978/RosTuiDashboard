@@ -6,6 +6,18 @@ import { join } from 'path';
 
 export const RC_PATH = join(homedir(), '.rdashrc');
 
+// 북마크 추가창에서 ↑↓ 로 고를 흔한 명령 템플릿(<...> 부분만 채워 쓰면 됨).
+export const BOOKMARK_TEMPLATES = [
+  'ros2 launch <pkg> <file>.launch.py',
+  'ros2 run <pkg> <exe>',
+  'ros2 bag record -a',
+  'ros2 bag record /topic1 /topic2',
+  'MicroXRCEAgent udp4 -p 8888',
+  'ros2 daemon stop && ros2 daemon start',
+  'rqt_graph',
+  'ros2 topic hz <topic>',
+];
+
 export function loadBookmarks() {
   try {
     const d = JSON.parse(readFileSync(RC_PATH, 'utf8'));

@@ -11,7 +11,7 @@ export function Bookmarks() {
   const idx = clamp(d.bmOpen.idx, 0, Math.max(0, list.length - 1));
   useInput((ch, key) => {
     if (key.escape || ch === 'q') d.setBmOpen(null);
-    else if (ch === 'a') { d.setBmOpen(null); d.setBmAdd({ step: 'name', name: '', cmd: '' }); }
+    else if (ch === 'a') { d.setBmOpen(null); d.setBmAdd({ step: 'name', name: '', cmd: d.bmSeedCmd(), ti: -1 }); }
     else if (!list.length) return;
     else if (key.return) { d.setBmOpen(null); d.runBookmark(list[idx]); }
     else if (ch === 'd') d.deleteBookmark(idx);
