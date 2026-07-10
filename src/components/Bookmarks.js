@@ -25,6 +25,7 @@ export function Bookmarks() {
   useInput((ch, key) => {
     if (key.escape || ch === 'q') d.setBmOpen(null);
     else if (ch === 'a') { d.setBmOpen(null); d.setBmAdd({ step: 'name', name: '', cmd: d.bmSeedCmd(), ti: -1 }); }
+    else if (ch === 's') { d.cyclePreset(); d.setBmOpen({ idx: 0 }); }
     else if (!list.length) return;
     else if (key.return) { d.setBmOpen(null); d.runBookmark(list[idx]); }
     // 수정 — 기존 이름/명령을 채워서 입력창을 연다. 단축키는 그대로 유지된다.
@@ -42,7 +43,7 @@ export function Bookmarks() {
   const w = Math.max(30, (d.cols || 100) - 4);   // 폭 고정 + 각 줄 truncate → 긴 명령/한글에도 줄 겹침 방지
   const more = list.length > VIS ? `   ${top > 0 ? '▲' : ''}${top + 1}-${top + shown.length}/${list.length}${top + VIS < list.length ? '▼' : ''}` : '';
   return h(Box, { flexDirection: 'column', borderStyle: 'round', borderColor: 'magenta', paddingX: 1, width: w + 2 },
-    h(Text, { color: 'magenta', bold: true, wrap: 'truncate-end' }, ` ★ 북마크 (${list.length})  ·  Enter 실행 · a 추가 · e 수정 · d 삭제 · Esc 닫기 `),
+    h(Text, { color: 'magenta', bold: true, wrap: 'truncate-end' }, ` ★ 북마크 ${d.preset ? `[${d.preset}] ` : ''}(${list.length})  ·  Enter 실행 · a 추가 · e 수정 · d 삭제 · s 프리셋 · Esc 닫기 `),
     ...(list.length
       ? shown.map((b, i) => {
           const gi = top + i;

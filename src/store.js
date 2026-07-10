@@ -14,7 +14,7 @@ import { flattenSkeleton, buildYaml } from './lib/msgform.js';
 import { shq } from './lib/util.js';
 import { PLOT_PY } from './lib/paths.js';
 import { rosEnv } from './lib/env.js';
-import { loadBookmarks, saveBookmarks } from './lib/bookmarks.js';
+import { loadBookmarks, saveBookmarks, activePreset, presetNames, savePreset } from './lib/bookmarks.js';
 import { loadPreflight } from './lib/preflight.js';
 import { connectionsCmd, resourceCmd, tfTreeCmd, tfEchoCmd, bagRecordCmd, bagPlayCmd, bagCompareCmd } from './lib/commands.js';
 import { useRosVersion } from './hooks/useRosVersion.js';
@@ -35,6 +35,7 @@ export function StoreProvider({ children }) {
   const [domainEdit, setDomainEdit] = useState(null);   // 도메인 입력창 {value} 또는 null
   const [hzMode, setHzMode] = useState('all');          // Hz 측정 정책 all|selected|off
   const [bookmarks, setBookmarks] = useState(() => loadBookmarks());   // 명령 북마크 리스트
+  const [preset, setPreset] = useState(() => activePreset());   // 활성 북마크 프리셋(px4/turtlesim…) 또는 null
   const [bmOpen, setBmOpen] = useState(null);           // 북마크 오버레이 {idx} 또는 null
   const [bmAdd, setBmAdd] = useState(null);             // 북마크 추가 입력 {step,name,cmd} 또는 null
   const [infoView, setInfoView] = useState(null);       // 정보 오버레이 {title,lines,top} (연결/리소스/TF)
@@ -278,23 +279,31 @@ export function StoreProvider({ children }) {
     const bm = bookmarks.find((b) => b.key === ch);
     if (bm) runBookmark(bm);
   };
+  // 북마크 프리셋 순환(px4 ↔ turtlesim …) — 프리셋이 1개 이하면 아무 것도 안 함
+  const cyclePreset = () => {
+    const names = presetNames();
+    if (names.length < 2) return;
+    const p = names[(names.indexOf(preset) + 1) % names.length];
+    setPreset(p); setBookmarks(loadBookmarks(p)); savePreset(p);
+    setStatus(`프리셋: ${p}`);
+  };
   const addBookmark = (name, cmd) => {
     // 비어있는 숫자키(1..9,0)를 재사용해 배정 — 10개까진 즉시 단축키, 그 이상은 키 없이 저장(목록에서 실행).
     const used = new Set(bookmarks.map((b) => b.key));
     const key = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'].find((k) => !used.has(k)) || '';
     const next = [...bookmarks, { name: name || cmd, cmd, key }];
-    setBookmarks(next); saveBookmarks(next);
+    setBookmarks(next); saveBookmarks(next, preset);
     setStatus(`북마크 추가: ${key ? `[${key}] ` : ''}${name || cmd}  (총 ${next.length}개)`);
   };
   const deleteBookmark = (i) => {
     const next = bookmarks.filter((_, j) => j !== i);
-    setBookmarks(next); saveBookmarks(next);
+    setBookmarks(next); saveBookmarks(next, preset);
   };
   // 수정 — 단축키(key)는 그대로 두고 이름/명령만 갈아끼운다.
   const updateBookmark = (i, name, cmd) => {
     if (!bookmarks[i]) return;
     const next = bookmarks.map((b, j) => (j === i ? { ...b, name: name || cmd, cmd } : b));
-    setBookmarks(next); saveBookmarks(next);
+    setBookmarks(next); saveBookmarks(next, preset);
     setStatus(`북마크 수정: ${next[i].key ? `[${next[i].key}] ` : ''}${next[i].name}`);
   };
   // 북마크 cmd 자동채움: 마지막 실행 명령 → 없으면 선택 항목 기준 스캐폴드(명령 안 외워도 됨)
@@ -408,7 +417,7 @@ export function StoreProvider({ children }) {
     expanded, active, echo, bw, activeHz, activeAge, valTop, valMaxRef, frozen, renderHz,
     edit, searching, filter, plotPick, status, actHint, hzHistRef, listRef,
     hzMode, domain, domainEdit, env: rosEnv(ver, domain),
-    bookmarks, bmOpen, bmAdd, infoView, rec, bagPlay, tfEcho, bagCmp, jobs, jobsOpen, jobLogsRef,
+    bookmarks, preset, bmOpen, bmAdd, infoView, rec, bagPlay, tfEcho, bagCmp, jobs, jobsOpen, jobLogsRef,
     treeHidden, help, watches, watchOpen, preflight, preflightOpen, pubForm,
     setSel, setTop, setValTop, setExpanded, setActive, setEdit, setSearching, setPubForm, submitPubForm,
     setFilter, setFrozen, setPlotPick, setRateIdx, setStatus, setDomainEdit,
@@ -416,7 +425,7 @@ export function StoreProvider({ children }) {
     openFieldPicker, addWatch, removeWatch, submitTfEcho, submitBagCompare,
     toggleTree: () => setTreeHidden((v) => !v),
     activate, move, doAction, doRestart, submitSet, submitEdit, doPlot, launchPlot, quit,
-    cycleHz, submitDomain, runBookmark, runBookmarkKey, addBookmark, deleteBookmark, updateBookmark, bmSeedCmd,
+    cycleHz, submitDomain, runBookmark, runBookmarkKey, cyclePreset, addBookmark, deleteBookmark, updateBookmark, bmSeedCmd,
     openConnections, openResource, openTf, closeInfo, toggleRec, submitBagPlay,
     killJob, removeJob,
   };
