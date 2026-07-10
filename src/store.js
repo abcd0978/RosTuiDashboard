@@ -9,7 +9,7 @@ import { useApp } from 'ink';
 import { useMouse, useElementPosition } from '@zenobius/ink-mouse';
 import { clamp, fuzzy, RATES, LEFT_W } from './lib/util.js';
 import { buildTree, flattenTree } from './lib/tree.js';
-import { actionFor, restartFor, runAction, numericFields, rosSpawn, echoFullCmd } from './lib/ros.js';
+import { actionFor, restartFor, runAction, numericFields, rosSpawn, echoFullCmd, killTree } from './lib/ros.js';
 import { shq } from './lib/util.js';
 import { PLOT_PY } from './lib/paths.js';
 import { rosEnv } from './lib/env.js';
@@ -218,7 +218,7 @@ export function StoreProvider({ children }) {
   const spawnJob = (label, cmd) => {
     lastCmdRef.current = cmd;               // 북마크 자동채움용
     const id = ++jobSeqRef.current;
-    const child = rosSpawn(cmd);
+    const child = rosSpawn(cmd, undefined, true);   // detached=새 그룹 → 파이프라인째 종료 가능
     const lines = []; jobLogsRef.current.set(id, lines);
     const push = (s) => { for (const ln of String(s).split('\n')) { if (ln !== '') { lines.push(ln); if (lines.length > 300) lines.shift(); } } };
     if (child.stdout) child.stdout.on('data', (d) => push(d.toString()));
@@ -228,9 +228,9 @@ export function StoreProvider({ children }) {
     setJobs((js) => [...js, { id, label, pid: child.pid, status: 'run', child }]);
     return id;
   };
-  const killJob = (id, sig = 'SIGINT') => { const j = jobsRef.current.find((x) => x.id === id); if (j && j.child) { try { j.child.kill(sig); } catch { /* */ } } };
+  const killJob = (id, sig = 'SIGINT') => { const j = jobsRef.current.find((x) => x.id === id); if (j) killTree(j.child, sig); };
   const removeJob = (id) => { jobLogsRef.current.delete(id); setJobs((js) => js.filter((j) => j.id !== id)); };
-  const killAllJobs = () => { for (const j of jobsRef.current) { try { j.child && j.child.kill(); } catch { /* */ } } };
+  const killAllJobs = () => { for (const j of jobsRef.current) killTree(j.child, 'SIGTERM'); };
 
   const cycleHz = () => setHzMode((m) => HZ_MODES[(HZ_MODES.indexOf(m) + 1) % HZ_MODES.length]);
   // ── 북마크(명령 단축) ──────────────────────────────────────────────────────

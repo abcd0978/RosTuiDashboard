@@ -4,9 +4,20 @@
 import { spawn } from 'child_process';
 import { shq } from './util.js';
 
-export function rosSpawn(inner, env) {
+export function rosSpawn(inner, env, detached) {
   // 로그인셸(-l) 아님 → 현재 env 그대로 상속. env 지정 시 덧씌움(RDASH_CTRL, ROS_DOMAIN_ID 등).
-  return spawn('bash', ['-c', inner], env ? { env: { ...process.env, ...env } } : undefined);
+  // detached=true → 새 프로세스 그룹(리더). 파이프라인 자식까지 그룹째 종료(process.kill(-pid))하기 위함.
+  const opts = {};
+  if (env) opts.env = { ...process.env, ...env };
+  if (detached) opts.detached = true;
+  return spawn('bash', ['-c', inner], opts);
+}
+
+// 프로세스(및 그 그룹) 종료 — detached 로 띄운 자식은 그룹째, 아니면 자식만.
+export function killTree(child, sig = 'SIGINT') {
+  if (!child || !child.pid) return;
+  try { process.kill(-child.pid, sig); }          // 그룹째(파이프라인 자식 포함)
+  catch { try { child.kill(sig); } catch { /* */ } }   // 폴백: 자식만
 }
 
 // 값/정보 조회 명령 (버전별)

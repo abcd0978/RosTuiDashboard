@@ -18,7 +18,7 @@ export function Jobs() {
     else if (!list.length) return;
     else if (ch === 'k') d.killJob(list[idx].id, 'SIGINT');
     else if (ch === 'K') d.killJob(list[idx].id, 'SIGKILL');
-    else if (ch === 'd' && list[idx].status !== 'run') d.removeJob(list[idx].id);
+    else if (ch === 'd') { const jb = list[idx]; if (jb.status === 'run') d.killJob(jb.id, 'SIGKILL'); d.removeJob(jb.id); }
   }, { isActive: !!process.stdin.isTTY });
 
   const sel = list[idx];
