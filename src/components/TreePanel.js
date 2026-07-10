@@ -8,8 +8,14 @@ export function TreePanel() {
   const d = useDashboard();
   const { flat, top: dtop, sel: dsel, VISIBLE, LW, expanded, hzHistRef } = d;
 
+  // ROS 데이터 도착 전/그래프 비었을 때 트리 자리 힌트(연결 상태별)
+  const emptyHint = !d.ver ? 'ROS 버전 감지 중…'
+    : d.topics == null ? (d.conn === 'reconnecting' ? 'ROS 재연결 중…' : d.conn === 'exec-error' ? 'python3/ROS 확인' : 'ROS 연결 중…')
+    : '노드 없음 — 실행되면 자동 표시';
+
   const win = Array.from({ length: VISIBLE }, (_, i) => flat[dtop + i] || null);
   const treeRows = win.map((r, i) => {
+    if (!r && flat.length === 0 && i === 0) return h(Box, { key: i }, h(Text, { color: 'yellow' }, ' ' + emptyHint));
     if (!r) return h(Box, { key: i }, h(Text, null, ' '));
     const selected = (dtop + i === dsel);
     const it = r.node.item;

@@ -40,7 +40,7 @@ src/
     useWatches.js      #   watch-list: one echo per watched topic → latest field values
     useTermSize.js     #   terminal cols/rows (resize)
   components/
-    Layout.js          #   composition root: size guard / Loading / GlobalKeys + panels + Overlay + EnvBar + Footer
+    Layout.js          #   composition root: size guard / GlobalKeys + panels + Overlay + EnvBar + Footer (always renders; no full-screen loading)
     GlobalKeys.js      #   HEADLESS global/nav key handler (survives tree being hidden)
     TreePanel.js       #   left "file component": namespace tree + Hz sparkline (render only)
     ValuePanel.js      #   right "data component": live value, scroll, bandwidth, freeze
@@ -63,7 +63,6 @@ src/
     Jobs.js            #   jobs manager (list + output + kill/remove)
     Help.js            #   categorized shortcut reference (?)
     Button.js          #   hover/click mouse button
-    Loading.js         #   pre-connection screen
     TooSmall.js        #   terminal-too-small guard (< MIN_COLS×MIN_ROWS)
 ```
 
@@ -135,7 +134,7 @@ mode, so input lands in the right place with no central dispatcher.
 | `InfoView`     | `infoView`                                      | ↑↓/PgUp/PgDn scroll, Esc |
 | `Jobs`         | `jobsOpen`                                      | ↑↓, `k`/`K` kill, `d` remove, Esc |
 | `Help`         | `help`                                          | Esc / `?` |
-| `Loading` / `TooSmall` | before connect / terminal too small     | q |
+| `TooSmall`     | terminal too small (< MIN_COLS×MIN_ROWS)        | q |
 
 Global keys live in a **headless `GlobalKeys`** component (not `TreePanel`) so
 they keep working when the tree is hidden (`Tab`) and its panel is unmounted.
