@@ -290,6 +290,13 @@ export function StoreProvider({ children }) {
     const next = bookmarks.filter((_, j) => j !== i);
     setBookmarks(next); saveBookmarks(next);
   };
+  // 수정 — 단축키(key)는 그대로 두고 이름/명령만 갈아끼운다.
+  const updateBookmark = (i, name, cmd) => {
+    if (!bookmarks[i]) return;
+    const next = bookmarks.map((b, j) => (j === i ? { ...b, name: name || cmd, cmd } : b));
+    setBookmarks(next); saveBookmarks(next);
+    setStatus(`북마크 수정: ${next[i].key ? `[${next[i].key}] ` : ''}${next[i].name}`);
+  };
   // 북마크 cmd 자동채움: 마지막 실행 명령 → 없으면 선택 항목 기준 스캐폴드(명령 안 외워도 됨)
   const scaffoldCmd = () => {
     if (!active) return '';
@@ -409,7 +416,7 @@ export function StoreProvider({ children }) {
     openFieldPicker, addWatch, removeWatch, submitTfEcho, submitBagCompare,
     toggleTree: () => setTreeHidden((v) => !v),
     activate, move, doAction, doRestart, submitSet, submitEdit, doPlot, launchPlot, quit,
-    cycleHz, submitDomain, runBookmark, runBookmarkKey, addBookmark, deleteBookmark, bmSeedCmd,
+    cycleHz, submitDomain, runBookmark, runBookmarkKey, addBookmark, deleteBookmark, updateBookmark, bmSeedCmd,
     openConnections, openResource, openTf, closeInfo, toggleRec, submitBagPlay,
     killJob, removeJob,
   };

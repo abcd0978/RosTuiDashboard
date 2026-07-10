@@ -1,4 +1,5 @@
-// 북마크 추가 입력 — 2단계(이름 → 명령). bmAdd 모드에서만 마운트.
+// 북마크 추가/수정 입력 — 2단계(이름 → 명령). bmAdd 모드에서만 마운트.
+// bmAdd.editIdx 가 있으면 수정 모드: 기존 값을 채워 열고, 저장 시 그 자리를 덮어쓴다(단축키는 유지).
 import { h } from '../react.js';
 import { Box, Text, useInput } from 'ink';
 import { useDashboard } from '../store.js';
@@ -9,11 +10,16 @@ export function BookmarkAdd() {
   const d = useDashboard();
   const a = d.bmAdd;
   const onCmd = a.step === 'cmd';
+  const editing = a.editIdx != null;
   useInput((ch, key) => {
     if (key.escape) { d.setBmAdd(null); return; }
     if (key.return) {
       if (a.step === 'name') d.setBmAdd({ ...a, step: 'cmd' });
-      else { d.addBookmark(a.name.trim(), a.cmd.trim()); d.setBmAdd(null); }
+      else {
+        if (editing) d.updateBookmark(a.editIdx, a.name.trim(), a.cmd.trim());
+        else d.addBookmark(a.name.trim(), a.cmd.trim());
+        d.setBmAdd(null);
+      }
       return;
     }
     // cmd 단계에서 ↑↓ = 템플릿 넘기기(명령 안 외워도 됨)
@@ -29,7 +35,7 @@ export function BookmarkAdd() {
 
   const cur = a.step === 'name' ? a.name : a.cmd;
   return h(Box, { flexDirection: 'column', borderStyle: 'round', borderColor: 'magenta', paddingX: 1 },
-    h(Text, { color: 'magenta', bold: true }, ` ★ 북마크 추가 — ${a.step === 'name' ? '이름' : '명령(셸)'} 입력 `),
+    h(Text, { color: 'magenta', bold: true }, ` ★ 북마크 ${editing ? '수정' : '추가'} — ${a.step === 'name' ? '이름' : '명령(셸)'} 입력 `),
     h(Box, null,
       h(Text, { dimColor: true }, a.step === 'name' ? ' name: ' : ` name: ${a.name}   cmd: `),
       h(Text, { backgroundColor: 'magenta', color: 'black' }, `${cur} `),
