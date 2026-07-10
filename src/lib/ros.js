@@ -2,6 +2,7 @@
 // 이 프로그램은 "ROS 가 되는 셸(rostopic/rospy·ros2 동작)"에서 실행된다고만 가정한다.
 // 현재 셸의 ROS 환경(ROS_MASTER_URI 등)을 그대로 상속 — 도커/런치/프로젝트 스크립트는 모른다.
 import { spawn } from 'child_process';
+import { readdirSync, readFileSync } from 'fs';
 import { shq } from './util.js';
 
 export function rosSpawn(inner, env, detached) {
@@ -13,11 +14,49 @@ export function rosSpawn(inner, env, detached) {
   return spawn('bash', ['-c', inner], opts);
 }
 
-// 프로세스(및 그 그룹) 종료 — detached 로 띄운 자식은 그룹째, 아니면 자식만.
+// /proc 을 훑어 root 의 자손 pid 를 전부 모은다(깊이 무관).
+// setsid 는 세션/프로세스그룹만 바꾸고 PPid 는 그대로 두므로, 부모가 살아있는 동안에만 정확하다.
+function procDescendants(root) {
+  const kids = new Map();
+  for (const e of readdirSync('/proc')) {
+    if (!/^\d+$/.test(e)) continue;
+    try {
+      const st = readFileSync(`/proc/${e}/stat`, 'utf8');
+      const ppid = Number(st.slice(st.lastIndexOf(')') + 2).split(' ')[1]);   // comm 에 공백/괄호가 있어 뒤에서 자른다
+      if (!kids.has(ppid)) kids.set(ppid, []);
+      kids.get(ppid).push(Number(e));
+    } catch { /* 그 사이 종료된 pid */ }
+  }
+  const out = [], stack = [root];
+  while (stack.length) for (const c of kids.get(stack.pop()) || []) { out.push(c); stack.push(c); }
+  return out;
+}
+
+const sigPid = (pid, sig) => { try { process.kill(pid, sig); return true; } catch { return false; } };
+
+// 프로세스 종료 — 그룹째 + 자손 pid 직접.
+//
+// roslaunch 는 각 노드(px4/gzserver/mavros/rosmaster)를 setsid 로 **독립 세션**에 넣는다.
+// 그래서 그룹 킬 `kill(-pid)` 은 roslaunch 에만 닿는다. SIGINT 면 roslaunch 가 노드를 정리해주지만,
+// SIGKILL 이면 정리할 틈 없이 즉사해 노드들이 고아로 영원히 남는다(실측 확인).
+// → 신호를 보내기 **전에** 자손 목록을 떠서 각 pid 에 직접 보낸다.
 export function killTree(child, sig = 'SIGINT') {
   if (!child || !child.pid) return;
-  try { process.kill(-child.pid, sig); }          // 그룹째(파이프라인 자식 포함)
-  catch { try { child.kill(sig); } catch { /* */ } }   // 폴백: 자식만
+  const kids = procDescendants(child.pid);              // 부모가 죽기 전에 떠야 한다
+  if (!sigPid(-child.pid, sig)) { try { child.kill(sig); } catch { /* */ } }
+  for (const pid of kids) sigPid(pid, sig);
+}
+
+// 강제 종료 — 먼저 SIGINT 로 정상 종료 기회를 주고, graceMs 후에도 살아있는 것만 SIGKILL.
+// SIGKILL 을 곧바로 쏘면 roslaunch 가 노드를 정리하지 못하므로 이 단계가 필요하다.
+export function killTreeHard(child, graceMs = 6000) {
+  if (!child || !child.pid) return;
+  const all = [child.pid, ...procDescendants(child.pid)];
+  killTree(child, 'SIGINT');
+  setTimeout(() => {
+    sigPid(-child.pid, 'SIGKILL');
+    for (const pid of all) if (sigPid(pid, 0)) sigPid(pid, 'SIGKILL');   // 0 = 생존 확인
+  }, graceMs).unref?.();
 }
 
 // 값/정보 조회 명령 (버전별)

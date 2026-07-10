@@ -9,7 +9,7 @@ import { useApp } from 'ink';
 import { useMouse, useElementPosition } from '@zenobius/ink-mouse';
 import { clamp, fuzzy, RATES, LEFT_W } from './lib/util.js';
 import { buildTree, flattenTree } from './lib/tree.js';
-import { actionFor, restartFor, runAction, numericFields, rosSpawn, echoFullCmd, killTree, protoCmd, runText } from './lib/ros.js';
+import { actionFor, restartFor, runAction, numericFields, rosSpawn, echoFullCmd, killTree, killTreeHard, protoCmd, runText } from './lib/ros.js';
 import { flattenSkeleton, buildYaml } from './lib/msgform.js';
 import { shq } from './lib/util.js';
 import { PLOT_PY } from './lib/paths.js';
@@ -258,7 +258,12 @@ export function StoreProvider({ children }) {
     setJobs((js) => [...js, { id, label, pid: child.pid, status: 'run', child }]);
     return id;
   };
-  const killJob = (id, sig = 'SIGINT') => { const j = jobsRef.current.find((x) => x.id === id); if (j) killTree(j.child, sig); };
+  // SIGKILL 요청은 곧바로 쏘지 않는다 — roslaunch 가 죽으면 노드들이 고아로 남는다. SIGINT 후 유예.
+  const killJob = (id, sig = 'SIGINT') => {
+    const j = jobsRef.current.find((x) => x.id === id);
+    if (!j) return;
+    if (sig === 'SIGKILL') killTreeHard(j.child); else killTree(j.child, sig);
+  };
   const removeJob = (id) => { jobLogsRef.current.delete(id); setJobs((js) => js.filter((j) => j.id !== id)); };
   const killAllJobs = () => { for (const j of jobsRef.current) killTree(j.child, 'SIGTERM'); };
 
