@@ -9,7 +9,8 @@ import { useApp } from 'ink';
 import { useMouse, useElementPosition } from '@zenobius/ink-mouse';
 import { clamp, fuzzy, RATES, LEFT_W } from './lib/util.js';
 import { buildTree, flattenTree } from './lib/tree.js';
-import { actionFor, restartFor, runAction, numericFields, rosSpawn, echoFullCmd, killTree } from './lib/ros.js';
+import { actionFor, restartFor, runAction, numericFields, rosSpawn, echoFullCmd, killTree, protoCmd, runText } from './lib/ros.js';
+import { flattenSkeleton, buildYaml } from './lib/msgform.js';
 import { shq } from './lib/util.js';
 import { PLOT_PY } from './lib/paths.js';
 import { rosEnv } from './lib/env.js';
@@ -41,6 +42,7 @@ export function StoreProvider({ children }) {
   const [bagPlay, setBagPlay] = useState(null);         // rosbag 재생 경로 입력 {value} 또는 null
   const [tfEcho, setTfEcho] = useState(null);           // tf echo 프레임 입력 {step,src,tgt} 또는 null
   const [bagCmp, setBagCmp] = useState(null);           // A/B bag 비교 경로 입력 {step,a,b} 또는 null
+  const [pubForm, setPubForm] = useState(null);         // 토픽 발행 폼 {name,type,fields,idx} 또는 null
   const [jobs, setJobs] = useState([]);                 // 실행 중/종료 작업(북마크·rosbag·플롯…)
   const [jobsOpen, setJobsOpen] = useState(null);       // Jobs 오버레이 {idx} 또는 null
   const [treeHidden, setTreeHidden] = useState(false);  // 트리 숨김(값 패널 전체폭) — Tab 토글
@@ -145,8 +147,36 @@ export function StoreProvider({ children }) {
   const lastCmdRef = useRef('');
   const run = (cmd, onDone) => { lastCmdRef.current = cmd; runAction(cmd, onDone); };
 
+  // 토픽 발행 폼 — 타입에서 필드를 뽑아 값만 채우게 한다(구조를 손으로 안 침).
+  const openPublishForm = () => {
+    if (!active || active.kind !== 'topic') { setStatus('토픽을 선택하세요'); return; }
+    const nm = active.name, pc = protoCmd(ver, 'topic', nm, active.ty);
+    if (!pc) { setStatus('발행 불가'); return; }
+    setStatus('메시지 필드 조회 중…');
+    runText(pc, (out) => {
+      let parsed = null;
+      try { parsed = JSON.parse(out); } catch { /* */ }
+      const skel = parsed && parsed.skel;
+      if (!skel || typeof skel !== 'object') {
+        setEdit({ name: nm, value: '{}', kind: 'topic' });   // 타입 조회 실패 → YAML 자유 입력 폴백
+        setStatus('타입 필드 조회 실패 — YAML 직접 입력');
+        return;
+      }
+      const fields = flattenSkeleton(skel);
+      setPubForm({ name: nm, type: (parsed.type || active.ty || '?'), fields, idx: 0 });
+      setStatus(`▲ publish ${nm} — 필드 ${fields.length}개`);
+    });
+  };
+  const submitPubForm = () => {
+    const f = pubForm; if (!f) return;
+    const msg = buildYaml(f.fields);
+    setPubForm(null);
+    submitPublish(f.name, msg);
+  };
+
   const doAction = () => {
     if (!active) { setStatus('선택된 항목 없음 (Enter 로 선택)'); return; }
+    if (active.kind === 'topic') { openPublishForm(); return; }   // 발행은 폼으로
     const act = actionFor(ver, active.kind, active.name);
     if (!act) { setStatus(`(${active.kind}) 액션 없음`); return; }
     if (act.needsInput) { setEdit({ name: active.name, value: act.defaultVal || '', kind: active.kind }); return; }
@@ -365,8 +395,8 @@ export function StoreProvider({ children }) {
     edit, searching, filter, plotPick, status, actHint, hzHistRef, listRef,
     hzMode, domain, domainEdit, env: rosEnv(ver, domain),
     bookmarks, bmOpen, bmAdd, infoView, rec, bagPlay, tfEcho, bagCmp, jobs, jobsOpen, jobLogsRef,
-    treeHidden, help, watches, watchOpen, preflight, preflightOpen,
-    setSel, setTop, setValTop, setExpanded, setActive, setEdit, setSearching,
+    treeHidden, help, watches, watchOpen, preflight, preflightOpen, pubForm,
+    setSel, setTop, setValTop, setExpanded, setActive, setEdit, setSearching, setPubForm, submitPubForm,
     setFilter, setFrozen, setPlotPick, setRateIdx, setStatus, setDomainEdit,
     setBmOpen, setBmAdd, setInfoView, setBagPlay, setJobsOpen, setHelp, setWatchOpen, setTfEcho, setPreflightOpen, setBagCmp,
     openFieldPicker, addWatch, removeWatch, submitTfEcho, submitBagCompare,

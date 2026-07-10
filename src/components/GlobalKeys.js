@@ -6,7 +6,7 @@ import { clamp, RATES } from '../lib/util.js';
 
 export function GlobalKeys() {
   const d = useDashboard();
-  const active = !!process.stdin.isTTY && !d.edit && !d.plotPick && !d.searching && !d.domainEdit
+  const active = !!process.stdin.isTTY && !d.edit && !d.plotPick && !d.searching && !d.domainEdit && !d.pubForm
     && !d.bmOpen && !d.bmAdd && !d.infoView && !d.bagPlay && !d.jobsOpen && !d.help && !d.watchOpen && !d.tfEcho && !d.preflightOpen && !d.bagCmp;
   useInput((ch, key) => {
     if (ch === 'q') d.quit();

@@ -101,6 +101,54 @@ export function restartFor(kind, name) {
   return { label: 'restart node', cmd };
 }
 
+// ── 메시지 스켈레톤(발행 템플릿) 생성 ─────────────────────────────────────────
+// x 로 토픽 publish 시, 사용자가 "{linear: {x: 0.0, ...}}" 전체를 손으로 안 쳐도 되도록
+// 타입에서 기본값 채운 flow-style YAML 한 줄을 만들어 입력창에 미리 넣는다.
+//   ROS2: `ros2 interface proto <type>` 결과를 한 줄로 압축.
+//   ROS1: roslib 로 메시지 클래스를 인트로스펙트해 필드 기본값 트리를 만든다.
+// stdout 은 JSON 한 줄 {type, skel} — 폼(필드명↦기본값)으로 펼치고 다시 YAML 로 조립하기 쉽게.
+const PROTO_PY2 = `python3 -c 'import sys,yaml,json
+s=sys.stdin.read().strip()
+if len(s)>1 and s[0]=="\\"" and s[-1]=="\\"": s=s[1:-1]
+print(json.dumps({"type":sys.argv[1],"skel":yaml.safe_load(s) or {}}))'`;
+
+const PROTO_PY1 = `python3 -c 'import sys,json,roslib.message
+def sk(cls):
+    if cls is None: return {}
+    m=cls(); o={}
+    for n,t in zip(m.__slots__,m._slot_types): o[n]=fld(t)
+    return o
+def fld(t):
+    if "[" in t: return []
+    if t in ("float32","float64"): return 0.0
+    if t in ("int8","uint8","int16","uint16","int32","uint32","int64","uint64","byte","char"): return 0
+    if t=="bool": return False
+    if t=="string": return ""
+    if t in ("time","duration"): return {"secs":0,"nsecs":0}
+    return sk(roslib.message.get_message_class(t))
+print(json.dumps({"type":sys.argv[1],"skel":sk(roslib.message.get_message_class(sys.argv[1]))}))'`;
+
+// 발행 폼 스켈레톤 명령 — 토픽만. 타입을 알면(ty) 조회를 건너뛴다. stdout: JSON {type, skel}.
+export function protoCmd(ver, kind, name, ty) {
+  if (kind !== 'topic') return null;
+  if (ver === '2') {
+    const t = ty ? `T=${shq(ty)}` : `T=$(ros2 topic type ${shq(name)} 2>/dev/null | head -1)`;
+    return `${t}; [ -z "$T" ] && exit 0; ros2 interface proto "$T" 2>/dev/null | ${PROTO_PY2} "$T"`;
+  }
+  const t = ty ? `T=${shq(ty)}` : `T=$(rostopic type ${shq(name)} 2>/dev/null | head -1)`;
+  return `${t}; [ -z "$T" ] && exit 0; ${PROTO_PY1} "$T"`;
+}
+
+// 명령의 전체 stdout(trim)을 콜백으로 — 스켈레톤 등 한 덩어리 결과용.
+export function runText(cmd, onDone) {
+  const p = rosSpawn(cmd);
+  let out = '';
+  if (p.stderr) p.stderr.on('data', () => {});
+  p.stdout.on('data', (d) => { out += d.toString(); });
+  p.on('close', () => onDone(out.trim()));
+  p.on('error', () => onDone(''));
+}
+
 // 액션 실행 → 첫 줄 결과를 콜백으로
 export function runAction(cmd, onDone) {
   const p = rosSpawn(`${cmd} 2>&1`);

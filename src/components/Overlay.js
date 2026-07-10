@@ -13,16 +13,18 @@ import { BagPlay } from './BagPlay.js';
 import { TfEcho } from './TfEcho.js';
 import { BagCompare } from './BagCompare.js';
 import { Jobs } from './Jobs.js';
+import { PublishForm } from './PublishForm.js';
 import { Help } from './Help.js';
 import { WatchList } from './WatchList.js';
 import { Preflight } from './Preflight.js';
 import { StatusLine } from './StatusLine.js';
 
 export function Overlay() {
-  const { plotPick, searching, edit, domainEdit, bmOpen, bmAdd, infoView, bagPlay, tfEcho, bagCmp, jobsOpen, help, watchOpen, preflightOpen } = useDashboard();
+  const { plotPick, searching, edit, domainEdit, bmOpen, bmAdd, infoView, bagPlay, tfEcho, bagCmp, jobsOpen, help, watchOpen, preflightOpen, pubForm } = useDashboard();
   if (help) return h(Help);
   if (preflightOpen) return h(Preflight);
   if (watchOpen) return h(WatchList);
+  if (pubForm) return h(PublishForm);
   if (jobsOpen) return h(Jobs);
   if (tfEcho) return h(TfEcho);
   if (bagCmp) return h(BagCompare);
