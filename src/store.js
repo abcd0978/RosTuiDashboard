@@ -113,7 +113,9 @@ export function StoreProvider({ children }) {
     try { writeFileSync(ctrlPathRef.current, JSON.stringify({ measure })); } catch { /* */ }
   }, [visKey]);
 
-  const VISIBLE = Math.max(3, rows - 7);          // 세로 여유(풋터 줄바꿈 대비)
+  // 전체 높이 = VISIBLE + 8 (패널 헤더/테두리3 + 오버레이1 + EnvBar1 + 테두리 버튼 푸터3).
+  // 화면(rows)보다 크면 Ink 가 매 프레임 전체를 다시 그려 깜빡임 → rows-9 로 한 줄 여유.
+  const VISIBLE = Math.max(3, rows - 9);
   const rightW = treeHidden ? Math.max(24, cols - 2) : Math.max(24, cols - LEFT_W - 5);   // 트리 숨기면 전체폭
   const RW = rightW - 4;                           // 오른쪽 안쪽 폭(테두리2+패딩2)
   const LW = LEFT_W - 6;                           // 왼쪽 안쪽 폭
@@ -310,14 +312,11 @@ export function StoreProvider({ children }) {
   useEffect(() => () => killAllJobs(), []);
 
   // 마우스: 스크롤(트리/값) + 클릭(트리 행 선택/펼침).  RDASH_MOUSE=0 이면 완전 비활성.
+  // (입력창 오염은 typable 필터로, 깜빡임은 Button 의 hover 재렌더 제거로 해결 — 모션은 클릭 감지에
+  //  필요하므로 끄지 않는다.)
   useEffect(() => {
     if (!process.stdin.isTTY || process.env.RDASH_MOUSE === '0') return;
     mouse.enable();
-    // any-motion(1003) 추적은 터미널(WSL/Windows Terminal 등)에서 마우스 움직임마다 리포트를
-    // 쏟아 입력창 오염·화면 깜빡임을 유발 → 끄고 버튼/휠(1000)+SGR(1006)만 유지(클릭·스크롤은 정상).
-    const noMotion = () => { try { process.stdout.write('\x1b[?1003l'); } catch { /* */ } };
-    noMotion();
-    const suppress = [80, 250, 600].map((ms) => setTimeout(noMotion, ms));   // 라이브러리 재활성 대비
     const onScroll = (p, dir) => {
       if (dir !== 'scrolldown' && dir !== 'scrollup') return;
       const d = dir === 'scrolldown' ? 3 : -3;
@@ -339,7 +338,6 @@ export function StoreProvider({ children }) {
     mouse.events.on('scroll', onScroll);
     mouse.events.on('click', onClick);
     return () => {
-      suppress.forEach(clearTimeout);
       mouse.events.off('scroll', onScroll); mouse.events.off('click', onClick);
       try { mouse.disable(); } catch { /* */ }
     };
