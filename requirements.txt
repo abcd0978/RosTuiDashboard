@@ -1,0 +1,9 @@
+# RDash 플롯(plot.py)용 파이썬 패키지. index.js 실행 시 없으면 자동 설치를 시도한다.
+#   수동 설치:  pip install -r requirements.txt
+#   자동 설치 끄기:  RDASH_NO_AUTOPIP=1
+#
+# 참고: 텔레메트리(telemetry*.py)는 rospy/rclpy 등 ROS 배포판이 제공하는 패키지를 쓰므로
+#       여기(pip)에 넣지 않는다. 아래는 순수 pip 설치 대상만.
+numpy
+matplotlib
+PyYAML
