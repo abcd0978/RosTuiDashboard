@@ -27,7 +27,7 @@ export function GlobalKeys() {
     else if (ch === 'S') d.openResource();
     else if (ch === 'R') d.toggleRec();
     else if (ch === 'P') d.setBagPlay({ value: '' });
-    else if (ch >= '1' && ch <= '9') d.runBookmarkKey(ch);
+    else if ((ch >= '1' && ch <= '9') || ch === '0') d.runBookmarkKey(ch);   // 1-9,0 = 북마크 즉시 실행
     else if (key.escape && d.filter) d.setFilter('');
     else if (key.downArrow || ch === 'j') d.move(1);
     else if (key.upArrow || ch === 'k') d.move(-1);

@@ -274,10 +274,12 @@ export function StoreProvider({ children }) {
     if (bm) runBookmark(bm);
   };
   const addBookmark = (name, cmd) => {
-    const key = String((bookmarks.length + 1) % 10);   // 1..9,0 자동 단축키 배정
+    // 비어있는 숫자키(1..9,0)를 재사용해 배정 — 10개까진 즉시 단축키, 그 이상은 키 없이 저장(목록에서 실행).
+    const used = new Set(bookmarks.map((b) => b.key));
+    const key = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'].find((k) => !used.has(k)) || '';
     const next = [...bookmarks, { name: name || cmd, cmd, key }];
     setBookmarks(next); saveBookmarks(next);
-    setStatus(`북마크 추가: [${key}] ${name || cmd}`);
+    setStatus(`북마크 추가: ${key ? `[${key}] ` : ''}${name || cmd}  (총 ${next.length}개)`);
   };
   const deleteBookmark = (i) => {
     const next = bookmarks.filter((_, j) => j !== i);
