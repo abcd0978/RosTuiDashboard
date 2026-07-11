@@ -16,6 +16,7 @@ import { PLOT_PY } from './lib/paths.js';
 import { rosEnv } from './lib/env.js';
 import { loadBookmarks, saveBookmarks } from './lib/bookmarks.js';
 import { loadPreflight } from './lib/preflight.js';
+import { loadSession, saveSession } from './lib/session.js';
 import { connectionsCmd, resourceCmd, tfTreeCmd, tfEchoCmd, bagRecordCmd, bagPlayCmd, bagCompareCmd, msgDefCmd, paramListCmd, paramGetCmd, paramSetCmd } from './lib/commands.js';
 import { useRosVersion } from './hooks/useRosVersion.js';
 import { useTopics } from './hooks/useTopics.js';
@@ -31,9 +32,11 @@ export const useDashboard = () => useContext(DashboardContext);
 export function StoreProvider({ children }) {
   const { exit } = useApp();
   const ver = useRosVersion();
+  const sessRef = useRef(loadSession());                // 이전 세션(펼침/워치/모드/마지막 선택)
+  const sess = sessRef.current;
   const [domain, setDomain] = useState(process.env.ROS_DOMAIN_ID ?? null);   // 컨테이너/도메인 전환
   const [domainEdit, setDomainEdit] = useState(null);   // 도메인 입력창 {value} 또는 null
-  const [hzMode, setHzMode] = useState('all');          // Hz 측정 정책 all|selected|off
+  const [hzMode, setHzMode] = useState(sess.hzMode || 'all');          // Hz 측정 정책 all|selected|off
   const [bookmarks, setBookmarks] = useState(() => loadBookmarks());   // 명령 북마크 리스트
   const [bmOpen, setBmOpen] = useState(null);           // 북마크 오버레이 {idx} 또는 null
   const [bmAdd, setBmAdd] = useState(null);             // 북마크 추가 입력 {step,name,cmd} 또는 null
@@ -50,9 +53,9 @@ export function StoreProvider({ children }) {
   const [pkgNames, setPkgNames] = useState([]);         // 패키지 이름(자동완성용) — ros2 pkg list / rospack
   const [jobs, setJobs] = useState([]);                 // 실행 중/종료 작업(북마크·rosbag·플롯…)
   const [jobsOpen, setJobsOpen] = useState(null);       // Jobs 오버레이 {idx} 또는 null
-  const [treeHidden, setTreeHidden] = useState(false);  // 트리 숨김(값 패널 전체폭) — Tab 토글
+  const [treeHidden, setTreeHidden] = useState(!!sess.treeHidden);  // 트리 숨김(값 패널 전체폭) — Tab 토글
   const [help, setHelp] = useState(false);              // 도움말 오버레이(?)
-  const [watches, setWatches] = useState([]);           // 워치리스트 [{topic, field}]
+  const [watches, setWatches] = useState(() => (Array.isArray(sess.watches) ? sess.watches : []));  // 워치리스트 [{topic, field}]
   const [watchOpen, setWatchOpen] = useState(false);    // 워치 오버레이
   const [preflight] = useState(() => loadPreflight());  // 프리플라이트 체크 정의
   const [preflightOpen, setPreflightOpen] = useState(false);
@@ -68,7 +71,7 @@ export function StoreProvider({ children }) {
   const [sel, setSel] = useState(0);
   const [top, setTop] = useState(0);
   const [hoverIdx, setHoverIdx] = useState(-1);   // 마우스가 얹힌 트리 행(호버 하이라이트). 바뀔 때만 갱신.
-  const [expanded, setExpanded] = useState(() => new Set());
+  const [expanded, setExpanded] = useState(() => new Set(Array.isArray(sess.expanded) ? sess.expanded : []));
   const [active, setActive] = useState(null);   // 오른쪽에 볼 항목(item 객체)
   const [valTop, setValTop] = useState(0);       // 값 패널 세로 스크롤 오프셋
   const [edit, setEdit] = useState(null);        // 파라미터 입력창 {name,value} 또는 null
@@ -114,6 +117,14 @@ export function StoreProvider({ children }) {
     p.on('error', () => {});
     return () => { try { p.kill(); } catch { /* */ } };
   }, [ver]);
+
+  // 마지막 선택 복원 — 토픽이 처음 도착했을 때 한 번(경로 일치 시).
+  const restoredRef = useRef(false);
+  useEffect(() => {
+    if (restoredRef.current || !topics || !sess.activePath) return;
+    const it = topics.find((i) => i.p === sess.activePath);
+    if (it) { restoredRef.current = true; setActive(it); }
+  }, [topics]);
 
   const fullList = topics || [];
   const filt = filter.trim().toLowerCase();
@@ -423,7 +434,11 @@ export function StoreProvider({ children }) {
     setDomain(s === '' ? null : s);
     setStatus(`ROS_DOMAIN_ID = ${s || '(unset)'} — 재연결`);
   };
-  const quit = () => { try { mouse.disable(); } catch { /* */ } killAllJobs(); exit(); };
+  const quit = () => {
+    try { saveSession({ expanded: [...expanded], watches, hzMode, treeHidden, activePath: active && active.p }); } catch { /* */ }
+    try { mouse.disable(); } catch { /* */ }
+    killAllJobs(); exit();
+  };
 
   // 종료(언마운트) 시 모든 작업 정리
   useEffect(() => () => killAllJobs(), []);
