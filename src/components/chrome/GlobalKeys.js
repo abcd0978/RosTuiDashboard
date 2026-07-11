@@ -22,6 +22,7 @@ export function GlobalKeys() {
     else if (ch === 'F') d.setPreflightOpen(true);       // 프리플라이트 헬스체크
     else if (ch === 'B') d.setBagCmp({ step: 'a', a: '', b: '' });   // A/B bag 비교
     else if (ch === 'c') d.openConnections();
+    else if (ch === 'n') d.openGraph();                  // 노드 그래프(토폴로지)
     else if (ch === 't') d.openTf();
     else if (ch === 'T') d.setTfEcho({ step: 'src', src: '', tgt: '' });   // 두 프레임 tf echo
     else if (ch === 'S') d.openResource();

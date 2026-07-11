@@ -104,11 +104,31 @@ while rclpy.ok():
     rates = {n: round(counts.get(n, 0) / dt, 1) for n in types}
 
     now = time.time()
+
+    # 그래프 엣지 + QoS — 각 토픽의 발행/구독 엔드포인트(노드명 + reliability/durability).
+    def eps(topic, getter):
+        out = []
+        try:
+            for e in getter(topic):
+                nn = (e.node_namespace.rstrip("/") + "/" + e.node_name)
+                try:
+                    q = e.qos_profile
+                    r = "R" if q.reliability.name == "RELIABLE" else "B"
+                    d = "T" if q.durability.name == "TRANSIENT_LOCAL" else "V"
+                except Exception:
+                    r = d = None
+                out.append([nn, r, d])
+        except Exception:
+            pass
+        return out
+
     items = []
     for n in sorted(types):
         age = round(now - last_seen[n], 2) if n in last_seen else None   # 마지막 수신 후 경과(초)
         items.append({"p": "topics" + n, "kind": "topic", "name": n,
-                      "ty": types[n], "hz": rates.get(n, 0.0), "age": age})
+                      "ty": types[n], "hz": rates.get(n, 0.0), "age": age,
+                      "pubs": eps(n, node.get_publishers_info_by_topic),
+                      "subs": eps(n, node.get_subscriptions_info_by_topic)})
     for s in services:
         items.append({"p": "services" + s, "kind": "service", "name": s})
     for nd in nodes:

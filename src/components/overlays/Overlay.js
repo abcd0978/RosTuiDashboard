@@ -17,12 +17,14 @@ import { PublishForm } from './PublishForm.js';
 import { Help } from './Help.js';
 import { WatchList } from './WatchList.js';
 import { Preflight } from './Preflight.js';
+import { GraphView } from './GraphView.js';
 import { StatusLine } from './StatusLine.js';
 
 export function Overlay() {
-  const { plotPick, searching, edit, domainEdit, bmOpen, bmAdd, infoView, bagPlay, tfEcho, bagCmp, jobsOpen, help, watchOpen, preflightOpen, pubForm } = useDashboard();
+  const { plotPick, searching, edit, domainEdit, bmOpen, bmAdd, infoView, bagPlay, tfEcho, bagCmp, jobsOpen, help, watchOpen, preflightOpen, pubForm, graphOpen } = useDashboard();
   if (help) return h(Help);
   if (preflightOpen) return h(Preflight);
+  if (graphOpen) return h(GraphView);
   if (watchOpen) return h(WatchList);
   if (pubForm) return h(PublishForm);
   if (jobsOpen) return h(Jobs);

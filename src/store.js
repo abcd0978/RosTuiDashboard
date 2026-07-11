@@ -43,6 +43,7 @@ export function StoreProvider({ children }) {
   const [tfEcho, setTfEcho] = useState(null);           // tf echo 프레임 입력 {step,src,tgt} 또는 null
   const [bagCmp, setBagCmp] = useState(null);           // A/B bag 비교 경로 입력 {step,a,b} 또는 null
   const [pubForm, setPubForm] = useState(null);         // 토픽 발행 폼 {name,type,fields,idx} 또는 null
+  const [graphOpen, setGraphOpen] = useState(null);     // 노드 그래프 오버레이 {focus,top} 또는 null
   const [pkgNames, setPkgNames] = useState([]);         // 패키지 이름(자동완성용) — ros2 pkg list / rospack
   const [jobs, setJobs] = useState([]);                 // 실행 중/종료 작업(북마크·rosbag·플롯…)
   const [jobsOpen, setJobsOpen] = useState(null);       // Jobs 오버레이 {idx} 또는 null
@@ -351,6 +352,9 @@ export function StoreProvider({ children }) {
     openInfo('📊 node resources (CPU%/RSS)', resourceCmd(nodes), 2000);   // 2초마다 갱신
   };
   const openTf = () => openInfo('🌳 TF tree (/tf 수집 중, ~3s)', tfTreeCmd(ver));
+  // 노드 그래프 — 선택이 노드면 그 노드 중심, 아니면 전체 엣지.
+  const graphFocusName = active && active.kind === 'node' ? active.name : null;
+  const openGraph = () => setGraphOpen({ focus: graphFocusName, top: 0 });
   const submitTfEcho = (src, tgt) => {
     if (!src.trim() || !tgt.trim()) { setStatus('두 프레임 필요'); return; }
     openInfo(`🧭 tf ${src} → ${tgt}`, tfEchoCmd(ver, src.trim(), tgt.trim()), 1500);   // 1.5s 주기 갱신
@@ -389,7 +393,7 @@ export function StoreProvider({ children }) {
   // 오버레이/입력창이 열려 있으면 트리는 가려져 있으므로 트리용 마우스(스크롤/호버/클릭)를 무시한다.
   const busyRef = useRef(false);
   busyRef.current = !!(edit || plotPick || searching || domainEdit || bmOpen || bmAdd || infoView
-    || bagPlay || jobsOpen || help || watchOpen || tfEcho || preflightOpen || bagCmp || pubForm);
+    || bagPlay || jobsOpen || help || watchOpen || tfEcho || preflightOpen || bagCmp || pubForm || graphOpen);
 
   useEffect(() => {
     if (!process.stdin.isTTY || process.env.RDASH_MOUSE === '0') return;
@@ -435,8 +439,9 @@ export function StoreProvider({ children }) {
     edit, searching, filter, plotPick, status, actHint, hzHistRef, listRef,
     hzMode, domain, domainEdit, env: rosEnv(ver, domain),
     bookmarks, bmOpen, bmAdd, infoView, rec, bagPlay, tfEcho, bagCmp, jobs, jobsOpen, jobLogsRef,
-    treeHidden, help, watches, watchOpen, preflight, preflightOpen, pubForm, pkgNames,
+    treeHidden, help, watches, watchOpen, preflight, preflightOpen, pubForm, pkgNames, graphOpen, graphFocusName,
     setSel, setTop, setValTop, setExpanded, setActive, setEdit, setSearching, setPubForm, submitPubForm,
+    setGraphOpen, openGraph,
     setFilter, setFrozen, setPlotPick, setRateIdx, setStatus, setDomainEdit,
     setBmOpen, setBmAdd, setInfoView, setBagPlay, setJobsOpen, setHelp, setWatchOpen, setTfEcho, setPreflightOpen, setBagCmp,
     openFieldPicker, addWatch, removeWatch, submitTfEcho, submitBagCompare,
