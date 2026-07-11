@@ -26,7 +26,11 @@ export function TreePanel() {
     const stale = isTopic && !live && it.age != null && it.age > 3;   // 발행하다 멈춤(수신 후 3s+)
     const twist = r.hasKids ? (expanded.has(r.node.path) ? '▼' : '▶') : ' ';
     const mark = !it ? '' : (isTopic ? (live ? '●' : stale ? '⚠' : '·') : { param: 'P', service: 'S', node: 'N' }[kind] || '·');
-    const nameCol = '  '.repeat(r.depth) + twist + ' ' + (it ? mark + ' ' : '') + r.node.name + (it && it.sub ? ' (sub)' : '');
+    // 엣지 기반 표시: 발행자만 있고 구독자 0 = 아무도 안 듣는 dead-end(⇢); 구독자만 있고 발행자 0 = 발행자 없음(⇠).
+    const edge = isTopic && it.pubs
+      ? ((it.pubs.length && !(it.subs || []).length) ? ' ⇢' : (!it.pubs.length && (it.subs || []).length) ? ' ⇠' : '')
+      : '';
+    const nameCol = '  '.repeat(r.depth) + twist + ' ' + (it ? mark + ' ' : '') + r.node.name + (it && it.sub ? ' (sub)' : '') + edge;
     const hz = isTopic ? String(it.hz) : '';
     const spark = isTopic ? sparkline(hzHistRef.current.get(it.p), 5) : '';   // Hz 미니 히스토리
     const line = pad(nameCol, LW - 10) + pad(spark, 5) + ' ' + padL(hz, 4);

@@ -16,7 +16,7 @@ import { PLOT_PY } from './lib/paths.js';
 import { rosEnv } from './lib/env.js';
 import { loadBookmarks, saveBookmarks } from './lib/bookmarks.js';
 import { loadPreflight } from './lib/preflight.js';
-import { connectionsCmd, resourceCmd, tfTreeCmd, tfEchoCmd, bagRecordCmd, bagPlayCmd, bagCompareCmd } from './lib/commands.js';
+import { connectionsCmd, resourceCmd, tfTreeCmd, tfEchoCmd, bagRecordCmd, bagPlayCmd, bagCompareCmd, msgDefCmd } from './lib/commands.js';
 import { useRosVersion } from './hooks/useRosVersion.js';
 import { useTopics } from './hooks/useTopics.js';
 import { useTermSize } from './hooks/useTermSize.js';
@@ -44,6 +44,7 @@ export function StoreProvider({ children }) {
   const [bagCmp, setBagCmp] = useState(null);           // A/B bag 비교 경로 입력 {step,a,b} 또는 null
   const [pubForm, setPubForm] = useState(null);         // 토픽 발행 폼 {name,type,fields,idx} 또는 null
   const [graphOpen, setGraphOpen] = useState(null);     // 노드 그래프 오버레이 {focus,top} 또는 null
+  const [qosOpen, setQosOpen] = useState(null);         // QoS 오버레이 {name} 또는 null
   const [pkgNames, setPkgNames] = useState([]);         // 패키지 이름(자동완성용) — ros2 pkg list / rospack
   const [jobs, setJobs] = useState([]);                 // 실행 중/종료 작업(북마크·rosbag·플롯…)
   const [jobsOpen, setJobsOpen] = useState(null);       // Jobs 오버레이 {idx} 또는 null
@@ -355,6 +356,24 @@ export function StoreProvider({ children }) {
   // 노드 그래프 — 선택이 노드면 그 노드 중심, 아니면 전체 엣지.
   const graphFocusName = active && active.kind === 'node' ? active.name : null;
   const openGraph = () => setGraphOpen({ focus: graphFocusName, top: 0 });
+  // 메시지 정의(타입 구조) — 선택 토픽/서비스의 필드.
+  const openMsgDef = () => {
+    if (!active || !active.ty) { setStatus('타입 있는 토픽을 선택하세요'); return; }
+    openInfo(`📄 ${active.ty}`, msgDefCmd(ver, active.ty));
+  };
+  // QoS 뷰 — 선택 토픽만. 엣지(pubs/subs 의 reliability/durability)에서 계산.
+  const openQos = () => {
+    if (!active || active.kind !== 'topic') { setStatus('토픽을 선택하세요'); return; }
+    setQosOpen({ name: active.name });
+  };
+  // 현재 선택 항목 이름을 터미널 클립보드로(OSC52 — SSH 로도 동작).
+  const copySelection = () => {
+    const r = R.current.flat[dsel];
+    const name = r && (r.node.item ? r.node.item.name : r.node.name);
+    if (!name) { setStatus('복사할 항목 없음'); return; }
+    try { process.stdout.write(`\x1b]52;c;${Buffer.from(name).toString('base64')}\x07`); setStatus(`📋 복사: ${name}`); }
+    catch { setStatus('클립보드 복사 실패'); }
+  };
   const submitTfEcho = (src, tgt) => {
     if (!src.trim() || !tgt.trim()) { setStatus('두 프레임 필요'); return; }
     openInfo(`🧭 tf ${src} → ${tgt}`, tfEchoCmd(ver, src.trim(), tgt.trim()), 1500);   // 1.5s 주기 갱신
@@ -393,7 +412,7 @@ export function StoreProvider({ children }) {
   // 오버레이/입력창이 열려 있으면 트리는 가려져 있으므로 트리용 마우스(스크롤/호버/클릭)를 무시한다.
   const busyRef = useRef(false);
   busyRef.current = !!(edit || plotPick || searching || domainEdit || bmOpen || bmAdd || infoView
-    || bagPlay || jobsOpen || help || watchOpen || tfEcho || preflightOpen || bagCmp || pubForm || graphOpen);
+    || bagPlay || jobsOpen || help || watchOpen || tfEcho || preflightOpen || bagCmp || pubForm || graphOpen || qosOpen);
 
   useEffect(() => {
     if (!process.stdin.isTTY || process.env.RDASH_MOUSE === '0') return;
@@ -439,9 +458,9 @@ export function StoreProvider({ children }) {
     edit, searching, filter, plotPick, status, actHint, hzHistRef, listRef,
     hzMode, domain, domainEdit, env: rosEnv(ver, domain),
     bookmarks, bmOpen, bmAdd, infoView, rec, bagPlay, tfEcho, bagCmp, jobs, jobsOpen, jobLogsRef,
-    treeHidden, help, watches, watchOpen, preflight, preflightOpen, pubForm, pkgNames, graphOpen, graphFocusName,
+    treeHidden, help, watches, watchOpen, preflight, preflightOpen, pubForm, pkgNames, graphOpen, graphFocusName, qosOpen,
     setSel, setTop, setValTop, setExpanded, setActive, setEdit, setSearching, setPubForm, submitPubForm,
-    setGraphOpen, openGraph,
+    setGraphOpen, openGraph, setQosOpen, openQos, openMsgDef, copySelection,
     setFilter, setFrozen, setPlotPick, setRateIdx, setStatus, setDomainEdit,
     setBmOpen, setBmAdd, setInfoView, setBagPlay, setJobsOpen, setHelp, setWatchOpen, setTfEcho, setPreflightOpen, setBagCmp,
     openFieldPicker, addWatch, removeWatch, submitTfEcho, submitBagCompare,

@@ -10,6 +10,11 @@ export const connectionsCmd = (ver, kind, name) => {
   return `echo '연결 정보 없음'`;
 };
 
+// 메시지/서비스 타입 정의 표시 (선택 토픽/서비스의 필드 구조).
+export const msgDefCmd = (ver, ty) => ver === '2'
+  ? `ros2 interface show ${shq(ty)} 2>&1`
+  : `rosmsg show ${shq(ty)} 2>&1`;
+
 // 노드 리소스: 노드명 토큰으로 PID 찾아 /proc·ps 에서 CPU%/RSS. (best-effort: 독립 프로세스 노드만)
 export const resourceCmd = (nodes) => {
   const args = nodes.slice(0, 60).map(shq).join(' ');

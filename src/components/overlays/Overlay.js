@@ -18,13 +18,15 @@ import { Help } from './Help.js';
 import { WatchList } from './WatchList.js';
 import { Preflight } from './Preflight.js';
 import { GraphView } from './GraphView.js';
+import { QoSView } from './QoSView.js';
 import { StatusLine } from './StatusLine.js';
 
 export function Overlay() {
-  const { plotPick, searching, edit, domainEdit, bmOpen, bmAdd, infoView, bagPlay, tfEcho, bagCmp, jobsOpen, help, watchOpen, preflightOpen, pubForm, graphOpen } = useDashboard();
+  const { plotPick, searching, edit, domainEdit, bmOpen, bmAdd, infoView, bagPlay, tfEcho, bagCmp, jobsOpen, help, watchOpen, preflightOpen, pubForm, graphOpen, qosOpen } = useDashboard();
   if (help) return h(Help);
   if (preflightOpen) return h(Preflight);
   if (graphOpen) return h(GraphView);
+  if (qosOpen) return h(QoSView);
   if (watchOpen) return h(WatchList);
   if (pubForm) return h(PublishForm);
   if (jobsOpen) return h(Jobs);

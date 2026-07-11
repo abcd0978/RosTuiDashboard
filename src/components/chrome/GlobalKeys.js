@@ -23,6 +23,9 @@ export function GlobalKeys() {
     else if (ch === 'B') d.setBagCmp({ step: 'a', a: '', b: '' });   // A/B bag 비교
     else if (ch === 'c') d.openConnections();
     else if (ch === 'n') d.openGraph();                  // 노드 그래프(토폴로지)
+    else if (ch === 'm') d.openMsgDef();                 // 메시지 정의(타입 구조)
+    else if (ch === 'Q') d.openQos();                    // QoS 검사(발행/구독)
+    else if (ch === 'y') d.copySelection();              // 선택 이름 클립보드 복사(OSC52)
     else if (ch === 't') d.openTf();
     else if (ch === 'T') d.setTfEcho({ step: 'src', src: '', tgt: '' });   // 두 프레임 tf echo
     else if (ch === 'S') d.openResource();
