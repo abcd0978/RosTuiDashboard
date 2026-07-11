@@ -36,7 +36,11 @@ A terminal dashboard (TUI) for browsing **ROS topics / services / params / nodes
 - **Message age / latency**: the tree marks topics that stopped publishing (red `⚠`); the value header shows the active topic's `header.stamp` latency (ms) or arrival age (s), color-coded — dead sensor / sync issues at a glance.
 - **Preflight / health check** (`F`): evaluate expected conditions (topic present + min Hz, node up, service up) against the live graph → ✓/✗ checklist. "Is the stack ready before arming?" Checks live in `~/.rdash_preflight.json`.
 - **Jobs manager** (`J`): every process RDash spawns (bookmarks, rosbag, plots) is tracked — view its output, kill (SIGINT/SIGKILL), or remove it. All jobs are killed on quit.
-- **Connection view** (`c`): publishers/subscribers of a topic, or a node's in/out topics (rqt_graph-lite). **TF frame tree** (`t`), **tf echo between two frames** (`T`), and **node resource monitor** (`S`, CPU%/RSS).
+- **Connection view** (`c`): publishers/subscribers of a topic, or a node's in/out topics. **Node graph** (`n`): a terminal rqt_graph — the selected node's publish/subscribe topology (who it talks to), or the whole-graph edge list. **TF frame tree** (`t`), **tf echo between two frames** (`T`), and **node resource monitor** (`S`, CPU%/RSS).
+- **Diagnostics & introspection** for real debugging: **log viewer** (`L`, live `/rosout` with level & text filter), **diagnostics** (`v`, `/diagnostics` aggregated by status), **message definition** (`m`, `interface show`), **QoS inspect** (`Q`, per-endpoint reliability/durability + flags the RELIABLE-vs-BEST_EFFORT mismatch that silently drops messages), and a **system overview** (`O`, "ROS htop": node CPU/RSS + topic Hz + stale + preflight). The tree also marks dead-end topics (published but no subscribers `⇢`, or vice-versa `⇠`).
+- **Param tuning panel** (`o` on a ROS2 node): list the node's parameters and set them live (edit or `+`/`-` nudge ±10%) — an rqt_reconfigure in the terminal. **Lifecycle** (`V` on a node): run managed-node transitions (configure/activate/…). **Action client**: ROS2 actions appear under `actions/`; `x` sends a goal and streams feedback into Jobs.
+- **Multi-select & snapshot**: mark topics with `.` (shown `*`); `R` records just those, `X` snapshots their current values to a file for a bug report. Copy the selected name to the clipboard with `y` (OSC52, works over SSH).
+- **Session memory**: expanded folders, watches, mode, and last selection are restored on the next run; the bookmark editor recalls command history with `Ctrl+P`/`Ctrl+N`.
 - **rosbag** — record (`R`) the filtered topics (or `-a`) with a live REC indicator; play (`P`) a bag by path; **A/B compare** (`B`) two bags' info side by side.
 - **Help overlay** (`?`) with categorized shortcuts, a **clickable footer** button bar, and **`Tab`** to hide the tree so the value pane spans full width.
 - **Command bookmarks** (`b`): name frequently-used shell commands (launch scripts, canned publishes like arm/disarm) and run them — by number key `1`-`9`,`0`, from the scrollable list (Enter or **double-click**), any number of them. Add/`e`dit them in a **multi-line command editor** built to be easier than a shell: **paste** support (multi-line), **Ctrl+Space** autocomplete (ROS subcommands + topic/node/service/package names), cursor editing, **Ctrl+S** to save. Persisted per-container to `~/.rdashrc`.
@@ -85,8 +89,13 @@ node index.js
 | `J` | jobs manager (view output / kill spawned processes) |
 | `w` | watch list (pin fields from several topics) |
 | `F` | preflight / health check (✓/✗ vs `~/.rdash_preflight.json`) |
-| `c` / `t` / `T` / `S` | connections (pub/sub) / TF tree / tf echo (two frames) / node resource monitor |
-| `R` / `P` / `B` | rosbag record toggle / play (path) / A·B compare |
+| `c` / `n` | connections (pub/sub) / **node graph (topology)** |
+| `t` / `T` / `S` / `O` | TF tree / tf echo (two frames) / node resource monitor / **system overview (ROS htop)** |
+| `L` / `v` | **log viewer (/rosout)** / **diagnostics (/diagnostics)** |
+| `m` / `Q` / `y` | **message definition** / **QoS inspect** / copy name (clipboard) |
+| `o` / `V` | **param tuning panel** (ROS2 node) / **lifecycle** transition (ROS2 node) |
+| `.` / `X` | mark topic (multi-select) / **snapshot** marked topics to a file |
+| `R` / `P` / `B` | rosbag record toggle (marked topics if any) / play (path) / A·B compare |
 | `h` | cycle Hz measurement: all / selected / off |
 | `D` | switch `ROS_DOMAIN_ID` (view another container's graph) |
 | `Tab` | hide/show the tree (value pane full width) |
@@ -113,7 +122,9 @@ node index.js
 - `requirements.txt` — Python plot deps (auto-installed on first run).
 - `~/.rdashrc` — saved command bookmarks (JSON).
 - `~/.rdash_preflight.json` — preflight check definitions, e.g. `{"checks":[{"type":"topic","name":"/livox/imu","minHz":150},{"type":"node","name":"/fast_lio_mapping"}]}`.
-- `rdash_rec_<ts>` — rosbag output directories created by `R`.
+- `~/.rdash_session.json` — restored UI state (expanded folders, watches, mode, last selection).
+- `~/.rdash_history` — command history for the bookmark editor.
+- `rdash_rec_<ts>` / `rdash_snapshot_<ts>.txt` — rosbag recordings (`R`) / value snapshots (`X`).
 
 ## Testing
 Provide some ROS data, then run RDash in another shell.

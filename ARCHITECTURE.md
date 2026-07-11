@@ -33,7 +33,9 @@ src/
     ros.js             #   command builders, rosSpawn(env), killTree/killTreeHard, control actions, numericFields, protoCmd (msg skeleton)
     msgform.js         #   flatten a message skeleton into labeled fields + rebuild a YAML message (publish form)
     complete.js        #   ROS command autocomplete engine (subcommands + topic/node/service/pkg names)
-    commands.js        #   builders for connections / resource / tf tree+echo / rosbag rec·play·compare
+    graph.js           #   node topology from telemetry edges (node-centric / whole-graph)
+    session.js         #   ~/.rdash_session.json (UI state) + ~/.rdash_history (command history)
+    commands.js        #   builders: connections / resource / tf / rosbag / msg-def / param list·get·set
     paths.js           #   repo-root paths; loads telemetry(.py), plot.py, tf_tree.py
     env.js             #   host / ROS version / ROS_DOMAIN_ID / RMW context
     bookmarks.js       #   load/save ~/.rdashrc
@@ -47,6 +49,8 @@ src/
     useValue.js        #   selected item's live value (echo stream / info poll), freeze-aware
     useBandwidth.js    #   `rostopic/ros2 topic bw` for the selected topic
     useWatches.js      #   watch-list: one echo per watched topic → latest field values
+    useRosout.js       #   /rosout log stream → ring buffer (log viewer)
+    useDiagnostics.js  #   /diagnostics DiagnosticArray → per-component status map
     useTermSize.js     #   terminal cols/rows (resize)
   components/          # grouped by role; each renders + owns its own keyboard input
     common/            #   reusable building blocks
@@ -79,8 +83,22 @@ src/
       Preflight.js     #     health-check overlay: expected conditions ✓/✗ (F)
       InfoView.js      #     scrollable command output (connections / resource / tf / bag compare)
       Jobs.js          #     jobs manager (list + output + kill/remove) — uses common List
+      GraphView.js     #     node topology (n) · QoSView.js QoS+mismatch (Q)
+      LogViewer.js     #     live /rosout with level/text filter (L) · DiagnosticsView.js /diagnostics (v)
+      ParamPanel.js    #     ROS2 param list + live set/nudge (o) · LifecycleView.js transitions (V)
+      SystemOverview.js #    "ROS htop": nodes+topics+preflight in one screen (O)
       Help.js          #     categorized shortcut reference (?)
 ```
+
+Beyond the tree/value browse+control core, RDash covers a real debugging loop:
+a terminal **node graph** (rqt_graph), a live **/rosout log viewer** and
+**/diagnostics** aggregator, **message-definition** and **QoS** inspection
+(flagging the RELIABLE↔BEST_EFFORT mismatch), a **param tuning** panel
+(rqt_reconfigure), **lifecycle** and **action** clients, a **system overview**,
+plus quality-of-life (marked-topic recording/snapshot, clipboard, session +
+command-history persistence). Telemetry now also emits per-topic pub/sub edges
+(with QoS on ROS2), which power the graph, the QoS view, and the tree's
+dead-end (`⇢`/`⇠`) marks.
 
 ## Data flow
 
