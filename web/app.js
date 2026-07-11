@@ -135,7 +135,11 @@ function selectTopic(name) {
 function renderValActs() {
   const box = $('#valacts'); box.innerHTML = ''; const it = selItem; if (!it) return;
   const add = (label, fn) => box.append(el('button', { class: 'act', onclick: fn }, label));
-  if (it.kind === 'topic') { add('publish', () => Views.publish(it)); add('states', () => Views.states(it)); add('msg def', () => Views.msgdef(it)); add('QoS', () => Views.qos(it)); add('connections', () => Views.connections(it)); add(marked.has(it.name) ? 'unmark' : 'mark', () => { marked.has(it.name) ? marked.delete(it.name) : marked.add(it.name); renderSidebar(); renderValActs(); }); }
+  if (it.kind === 'topic') { add('publish', () => Views.publish(it)); add('states', () => Views.states(it));
+    if ((it.ty || '').includes('NavSatFix')) add('🗺 map', () => Views.map(it));
+    if ((it.ty || '').includes('CompressedImage') || (it.ty || '').includes('sensor_msgs/msg/Image')) add('🖼 image', () => Views.image(it));
+    if ((it.ty || '').includes('PointCloud2')) add('🧊 3D', () => Views.cloud(it));
+    add('msg def', () => Views.msgdef(it)); add('QoS', () => Views.qos(it)); add('connections', () => Views.connections(it)); add(marked.has(it.name) ? 'unmark' : 'mark', () => { marked.has(it.name) ? marked.delete(it.name) : marked.add(it.name); renderSidebar(); renderValActs(); }); }
   if (it.kind === 'service') add('call', () => Views.service(it));
   if (it.kind === 'param') add('set', () => Views.setparam(it));
   if (it.kind === 'node') { add('params', () => Views.params(it)); add('kill', () => post('/api/killnode', { name: it.name }).then((r) => toast(r.out))); add('restart', () => post('/api/restart', { name: it.name }).then((r) => toast(r.out))); add('lifecycle', () => Views.lifecycle(it)); add('connections', () => Views.connections(it)); }
@@ -273,6 +277,86 @@ const Views = {
     base = (await api('/api/baseline')).baseline; draw();
     const iv = setInterval(() => { if (!$('#modal').classList.contains('on')) { clearInterval(iv); return; } draw(); }, 2000);
   },
+  cloud(it) {
+    // 🧊 3D 포인트클라우드 — float32 xyz SSE 를 canvas 2D 투영으로 렌더(WebGL 불필요). 드래그=회전, 휠=줌.
+    const topic = it ? it.name : (items.find((i) => (i.ty || '').includes('PointCloud2')) || {}).name;
+    if (!topic) { openModal('🧊 3D 포인트클라우드', el('p', { class: 'hint' }, 'PointCloud2 토픽이 없습니다.')); return; }
+    const cv = el('canvas', { width: 900, height: 500, style: 'width:100%;height:500px;background:#0d1116;border:1px solid var(--line);border-radius:6px;cursor:grab' });
+    const info = el('div', { class: 'hint', style: 'margin-top:6px' }, '연결 중…');
+    openModal('🧊 3D — ' + topic, el('div', {}, el('div', { class: 'hint', style: 'margin-bottom:6px' }, '드래그=회전 · 휠=줌 · 높이(z)로 색상 (canvas 2D 투영, WebGL 불필요)'), cv, info));
+    let pts = new Float32Array(0), yaw = 0.6, pitch = -0.5, zoom = 1, drag = null;
+    cv.onmousedown = (e) => { drag = { x: e.clientX, y: e.clientY }; cv.style.cursor = 'grabbing'; };
+    window.addEventListener('mouseup', () => { drag = null; cv.style.cursor = 'grab'; });
+    cv.onmousemove = (e) => { if (!drag) return; yaw += (e.clientX - drag.x) * 0.01; pitch += (e.clientY - drag.y) * 0.01; drag = { x: e.clientX, y: e.clientY }; draw(); };
+    cv.onwheel = (e) => { e.preventDefault(); zoom *= e.deltaY < 0 ? 1.1 : 0.9; draw(); };
+    const es = new EventSource('/cloudstream?topic=' + encodeURIComponent(topic)); modalSub = es;
+    es.onmessage = (e) => { if (!e.data) return; const bin = atob(e.data); const u8 = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i); pts = new Float32Array(u8.buffer); info.textContent = `${pts.length / 3 | 0} 점 · 드래그로 회전`; draw(); };
+    es.onerror = () => { info.textContent = '스트림 오류 — PointCloud2 토픽 확인'; };
+    function draw() {
+      const ctx = cv.getContext('2d'); const W = cv.width = cv.clientWidth, H = cv.height; ctx.clearRect(0, 0, W, H);
+      const N = pts.length / 3 | 0; if (!N) return;
+      // 중심/스케일 산출
+      let cx = 0, cy = 0, cz = 0, mnz = Infinity, mxz = -Infinity, mr = 0;
+      for (let i = 0; i < N; i++) { cx += pts[i * 3]; cy += pts[i * 3 + 1]; cz += pts[i * 3 + 2]; }
+      cx /= N; cy /= N; cz /= N;
+      for (let i = 0; i < N; i++) { const z = pts[i * 3 + 2]; if (z < mnz) mnz = z; if (z > mxz) mxz = z; const dx = pts[i * 3] - cx, dy = pts[i * 3 + 1] - cy, dz = z - cz; mr = Math.max(mr, Math.hypot(dx, dy, dz)); }
+      const scale = (Math.min(W, H) * 0.42 / (mr || 1)) * zoom;
+      const cyaw = Math.cos(yaw), syaw = Math.sin(yaw), cpit = Math.cos(pitch), spit = Math.sin(pitch);
+      for (let i = 0; i < N; i++) {
+        let X = pts[i * 3] - cx, Y = pts[i * 3 + 1] - cy, Z = pts[i * 3 + 2] - cz;
+        let x1 = X * cyaw - Y * syaw, y1 = X * syaw + Y * cyaw;   // yaw around z
+        let y2 = y1 * cpit - Z * spit, z2 = y1 * spit + Z * cpit; // pitch around x
+        const sx = W / 2 + x1 * scale, sy = H / 2 - z2 * scale;
+        const h = (pts[i * 3 + 2] - mnz) / ((mxz - mnz) || 1);
+        const r = Math.round(60 + h * 120), g = Math.round(180 + h * 40), b = Math.round(230 - h * 120);
+        ctx.fillStyle = `rgba(${r},${g},${b},0.85)`; ctx.fillRect(sx, sy, 1.6, 1.6);
+      }
+      // 축 표시
+      ctx.strokeStyle = '#3a4658'; ctx.beginPath(); ctx.moveTo(W / 2, H / 2); ctx.lineTo(W / 2 + 30 * cyaw * zoom, H / 2 - 30 * spit * 0 + 0); ctx.stroke();
+    }
+  },
+  image(it) {
+    // 🖼 카메라 — CompressedImage/Image 프레임을 base64 JPEG SSE 로 받아 표시.
+    const topic = it ? it.name : (items.find((i) => /CompressedImage|sensor_msgs\/msg\/Image/.test(i.ty || '')) || {}).name;
+    if (!topic) { openModal('🖼 카메라', el('p', { class: 'hint' }, '이미지 토픽이 없습니다.')); return; }
+    const img = el('img', { style: 'max-width:100%;display:block;background:#0d1116;border:1px solid var(--line);border-radius:6px;image-rendering:auto' });
+    const info = el('div', { class: 'hint', style: 'margin-top:6px' }, '연결 중…'); let n = 0, t0 = Date.now();
+    openModal('🖼 카메라 — ' + topic, el('div', {}, img, info));
+    const es = new EventSource('/imgstream?topic=' + encodeURIComponent(topic)); modalSub = es;
+    es.onmessage = (e) => { if (!e.data) return; img.src = 'data:image/jpeg;base64,' + e.data; n++; const fps = n / ((Date.now() - t0) / 1000); info.textContent = `${n} 프레임 · ${fps.toFixed(1)} fps`; };
+    es.onerror = () => { info.textContent = '스트림 오류 — image_transport/토픽 확인'; };
+  },
+  map(it) {
+    // 🗺 GPS 지도 — NavSatFix lat/lon 궤적을 캔버스에 플롯(외부 타일 없이, 오프라인/CSP 안전).
+    const topic = it ? it.name : (items.find((i) => (i.ty || '').includes('NavSatFix')) || {}).name;
+    if (!topic) { openModal('🗺 GPS 지도', el('p', { class: 'hint' }, 'NavSatFix 토픽이 없습니다.')); return; }
+    const cv = el('canvas', { width: 900, height: 460, style: 'width:100%;height:460px;background:#0d1116;border:1px solid var(--line);border-radius:6px' });
+    const info = el('div', { class: 'hint', style: 'margin-top:6px' });
+    openModal('🗺 GPS 지도 — ' + topic, el('div', {}, el('div', { class: 'hint', style: 'margin-bottom:6px' }, 'NavSatFix 위경도 궤적 (외부 타일 없이 로컬 렌더)'), cv, info));
+    const track = []; let cur = null;
+    const es = new EventSource('/echo?topic=' + encodeURIComponent(topic)); modalSub = es;
+    es.onmessage = (e) => { const text = JSON.parse(e.data); const g = {};
+      for (const m of text.matchAll(/^(latitude|longitude|altitude):\s*(-?\d+\.?\d*)/gm)) g[m[1]] = parseFloat(m[2]);
+      if (g.latitude == null || g.longitude == null) return;
+      cur = g; track.push([g.longitude, g.latitude]); if (track.length > 2000) track.shift();
+      info.textContent = `lat ${g.latitude.toFixed(6)} · lon ${g.longitude.toFixed(6)} · alt ${(g.altitude ?? 0).toFixed(1)} m · ${track.length} pts`;
+      draw(); };
+    function draw() {
+      const ctx = cv.getContext('2d'); const W = cv.width = cv.clientWidth, H = cv.height; ctx.clearRect(0, 0, W, H);
+      if (track.length < 2) return;
+      let mnx = Infinity, mxx = -Infinity, mny = Infinity, mxy = -Infinity;
+      for (const [x, y] of track) { mnx = Math.min(mnx, x); mxx = Math.max(mxx, x); mny = Math.min(mny, y); mxy = Math.max(mxy, y); }
+      const pad = 40, latMid = (mny + mxy) / 2; const sx = (mxx - mnx) || 1e-6, sy = (mxy - mny) || 1e-6;
+      // 위도 보정(경도 축소) — 간이 등거리. 종횡비 유지.
+      const scale = Math.min((W - 2 * pad) / (sx * Math.cos(latMid * Math.PI / 180)), (H - 2 * pad) / sy);
+      const px = (x) => pad + (x - mnx) * Math.cos(latMid * Math.PI / 180) * scale;
+      const py = (y) => H - pad - (y - mny) * scale;
+      ctx.strokeStyle = '#232b36'; ctx.lineWidth = 1; for (let i = 0; i <= 4; i++) { const gy = pad + (H - 2 * pad) * i / 4; ctx.beginPath(); ctx.moveTo(pad, gy); ctx.lineTo(W - pad, gy); ctx.stroke(); const gx = pad + (W - 2 * pad) * i / 4; ctx.beginPath(); ctx.moveTo(gx, pad); ctx.lineTo(gx, H - pad); ctx.stroke(); }
+      ctx.strokeStyle = '#57c7d4'; ctx.lineWidth = 2; ctx.beginPath(); track.forEach(([x, y], i) => { const X = px(x), Y = py(y); i ? ctx.lineTo(X, Y) : ctx.moveTo(X, Y); }); ctx.stroke();
+      if (cur) { ctx.fillStyle = '#e2c85a'; ctx.beginPath(); ctx.arc(px(cur.longitude), py(cur.latitude), 5, 0, 7); ctx.fill(); }
+      ctx.fillStyle = '#8b97a7'; ctx.font = '10px monospace'; ctx.fillText(`${mny.toFixed(5)}..${mxy.toFixed(5)}°N`, pad, 14); ctx.fillText(`${mnx.toFixed(5)}..${mxx.toFixed(5)}°E`, pad, H - 8);
+    }
+  },
   procmon() {
     const wrap = el('div', {}); openModal('📊 노드 프로세스 (CPU/RSS/스레드 · 라이브)', wrap, () => {});
     const nodes = () => items.filter((i) => i.kind === 'node').map((i) => i.name);
@@ -376,7 +460,7 @@ const Views = {
 };
 
 // ── 툴바 + 키보드 ─────────────────────────────────────────────────────────────
-const TOOLS = [['H', '🩺 Doctor', () => Views.doctor()], ['K', '📌 Baseline', () => Views.baseline()], ['A', '🔴 Trigger', () => Views.trigger()], ['g', '🎮 Teleop', () => Views.teleop()], ['b', '북마크', () => Views.bookmarks()], ['J', 'Jobs', () => Views.jobs()], ['L', '로그', () => Views.log()], ['v', '진단', () => Views.diag()], ['O', '개요', () => Views.overview()], ['P', '📊 프로세스', () => Views.procmon()], ['t', 'TF', () => Views.tftree()]];
+const TOOLS = [['H', '🩺 Doctor', () => Views.doctor()], ['K', '📌 Baseline', () => Views.baseline()], ['A', '🔴 Trigger', () => Views.trigger()], ['g', '🎮 Teleop', () => Views.teleop()], ['b', '북마크', () => Views.bookmarks()], ['J', 'Jobs', () => Views.jobs()], ['L', '로그', () => Views.log()], ['v', '진단', () => Views.diag()], ['O', '개요', () => Views.overview()], ['P', '📊 프로세스', () => Views.procmon()], ['M', '🗺 Map', () => Views.map()], ['I', '🖼 Cam', () => Views.image()], ['C', '🧊 3D', () => Views.cloud()], ['t', 'TF', () => Views.tftree()]];
 const tb = $('#toolbar'); TOOLS.forEach(([k, label, fn]) => tb.append(el('button', { title: k, onclick: fn }, label)));
 window.addEventListener('keydown', (e) => {
   if (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) return;

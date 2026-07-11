@@ -8,7 +8,7 @@ import { dirname, join, extname } from 'path';
 import { spawnSync } from 'child_process';
 import { rosSpawn, echoFullCmd, actionFor, restartFor, protoCmd } from '../src/lib/ros.js';
 import { flattenSkeleton, buildYaml } from '../src/lib/msgform.js';
-import { TELEM, TELEM2 } from '../src/lib/paths.js';
+import { TELEM, TELEM2, IMG_BRIDGE, CLOUD_BRIDGE } from '../src/lib/paths.js';
 import {
   connectionsCmd, resourceCmd, tfTreeCmd, tfEchoCmd, bagRecordCmd, bagPlayCmd, bagCompareCmd,
   msgDefCmd, paramListCmd, paramGetCmd, paramSetCmd,
@@ -122,6 +122,8 @@ const server = http.createServer(async (req, res) => {
     // 스트림
     if (p === '/events') return streamLines(res, 'python3 -', telemScript());
     if (p === '/echo') return q.get('topic') ? streamBlocks(res, echoFullCmd(VER, q.get('topic'))) : json(res, 400, { error: 'topic' });
+    if (p === '/imgstream') { const t = q.get('topic'); if (!t) return json(res, 400, { error: 'topic' }); return streamLines(res, `python3 ${shq(process.env.RDASH_IMG_BRIDGE || IMG_BRIDGE)} ${shq(t)} 2>/dev/null`); }
+    if (p === '/cloudstream') { const t = q.get('topic'); if (!t) return json(res, 400, { error: 'topic' }); return streamLines(res, `python3 ${shq(process.env.RDASH_CLOUD_BRIDGE || CLOUD_BRIDGE)} ${shq(t)} 2>/dev/null`); }
     if (p === '/rosout') return streamBlocks(res, VER === '2' ? 'stdbuf -oL ros2 topic echo /rosout 2>/dev/null' : 'stdbuf -oL rostopic echo /rosout 2>/dev/null');
     if (p === '/diagnostics') return streamBlocks(res, VER === '2' ? 'stdbuf -oL ros2 topic echo /diagnostics 2>/dev/null' : 'stdbuf -oL rostopic echo /diagnostics 2>/dev/null');
 

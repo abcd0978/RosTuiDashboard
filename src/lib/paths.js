@@ -6,5 +6,7 @@ import { dirname, join } from 'path';
 export const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 export const PLOT_PY = join(ROOT, 'plot.py');   // matplotlib 라이브 플로터(원값/미분/적분/FFT)
 export const TF_TREE_PY = join(ROOT, 'tf_tree.py');   // /tf → 프레임 트리 파서
+export const IMG_BRIDGE = join(ROOT, 'img_bridge.py');     // CompressedImage/Image → base64 JPEG 스트림
+export const CLOUD_BRIDGE = join(ROOT, 'cloud_bridge.py'); // PointCloud2 → base64 float32 xyz 스트림
 export const TELEM = readFileSync(join(ROOT, 'telemetry.py'), 'utf8');
 export const TELEM2 = readFileSync(join(ROOT, 'telemetry_ros2.py'), 'utf8');
