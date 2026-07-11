@@ -7,6 +7,7 @@ import { typable } from '../../lib/util.js';
 const LABELS = {
   service: ['call', 'req', 'Enter=호출 Esc=취소  (YAML 요청, 예: {data: true})'],
   topic: ['pub', 'msg', 'Enter=발행(1회) Esc=취소  (YAML 메시지)'],
+  action: ['goal', 'goal', 'Enter=goal 전송 Esc=취소  (YAML, 피드백은 J)'],
   param: ['set', '=', 'Enter=적용 Esc=취소'],
 };
 

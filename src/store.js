@@ -131,8 +131,22 @@ export function StoreProvider({ children }) {
   }, [topics]);
 
   const fullList = topics || [];
+  // ROS2 액션 파생 — 숨은 /_action/ 토픽·서비스에서 액션 이름/타입 추출(트리에 actions/ 로 노출).
+  const actionMap = new Map();
+  for (const it of fullList) {
+    const m = /^(.*)\/_action\//.exec(it.name);
+    if (!m) continue;
+    const an = m[1];
+    if (!actionMap.has(an)) actionMap.set(an, { p: 'actions' + an, kind: 'action', name: an });
+    if (it.kind === 'topic' && it.name.endsWith('/_action/feedback') && it.ty) {
+      actionMap.get(an).ty = it.ty.replace(/_FeedbackMessage$/, '').replace('/msg/', '/action/');
+    }
+  }
+  const actionItems = [...actionMap.values()];
+  const visibleList = fullList.filter((it) => !it.name.includes('/_action/'));   // 숨은 _action/ 항목은 트리에서 감춤
+  const treeItems = actionItems.length ? [...visibleList, ...actionItems] : visibleList;
   const filt = filter.trim().toLowerCase();
-  const list = filt ? fullList.filter((it) => fuzzy(filt, it.name.toLowerCase())) : fullList;
+  const list = filt ? treeItems.filter((it) => fuzzy(filt, it.name.toLowerCase())) : treeItems;
   const flat = flattenTree(buildTree(list), expanded, 0, [], !!filt);
   const n = flat.length;
   useEffect(() => { setSel(0); setTop(0); }, [filt]);   // 필터 바뀌면 선택 맨 위로
@@ -211,6 +225,7 @@ export function StoreProvider({ children }) {
   const doAction = () => {
     if (!active) { setStatus('선택된 항목 없음 (Enter 로 선택)'); return; }
     if (active.kind === 'topic') { openPublishForm(); return; }   // 발행은 폼으로
+    if (active.kind === 'action') { setEdit({ name: active.name, value: '{}', kind: 'action' }); return; }   // 액션 goal 입력
     const act = actionFor(ver, active.kind, active.name);
     if (!act) { setStatus(`(${active.kind}) 액션 없음`); return; }
     if (act.needsInput) { setEdit({ name: active.name, value: act.defaultVal || '', kind: active.kind }); return; }
@@ -237,10 +252,19 @@ export function StoreProvider({ children }) {
     const act = actionFor(ver, 'topic', name, msg);
     if (act && act.cmd) { setStatus(`pub ${name} …`); run(act.cmd, (o) => setStatus(`${name}: ${o}`)); }
   };
+  // 액션 goal 전송 — 피드백/결과는 Job 로그로 스트리밍.
+  const submitActionGoal = (name, goal) => {
+    const it = actionItems.find((a) => a.name === name);
+    const ty = it && it.ty;
+    if (!ty) { setStatus(`${name}: 액션 타입 미상`); return; }
+    spawnJob(`action ${name}`, `ros2 action send_goal ${shq(name)} ${shq(ty)} ${shq(goal)} --feedback 2>&1`);
+    setStatus(`▶ action goal → ${name} (J 에서 피드백)`);
+  };
   const submitEdit = (kind, name, value) => (
     kind === 'service' ? submitServiceCall(name, value)
       : kind === 'topic' ? submitPublish(name, value)
-        : submitSet(name, value));
+        : kind === 'action' ? submitActionGoal(name, value)
+          : submitSet(name, value));
   // 필드 선택 오버레이 — target 'plot'(matplotlib) 또는 'watch'(워치리스트 핀)
   const openFieldPicker = (target) => {
     if (!active || active.kind !== 'topic') { setStatus('토픽을 선택하세요'); return; }

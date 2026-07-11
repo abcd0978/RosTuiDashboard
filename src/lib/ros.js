@@ -87,6 +87,7 @@ export const bwCmd = (ver, name) => ver === '2'
 // ── 제어 액션 (RViz 와의 차별점) — 선택 항목에 x 로 실행 ──────────────────────
 //   node: 죽이기 / service: 호출 / param: 값 설정(needsInput). 반환 {label, cmd} 또는 null.
 export function actionFor(ver, kind, name, arg) {
+  if (kind === 'action') return { label: 'send goal', needsInput: true, defaultVal: '{}', cmd: null };   // 실제 전송은 store.submitActionGoal
   if (kind === 'param') {
     if (ver === '2') return { label: 'set param (ROS2: per-node, N/A)', cmd: null };
     return { label: 'set param', needsInput: true, cmd: arg != null ? `rosparam set '${name}' '${arg}'` : null };
