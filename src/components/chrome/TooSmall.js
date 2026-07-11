@@ -1,8 +1,8 @@
 // 터미널이 최소 크기보다 작을 때 안내 — 창을 키우면(리사이즈) 자동으로 대시보드로 복귀.
-import { h } from '../react.js';
+import { h } from '../../react.js';
 import { Box, Text, useInput } from 'ink';
-import { useDashboard } from '../store.js';
-import { MIN_COLS, MIN_ROWS } from '../lib/util.js';
+import { useDashboard } from '../../store.js';
+import { MIN_COLS, MIN_ROWS } from '../../lib/util.js';
 
 export function TooSmall() {
   const { cols, rows, quit } = useDashboard();

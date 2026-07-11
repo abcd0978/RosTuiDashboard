@@ -1,8 +1,8 @@
 // '/' 퍼지 검색 입력줄 — searching 모드에서만 마운트되어 키 입력을 자기 책임에서 처리.
-import { h } from '../react.js';
+import { h } from '../../react.js';
 import { Box, Text, useInput } from 'ink';
-import { useDashboard } from '../store.js';
-import { typable } from '../lib/util.js';
+import { useDashboard } from '../../store.js';
+import { typable } from '../../lib/util.js';
 
 export function SearchBar() {
   const d = useDashboard();

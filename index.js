@@ -5,7 +5,7 @@ import { render } from 'ink';
 import { MouseProvider } from '@zenobius/ink-mouse';
 import { h } from './src/react.js';
 import { StoreProvider } from './src/store.js';
-import { Layout } from './src/components/Layout.js';
+import { Layout } from './src/components/chrome/Layout.js';
 import { enterAltScreen, bindExit } from './src/lib/screen.js';
 import { createDiffStdout } from './src/lib/diffstdout.js';
 import { ensurePyDeps } from './src/lib/pydeps.js';

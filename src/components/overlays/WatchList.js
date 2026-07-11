@@ -1,12 +1,12 @@
 // 👁 워치리스트 — 여러 토픽/필드를 핀 고정해 한 패널에서 동시에 라이브 값 표시.
 //   ↑↓/클릭 이동 | a 추가(현재 토픽 필드) | d 삭제 | Esc 닫기.
-import { h, useState } from '../react.js';
+import { h, useState } from '../../react.js';
 import { useInput } from 'ink';
-import { useDashboard } from '../store.js';
-import { useWatches } from '../hooks/useWatches.js';
-import { clamp, pad } from '../lib/util.js';
-import { OverlayFrame } from './common/OverlayFrame.js';
-import { List } from './common/List.js';
+import { useDashboard } from '../../store.js';
+import { useWatches } from '../../hooks/useWatches.js';
+import { clamp, pad } from '../../lib/util.js';
+import { OverlayFrame } from '../common/OverlayFrame.js';
+import { List } from '../common/List.js';
 
 export function WatchList() {
   const d = useDashboard();

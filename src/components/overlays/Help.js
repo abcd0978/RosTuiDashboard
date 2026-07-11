@@ -1,7 +1,7 @@
 // 도움말 오버레이(?) — 긴 풋터 대신 단축키를 분류해 한눈에. Esc/?/q 로 닫기, 마우스로도.
-import { h } from '../react.js';
+import { h } from '../../react.js';
 import { Box, Text, useInput } from 'ink';
-import { useDashboard } from '../store.js';
+import { useDashboard } from '../../store.js';
 
 const GROUPS = [
   ['탐색 · 보기', [['↑↓ / j k', '이동'], ['Enter / → / 클릭', '펼침 · 선택'], ['g / G', '맨위 · 맨아래'],

@@ -1,8 +1,8 @@
 // rosbag 재생 경로 입력 — bagPlay 모드에서만 마운트.
-import { h } from '../react.js';
+import { h } from '../../react.js';
 import { Box, Text, useInput } from 'ink';
-import { useDashboard } from '../store.js';
-import { typable } from '../lib/util.js';
+import { useDashboard } from '../../store.js';
+import { typable } from '../../lib/util.js';
 
 export function BagPlay() {
   const d = useDashboard();

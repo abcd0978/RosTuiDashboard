@@ -1,11 +1,11 @@
 // 📈 플롯/워치 필드 선택 오버레이 — plotPick 모드에서만 마운트. 다중 선택 + 모드 선택.
 //   ↑↓/클릭 이동 | space·더블클릭 선택/해제 | Enter time 플롯 | x XY/3D 플롯 | Esc 취소
-import { h, useState } from '../react.js';
+import { h, useState } from '../../react.js';
 import { useInput } from 'ink';
-import { useDashboard } from '../store.js';
-import { clamp } from '../lib/util.js';
-import { OverlayFrame } from './common/OverlayFrame.js';
-import { List } from './common/List.js';
+import { useDashboard } from '../../store.js';
+import { clamp } from '../../lib/util.js';
+import { OverlayFrame } from '../common/OverlayFrame.js';
+import { List } from '../common/List.js';
 
 export function FieldPicker() {
   const d = useDashboard();

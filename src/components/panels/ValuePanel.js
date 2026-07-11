@@ -1,9 +1,9 @@
 // 오른쪽 "데이터 컴포넌트" — 선택 항목의 실시간 값(토픽 echo / 정보). 세로 스크롤·프리즈·대역폭 표시.
-import { h } from '../react.js';
+import { h } from '../../react.js';
 import { Box, Text } from 'ink';
-import { useDashboard } from '../store.js';
-import { pad, clamp } from '../lib/util.js';
-import { fieldValue } from '../lib/ros.js';
+import { useDashboard } from '../../store.js';
+import { pad, clamp } from '../../lib/util.js';
+import { fieldValue } from '../../lib/ros.js';
 
 // header.stamp 가 있으면 지연(ms), 없으면 telemetry 수신 age(s) 를 색과 함께 반환.
 function ageTag(active, echo, activeAge) {

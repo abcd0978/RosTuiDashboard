@@ -1,13 +1,13 @@
 // ★ 북마크 매니저 — bmOpen 모드에서만 마운트. 저장된 명령을 보고 실행/추가/수정/삭제.
 //   ↑↓/클릭 이동 | Enter·더블클릭 실행 | a 추가 | e 수정 | d 삭제 | Esc 닫기.  (숫자 1-9,0 은 어디서든 즉시 실행)
-import { h } from '../react.js';
+import { h } from '../../react.js';
 import { Text, useInput } from 'ink';
 import { realpathSync } from 'fs';
-import { useDashboard } from '../store.js';
-import { RC_PATH } from '../lib/bookmarks.js';
-import { clamp } from '../lib/util.js';
-import { OverlayFrame } from './common/OverlayFrame.js';
-import { List } from './common/List.js';
+import { useDashboard } from '../../store.js';
+import { RC_PATH } from '../../lib/bookmarks.js';
+import { clamp } from '../../lib/util.js';
+import { OverlayFrame } from '../common/OverlayFrame.js';
+import { List } from '../common/List.js';
 
 // 북마크 파일 경로(심볼릭 링크면 실체까지). 어디를 고쳐야 하는지 헷갈리므로 둘 다 보여준다.
 const rcLabel = (() => {

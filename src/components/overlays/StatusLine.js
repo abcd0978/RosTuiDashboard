@@ -1,7 +1,7 @@
 // 기본 상태줄(오버레이 없을 때) — 마지막 액션 결과 / 활성 필터 / x 액션 힌트.
-import { h } from '../react.js';
+import { h } from '../../react.js';
 import { Text } from 'ink';
-import { useDashboard } from '../store.js';
+import { useDashboard } from '../../store.js';
 
 export function StatusLine() {
   const { filter, list, status, actHint } = useDashboard();

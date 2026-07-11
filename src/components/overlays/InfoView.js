@@ -1,8 +1,8 @@
 // 정보 오버레이 — 연결(pub/sub)·노드 리소스·TF 트리 결과를 스크롤 표시. ↑↓ 스크롤, Esc 닫기.
-import { h } from '../react.js';
+import { h } from '../../react.js';
 import { Box, Text, useInput } from 'ink';
-import { useDashboard } from '../store.js';
-import { clamp, pad } from '../lib/util.js';
+import { useDashboard } from '../../store.js';
+import { clamp, pad } from '../../lib/util.js';
 
 const H = 14;   // 오버레이에 보이는 최대 줄 수
 

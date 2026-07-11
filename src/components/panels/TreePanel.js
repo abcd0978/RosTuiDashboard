@@ -1,8 +1,8 @@
 // 왼쪽 "파일 컴포넌트" — ROS 그래프 네임스페이스 트리. 네비게이션·전역 키를 자기 책임에서 처리.
-import { h } from '../react.js';
+import { h } from '../../react.js';
 import { Box, Text } from 'ink';
-import { useDashboard } from '../store.js';
-import { pad, padL, sparkline, LEFT_W } from '../lib/util.js';
+import { useDashboard } from '../../store.js';
+import { pad, padL, sparkline, LEFT_W } from '../../lib/util.js';
 
 export function TreePanel() {
   const d = useDashboard();

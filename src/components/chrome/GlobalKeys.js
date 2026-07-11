@@ -1,8 +1,8 @@
 // 전역 키 핸들러(헤드리스) — 오버레이가 없을 때 네비게이션·기능 키를 처리한다.
 // 트리를 숨겨도(패널 언마운트) 키가 살아있도록 별도 컴포넌트로 분리, Layout 에 항상 마운트.
-import { useDashboard } from '../store.js';
+import { useDashboard } from '../../store.js';
 import { useInput } from 'ink';
-import { clamp, RATES } from '../lib/util.js';
+import { clamp, RATES } from '../../lib/util.js';
 
 export function GlobalKeys() {
   const d = useDashboard();

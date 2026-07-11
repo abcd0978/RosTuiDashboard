@@ -1,10 +1,10 @@
 // 🩺 프리플라이트 / 헬스 체크 — 기대 조건(토픽·Hz·노드·서비스)을 현재 그래프 대비 ✓/✗ 로.
 // arm/비행 전 "스택 준비됐나?" 한눈에. 체크는 ~/.rdash_preflight.json 에서 로드.
-import { h } from '../react.js';
+import { h } from '../../react.js';
 import { Box, Text, useInput } from 'ink';
-import { useDashboard } from '../store.js';
-import { evalCheck, PREFLIGHT_PATH } from '../lib/preflight.js';
-import { pad } from '../lib/util.js';
+import { useDashboard } from '../../store.js';
+import { evalCheck, PREFLIGHT_PATH } from '../../lib/preflight.js';
+import { pad } from '../../lib/util.js';
 
 export function Preflight() {
   const d = useDashboard();

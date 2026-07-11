@@ -3,11 +3,11 @@
 //   · Ctrl+Space = 자동완성 드롭다운(↑↓ 선택 · Enter 넣기 · Esc 닫기) — ROS 서브커맨드·토픽/노드/서비스/패키지
 //   · Enter = 명령칸 줄바꿈 / 이름칸 다음 · Ctrl+S = 저장 · Tab/Shift+Tab = 칸 전환 · ←→↑↓ 커서 · Esc = 취소
 //   · bmAdd.editIdx 가 있으면 수정 모드: 그 자리를 덮어쓴다(단축키 유지).
-import { h } from '../react.js';
+import { h } from '../../react.js';
 import { Box, Text, useInput } from 'ink';
-import { useDashboard } from '../store.js';
-import { editable, clamp } from '../lib/util.js';
-import { completions } from '../lib/complete.js';
+import { useDashboard } from '../../store.js';
+import { editable, clamp } from '../../lib/util.js';
+import { completions } from '../../lib/complete.js';
 
 // 커서 인덱스 → {row,col}, 그리고 줄 배열.
 function rowCol(text, idx) {

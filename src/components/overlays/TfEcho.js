@@ -1,8 +1,8 @@
 // 🧭 tf echo 프레임 입력 — 2단계(source → target). 확정 시 두 프레임 간 변환을 InfoView 로 표시.
-import { h } from '../react.js';
+import { h } from '../../react.js';
 import { Box, Text, useInput } from 'ink';
-import { useDashboard } from '../store.js';
-import { typable } from '../lib/util.js';
+import { useDashboard } from '../../store.js';
+import { typable } from '../../lib/util.js';
 
 export function TfEcho() {
   const d = useDashboard();

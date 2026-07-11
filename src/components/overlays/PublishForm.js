@@ -1,10 +1,10 @@
 // 토픽 발행 폼 — 메시지 타입에서 뽑은 필드들을 한 줄씩 보여주고 값만 채워 넣게 한다.
 //   ↑↓ 필드 이동 · 입력=현재 필드 편집 · Enter=발행(1회) · Esc=취소.
 // (구조를 통째로 외워 YAML 을 손으로 치던 방식 대체)
-import { h } from '../react.js';
+import { h } from '../../react.js';
 import { Box, Text, useInput } from 'ink';
-import { useDashboard } from '../store.js';
-import { typable, clamp, pad } from '../lib/util.js';
+import { useDashboard } from '../../store.js';
+import { typable, clamp, pad } from '../../lib/util.js';
 
 export function PublishForm() {
   const d = useDashboard();

@@ -1,7 +1,7 @@
 // 컨테이너/환경 컨텍스트 줄 — 어느 host·도메인·rmw 의 그래프를 보는지 + Hz 측정 모드.
-import { h } from '../react.js';
+import { h } from '../../react.js';
 import { Box, Text } from 'ink';
-import { useDashboard } from '../store.js';
+import { useDashboard } from '../../store.js';
 
 export function EnvBar() {
   const { env, hzMode, rec } = useDashboard();

@@ -1,11 +1,11 @@
 // ⚙ Jobs 매니저 — RDash 가 띄운 프로세스(북마크·rosbag·플롯) 목록 + 선택 작업 출력.
 //   ↑↓/클릭 이동 | k 종료(SIGINT) | K 강제(SIGKILL) | d 제거(종료된 것) | Esc 닫기.
-import { h } from '../react.js';
+import { h } from '../../react.js';
 import { Text, useInput } from 'ink';
-import { useDashboard } from '../store.js';
-import { clamp, pad } from '../lib/util.js';
-import { OverlayFrame } from './common/OverlayFrame.js';
-import { List } from './common/List.js';
+import { useDashboard } from '../../store.js';
+import { clamp, pad } from '../../lib/util.js';
+import { OverlayFrame } from '../common/OverlayFrame.js';
+import { List } from '../common/List.js';
 
 const badge = (s) => (s === 'run' ? '●run' : s === 'error' ? '×err' : '○done');
 const jobColor = (s) => (s === 'run' ? 'green' : s === 'error' ? 'red' : 'gray');

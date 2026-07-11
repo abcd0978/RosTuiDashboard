@@ -1,8 +1,8 @@
 // 하단 — 긴 키 나열 대신 마우스로 누를 수 있는 핵심 버튼들 + "? 로 전체 단축키" 안내.
-import { h } from '../react.js';
+import { h } from '../../react.js';
 import { Box, Text } from 'ink';
-import { useDashboard } from '../store.js';
-import { Button } from './common/Button.js';
+import { useDashboard } from '../../store.js';
+import { Button } from '../common/Button.js';
 
 export function Footer() {
   const d = useDashboard();

@@ -1,8 +1,8 @@
 // 파라미터 값 입력줄(ROS1 set param) — edit 모드에서만 마운트. 키 입력 자기 책임.
-import { h } from '../react.js';
+import { h } from '../../react.js';
 import { Box, Text, useInput } from 'ink';
-import { useDashboard } from '../store.js';
-import { typable } from '../lib/util.js';
+import { useDashboard } from '../../store.js';
+import { typable } from '../../lib/util.js';
 
 const LABELS = {
   service: ['call', 'req', 'Enter=호출 Esc=취소  (YAML 요청, 예: {data: true})'],

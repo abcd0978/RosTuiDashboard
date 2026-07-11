@@ -1,8 +1,8 @@
 // 🔀 A/B bag 비교 경로 입력 — 2단계(bag A → bag B). 확정 시 두 bag 의 info 를 나란히 표시.
-import { h } from '../react.js';
+import { h } from '../../react.js';
 import { Box, Text, useInput } from 'ink';
-import { useDashboard } from '../store.js';
-import { typable } from '../lib/util.js';
+import { useDashboard } from '../../store.js';
+import { typable } from '../../lib/util.js';
 
 export function BagCompare() {
   const d = useDashboard();

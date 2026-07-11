@@ -1,8 +1,8 @@
 // ROS_DOMAIN_ID 전환 입력 — domainEdit 모드에서만 마운트. 다른 컨테이너/도메인 그래프 보기.
-import { h } from '../react.js';
+import { h } from '../../react.js';
 import { Box, Text, useInput } from 'ink';
-import { useDashboard } from '../store.js';
-import { typable } from '../lib/util.js';
+import { useDashboard } from '../../store.js';
+import { typable } from '../../lib/util.js';
 
 export function DomainEdit() {
   const d = useDashboard();
