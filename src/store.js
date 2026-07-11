@@ -386,10 +386,16 @@ export function StoreProvider({ children }) {
 
   // 마우스: 스크롤(트리/값) + 클릭(트리 행 선택/펼침) + 호버(트리 행 하이라이트). RDASH_MOUSE=0 이면 비활성.
   // 깜빡임은 라인 diff 출력기가 "바뀐 줄만" 다시 그려 해결 → 호버는 상태가 바뀔 때만 리렌더(모션마다 X).
+  // 오버레이/입력창이 열려 있으면 트리는 가려져 있으므로 트리용 마우스(스크롤/호버/클릭)를 무시한다.
+  const busyRef = useRef(false);
+  busyRef.current = !!(edit || plotPick || searching || domainEdit || bmOpen || bmAdd || infoView
+    || bagPlay || jobsOpen || help || watchOpen || tfEcho || preflightOpen || bagCmp || pubForm);
+
   useEffect(() => {
     if (!process.stdin.isTTY || process.env.RDASH_MOUSE === '0') return;
     mouse.enable();
     const onScroll = (p, dir) => {
+      if (busyRef.current) return;
       if (dir !== 'scrolldown' && dir !== 'scrollup') return;
       const d = dir === 'scrolldown' ? 3 : -3;
       if (p && p.x > LEFT_W) setValTop((v) => clamp(v + d, 0, valMaxRef.current));
@@ -403,12 +409,13 @@ export function StoreProvider({ children }) {
       const idx = R.current.dtop + slot;
       return idx < R.current.n ? idx : -1;
     };
-    const onMove = (p) => { const idx = treeRowAt(p); setHoverIdx((cur) => (cur === idx ? cur : idx)); };
+    const onMove = (p) => { const idx = busyRef.current ? -1 : treeRowAt(p); setHoverIdx((cur) => (cur === idx ? cur : idx)); };
     let down = false;   // press→release 한 사이클. 중복 press 무시(열자마자 닫힘 방지)
     const onClick = (pos, action) => {
       if (action === 'release') { down = false; return; }
       if (action !== 'press' || down) return;
       down = true;
+      if (busyRef.current) return;
       const idx = treeRowAt(pos);
       if (idx >= 0) { setSel(idx); activateRef.current(idx); }
     };

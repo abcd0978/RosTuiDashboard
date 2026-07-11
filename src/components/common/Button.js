@@ -2,7 +2,7 @@
 //  · 호버: useOnMouseHover 로 이 버튼에 마우스가 얹혔을 때만 setState → 그 버튼만 리렌더(모션마다 X).
 //  · 클릭: press 시점에 버튼의 실시간 yoga 경계를 읽어 좌표 히트테스트(레이아웃 바뀌어도 안 어긋남).
 //  깜빡임은 라인 diff 출력기가 바뀐 줄만 다시 그려 없앤다.
-import { h, useRef, useEffect, useState } from '../react.js';
+import { h, useRef, useEffect, useState } from '../../react.js';
 import { Box, Text } from 'ink';
 import { useMouse, useOnMouseHover } from '@zenobius/ink-mouse';
 

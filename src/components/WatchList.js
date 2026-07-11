@@ -1,10 +1,12 @@
-// 👁 워치리스트 — 여러 토픽/필드를 핀 고정해 한 패널에서 동시에 라이브 값 표시(창 없이, 헤드리스 OK).
-//   ↑↓ 이동 | a 추가(현재 토픽 필드) | d 삭제 | Esc 닫기.
+// 👁 워치리스트 — 여러 토픽/필드를 핀 고정해 한 패널에서 동시에 라이브 값 표시.
+//   ↑↓/클릭 이동 | a 추가(현재 토픽 필드) | d 삭제 | Esc 닫기.
 import { h, useState } from '../react.js';
-import { Box, Text, useInput } from 'ink';
+import { useInput } from 'ink';
 import { useDashboard } from '../store.js';
 import { useWatches } from '../hooks/useWatches.js';
 import { clamp, pad } from '../lib/util.js';
+import { OverlayFrame } from './common/OverlayFrame.js';
+import { List } from './common/List.js';
 
 export function WatchList() {
   const d = useDashboard();
@@ -22,14 +24,14 @@ export function WatchList() {
   }, { isActive: !!process.stdin.isTTY });
 
   const w = Math.max(30, (d.cols || 100) - 4);
-  return h(Box, { flexDirection: 'column', borderStyle: 'round', borderColor: 'magenta', paddingX: 1, width: w + 2 },
-    h(Text, { color: 'magenta', bold: true }, ` 👁 Watch (${list.length}) — a 추가(현재 토픽) · d 삭제 · Esc 닫기 `),
-    ...(list.length
-      ? list.slice(0, 12).map((wt, i) => {
-          const v = vals[`${wt.topic}|${wt.field}`];
-          const on = i === cur;
-          return h(Text, { key: i, backgroundColor: on ? 'magenta' : undefined, color: on ? 'black' : undefined },
-            ` ${on ? '▶' : ' '} ${pad(`${wt.topic} · ${wt.field}`, w - 22)} = ${v == null ? '…' : v}`);
-        })
-      : [h(Text, { key: 'e', dimColor: true }, ' (없음) 토픽 선택 후 a 로 필드 핀. 또는 값 패널에서 p 대신 이 목록으로. ')]));
+  return h(OverlayFrame, { color: 'magenta', title: `👁 Watch (${list.length})`, hint: 'a 추가(현재 토픽) · d 삭제 · Esc' },
+    h(List, {
+      items: list, idx: cur, visible: Math.max(3, (d.rows || 20) - 8), accent: 'magenta',
+      onSelect: setIdx,
+      renderRow: (wt) => {
+        const v = vals[`${wt.topic}|${wt.field}`];
+        return `${pad(`${wt.topic} · ${wt.field}`, w - 24)} = ${v == null ? '…' : v}`;
+      },
+      emptyText: ' (없음) 토픽 선택 후 a 로 필드 핀. 또는 값 패널에서 이 목록으로. ',
+    }));
 }

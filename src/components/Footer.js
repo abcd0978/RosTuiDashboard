@@ -2,7 +2,7 @@
 import { h } from '../react.js';
 import { Box, Text } from 'ink';
 import { useDashboard } from '../store.js';
-import { Button } from './Button.js';
+import { Button } from './common/Button.js';
 
 export function Footer() {
   const d = useDashboard();

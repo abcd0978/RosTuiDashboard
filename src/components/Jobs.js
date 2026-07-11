@@ -1,11 +1,14 @@
 // ⚙ Jobs 매니저 — RDash 가 띄운 프로세스(북마크·rosbag·플롯) 목록 + 선택 작업 출력.
-//   ↑↓ 이동 | k 종료(SIGINT) | K 강제(SIGKILL) | d 제거(종료된 것) | Esc 닫기.
+//   ↑↓/클릭 이동 | k 종료(SIGINT) | K 강제(SIGKILL) | d 제거(종료된 것) | Esc 닫기.
 import { h } from '../react.js';
-import { Box, Text, useInput } from 'ink';
+import { Text, useInput } from 'ink';
 import { useDashboard } from '../store.js';
 import { clamp, pad } from '../lib/util.js';
+import { OverlayFrame } from './common/OverlayFrame.js';
+import { List } from './common/List.js';
 
 const badge = (s) => (s === 'run' ? '●run' : s === 'error' ? '×err' : '○done');
+const jobColor = (s) => (s === 'run' ? 'green' : s === 'error' ? 'red' : 'gray');
 
 export function Jobs() {
   const d = useDashboard();
@@ -25,16 +28,13 @@ export function Jobs() {
   const sel = list[idx];
   const tail = (sel ? (d.jobLogsRef.current.get(sel.id) || []) : []).slice(-6);
   const w = Math.max(30, (d.cols || 100) - 4);
-  return h(Box, { flexDirection: 'column', borderStyle: 'round', borderColor: 'blue', paddingX: 1, width: w + 2 },
-    h(Text, { color: 'blue', bold: true }, ` ⚙ Jobs (${list.length}) — k 종료 · K 강제 · d 제거(종료된 것만) · Esc 닫기 `),
-    ...(list.length
-      ? list.slice(0, 8).map((jb, i) => {
-          const on = i === idx;
-          const col = jb.status === 'run' ? 'green' : jb.status === 'error' ? 'red' : 'gray';
-          return h(Text, { key: i, backgroundColor: on ? 'blue' : undefined, color: on ? 'black' : col },
-            ` ${on ? '▶' : ' '} ${pad(badge(jb.status), 5)} [${jb.pid || '?'}] ${jb.label} `);
-        })
-      : [h(Text, { key: 'e', dimColor: true }, ' (실행한 작업 없음 — b 북마크나 R 녹화로 생성) ')]),
+  return h(OverlayFrame, { color: 'blue', title: `⚙ Jobs (${list.length})`, hint: 'k 종료 · K 강제 · d 제거(종료된 것만) · Esc' },
+    h(List, {
+      items: list, idx, visible: Math.max(3, (d.rows || 20) - 13), accent: 'blue',
+      onSelect: (i) => d.setJobsOpen((p) => p && ({ ...p, idx: i })),
+      renderRow: (jb) => ({ text: `${pad(badge(jb.status), 5)} [${jb.pid || '?'}] ${jb.label}`, color: jobColor(jb.status) }),
+      emptyText: ' (실행한 작업 없음 — b 북마크나 R 녹화로 생성) ',
+    }),
     sel ? h(Text, { dimColor: true }, ' ── output ──────────') : null,
     ...tail.map((l, i) => h(Text, { key: 'o' + i, dimColor: true }, pad(' ' + l, w))));
 }
