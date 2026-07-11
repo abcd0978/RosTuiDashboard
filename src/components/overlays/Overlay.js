@@ -25,11 +25,13 @@ import { SystemOverview } from './SystemOverview.js';
 import { DiagnosticsView } from './DiagnosticsView.js';
 import { LifecycleView } from './LifecycleView.js';
 import { TeleopView } from './TeleopView.js';
+import { DoctorView } from './DoctorView.js';
 import { StatusLine } from './StatusLine.js';
 
 export function Overlay() {
-  const { plotPick, searching, edit, domainEdit, bmOpen, bmAdd, infoView, bagPlay, tfEcho, bagCmp, jobsOpen, help, watchOpen, preflightOpen, pubForm, graphOpen, qosOpen, logOpen, paramPanel, overviewOpen, diagOpen, lifeOpen, teleopOpen } = useDashboard();
+  const { plotPick, searching, edit, domainEdit, bmOpen, bmAdd, infoView, bagPlay, tfEcho, bagCmp, jobsOpen, help, watchOpen, preflightOpen, pubForm, graphOpen, qosOpen, logOpen, paramPanel, overviewOpen, diagOpen, lifeOpen, teleopOpen, doctorOpen } = useDashboard();
   if (help) return h(Help);
+  if (doctorOpen) return h(DoctorView);
   if (teleopOpen) return h(TeleopView);
   if (preflightOpen) return h(Preflight);
   if (graphOpen) return h(GraphView);

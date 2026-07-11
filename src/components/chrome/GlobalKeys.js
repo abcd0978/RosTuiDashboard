@@ -32,6 +32,7 @@ export function GlobalKeys() {
     else if (ch === 'v') d.openDiag();                   // 진단(/diagnostics)
     else if (ch === 'V') d.openLifecycle();              // 라이프사이클(ROS2 managed 노드)
     else if (ch === 'W') d.openTeleop();                 // Teleop(Twist 조종, WASD)
+    else if (ch === 'H') d.openDoctor();                 // 🩺 Doctor(헬스 스캔)
     else if (ch === '.') d.toggleMark();                 // 토픽 표시(멀티선택 녹화/스냅샷)
     else if (ch === 'X') d.snapshot();                   // 스냅샷(표시 토픽 값 덤프)
     else if (ch === 't') d.openTf();
