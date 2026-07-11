@@ -23,10 +23,11 @@ import { LogViewer } from './LogViewer.js';
 import { ParamPanel } from './ParamPanel.js';
 import { SystemOverview } from './SystemOverview.js';
 import { DiagnosticsView } from './DiagnosticsView.js';
+import { LifecycleView } from './LifecycleView.js';
 import { StatusLine } from './StatusLine.js';
 
 export function Overlay() {
-  const { plotPick, searching, edit, domainEdit, bmOpen, bmAdd, infoView, bagPlay, tfEcho, bagCmp, jobsOpen, help, watchOpen, preflightOpen, pubForm, graphOpen, qosOpen, logOpen, paramPanel, overviewOpen, diagOpen } = useDashboard();
+  const { plotPick, searching, edit, domainEdit, bmOpen, bmAdd, infoView, bagPlay, tfEcho, bagCmp, jobsOpen, help, watchOpen, preflightOpen, pubForm, graphOpen, qosOpen, logOpen, paramPanel, overviewOpen, diagOpen, lifeOpen } = useDashboard();
   if (help) return h(Help);
   if (preflightOpen) return h(Preflight);
   if (graphOpen) return h(GraphView);
@@ -35,6 +36,7 @@ export function Overlay() {
   if (paramPanel) return h(ParamPanel);
   if (overviewOpen) return h(SystemOverview);
   if (diagOpen) return h(DiagnosticsView);
+  if (lifeOpen) return h(LifecycleView);
   if (watchOpen) return h(WatchList);
   if (pubForm) return h(PublishForm);
   if (jobsOpen) return h(Jobs);

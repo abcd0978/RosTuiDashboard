@@ -52,6 +52,8 @@ export function StoreProvider({ children }) {
   const [paramPanel, setParamPanel] = useState(null);   // 파라미터 튜닝 {node,rows,idx,edit} 또는 null
   const [overviewOpen, setOverviewOpen] = useState(null);   // 시스템 개요 오버레이 또는 null
   const [diagOpen, setDiagOpen] = useState(null);       // 진단 뷰어 또는 null
+  const [lifeOpen, setLifeOpen] = useState(null);       // 라이프사이클 전환 {node,idx} 또는 null
+  const [marked, setMarked] = useState(() => new Set());   // 표시된 토픽(멀티선택 녹화/스냅샷)
   const [pkgNames, setPkgNames] = useState([]);         // 패키지 이름(자동완성용) — ros2 pkg list / rospack
   const [jobs, setJobs] = useState([]);                 // 실행 중/종료 작업(북마크·rosbag·플롯…)
   const [jobsOpen, setJobsOpen] = useState(null);       // Jobs 오버레이 {idx} 또는 null
@@ -423,11 +425,38 @@ export function StoreProvider({ children }) {
   // ── rosbag 녹화/재생 ───────────────────────────────────────────────────────
   const toggleRec = () => {
     if (rec) { killJob(rec.id, 'SIGINT'); setRec(null); setStatus('■ 녹화 정지'); return; }
-    const recTopics = filt ? list.filter((i) => i.kind === 'topic').map((i) => i.name) : null;
+    // 우선순위: 표시(marked) 토픽 > 필터 결과 > 전체(-a).
+    const recTopics = marked.size ? [...marked] : (filt ? list.filter((i) => i.kind === 'topic').map((i) => i.name) : null);
     const out = `rdash_rec_${Date.now()}`;
     const id = spawnJob(`rosbag rec → ${out}`, bagRecordCmd(ver, recTopics, out));
     setRec({ id, out, started: Date.now(), n: recTopics ? recTopics.length : 0 });
-    setStatus(`● 녹화: ${recTopics ? recTopics.length + ' 토픽(필터)' : '전체 -a'} → ${out}`);
+    setStatus(`● 녹화: ${recTopics ? recTopics.length + ' 토픽' + (marked.size ? '(표시)' : '(필터)') : '전체 -a'} → ${out}`);
+  };
+  // 토픽 표시 토글(멀티선택) — 선택 행이 토픽일 때.
+  const toggleMark = () => {
+    const r = R.current.flat[dsel]; const it = r && r.node.item;
+    if (!it || it.kind !== 'topic') { setStatus('토픽 행에서 . 로 표시(녹화/스냅샷 대상)'); return; }
+    setMarked((s) => { const nn = new Set(s); nn.has(it.name) ? nn.delete(it.name) : nn.add(it.name); return nn; });
+  };
+  const clearMarks = () => setMarked(new Set());
+  // 스냅샷 — 표시(또는 선택) 토픽의 현재 값 1개씩을 파일로 덤프(버그리포트용).
+  const snapshot = () => {
+    const sel = marked.size ? [...marked] : (active && active.kind === 'topic' ? [active.name] : []);
+    if (!sel.length) { setStatus('스냅샷: 토픽을 . 로 표시하거나 선택하세요'); return; }
+    const out = `rdash_snapshot_${Date.now()}.txt`;
+    const echo1 = (t) => (ver === '2' ? `timeout 2 ros2 topic echo --once ${shq(t)}` : `timeout 2 rostopic echo -n1 ${shq(t)}`);
+    const cmd = sel.map((t) => `echo '=== ${t} ==='; ${echo1(t)}`).join('; ') + ` > ${shq(out)} 2>&1`;
+    spawnJob(`snapshot → ${out}`, cmd);
+    setStatus(`📸 snapshot: ${sel.length} 토픽 → ${out} (J 에서 확인)`);
+  };
+  // 라이프사이클(ROS2 managed node) — 전환 선택.
+  const openLifecycle = () => {
+    if (ver !== '2') { setStatus('라이프사이클은 ROS2 전용'); return; }
+    if (!active || active.kind !== 'node') { setStatus('노드를 선택하세요'); return; }
+    setLifeOpen({ node: active.name, idx: 0 });
+  };
+  const runLifecycle = (node, transition) => {
+    run(`ros2 lifecycle set ${shq(node)} ${transition} 2>&1`, (o) => setStatus(`lifecycle ${transition}: ${o}`));
   };
   const submitBagPlay = (path) => {
     const s = String(path).trim();
@@ -454,7 +483,7 @@ export function StoreProvider({ children }) {
   // 오버레이/입력창이 열려 있으면 트리는 가려져 있으므로 트리용 마우스(스크롤/호버/클릭)를 무시한다.
   const busyRef = useRef(false);
   busyRef.current = !!(edit || plotPick || searching || domainEdit || bmOpen || bmAdd || infoView
-    || bagPlay || jobsOpen || help || watchOpen || tfEcho || preflightOpen || bagCmp || pubForm || graphOpen || qosOpen || logOpen || paramPanel || overviewOpen || diagOpen);
+    || bagPlay || jobsOpen || help || watchOpen || tfEcho || preflightOpen || bagCmp || pubForm || graphOpen || qosOpen || logOpen || paramPanel || overviewOpen || diagOpen || lifeOpen);
 
   useEffect(() => {
     if (!process.stdin.isTTY || process.env.RDASH_MOUSE === '0') return;
@@ -500,10 +529,11 @@ export function StoreProvider({ children }) {
     edit, searching, filter, plotPick, status, actHint, hzHistRef, listRef,
     hzMode, domain, domainEdit, env: rosEnv(ver, domain),
     bookmarks, bmOpen, bmAdd, infoView, rec, bagPlay, tfEcho, bagCmp, jobs, jobsOpen, jobLogsRef,
-    treeHidden, help, watches, watchOpen, preflight, preflightOpen, pubForm, pkgNames, graphOpen, graphFocusName, qosOpen, logOpen, paramPanel, overviewOpen, diagOpen,
+    treeHidden, help, watches, watchOpen, preflight, preflightOpen, pubForm, pkgNames, graphOpen, graphFocusName, qosOpen, logOpen, paramPanel, overviewOpen, diagOpen, lifeOpen, marked,
     setSel, setTop, setValTop, setExpanded, setActive, setEdit, setSearching, setPubForm, submitPubForm,
     setGraphOpen, openGraph, setQosOpen, openQos, setLogOpen, openLog, openMsgDef, copySelection,
     setParamPanel, openParamPanel, setParam, setOverviewOpen, openOverview, setDiagOpen, openDiag,
+    setLifeOpen, openLifecycle, runLifecycle, toggleMark, clearMarks, snapshot,
     setFilter, setFrozen, setPlotPick, setRateIdx, setStatus, setDomainEdit,
     setBmOpen, setBmAdd, setInfoView, setBagPlay, setJobsOpen, setHelp, setWatchOpen, setTfEcho, setPreflightOpen, setBagCmp,
     openFieldPicker, addWatch, removeWatch, submitTfEcho, submitBagCompare,

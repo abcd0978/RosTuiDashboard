@@ -30,6 +30,9 @@ export function GlobalKeys() {
     else if (ch === 'o') d.openParamPanel();             // 파라미터 튜닝(ROS2 노드)
     else if (ch === 'O') d.openOverview();               // 시스템 개요(ROS htop)
     else if (ch === 'v') d.openDiag();                   // 진단(/diagnostics)
+    else if (ch === 'V') d.openLifecycle();              // 라이프사이클(ROS2 managed 노드)
+    else if (ch === '.') d.toggleMark();                 // 토픽 표시(멀티선택 녹화/스냅샷)
+    else if (ch === 'X') d.snapshot();                   // 스냅샷(표시 토픽 값 덤프)
     else if (ch === 't') d.openTf();
     else if (ch === 'T') d.setTfEcho({ step: 'src', src: '', tgt: '' });   // 두 프레임 tf echo
     else if (ch === 'S') d.openResource();

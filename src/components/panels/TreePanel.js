@@ -6,7 +6,7 @@ import { pad, padL, sparkline, LEFT_W } from '../../lib/util.js';
 
 export function TreePanel() {
   const d = useDashboard();
-  const { flat, top: dtop, sel: dsel, VISIBLE, LW, expanded, hzHistRef, hoverIdx } = d;
+  const { flat, top: dtop, sel: dsel, VISIBLE, LW, expanded, hzHistRef, hoverIdx, marked } = d;
 
   // ROS 데이터 도착 전/그래프 비었을 때 트리 자리 힌트(연결 상태별)
   const emptyHint = !d.ver ? 'ROS 버전 감지 중…'
@@ -30,7 +30,8 @@ export function TreePanel() {
     const edge = isTopic && it.pubs
       ? ((it.pubs.length && !(it.subs || []).length) ? ' ⇢' : (!it.pubs.length && (it.subs || []).length) ? ' ⇠' : '')
       : '';
-    const nameCol = '  '.repeat(r.depth) + twist + ' ' + (it ? mark + ' ' : '') + r.node.name + (it && it.sub ? ' (sub)' : '') + edge;
+    const star = isTopic && marked && marked.has(it.name) ? '*' : '';   // 멀티선택 표시(녹화/스냅샷)
+    const nameCol = '  '.repeat(r.depth) + twist + ' ' + (it ? mark + ' ' : '') + star + r.node.name + (it && it.sub ? ' (sub)' : '') + edge;
     const hz = isTopic ? String(it.hz) : '';
     const spark = isTopic ? sparkline(hzHistRef.current.get(it.p), 5) : '';   // Hz 미니 히스토리
     const line = pad(nameCol, LW - 10) + pad(spark, 5) + ' ' + padL(hz, 4);
