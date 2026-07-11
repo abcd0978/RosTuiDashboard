@@ -16,7 +16,7 @@ import { PLOT_PY } from './lib/paths.js';
 import { rosEnv } from './lib/env.js';
 import { loadBookmarks, saveBookmarks } from './lib/bookmarks.js';
 import { loadPreflight } from './lib/preflight.js';
-import { connectionsCmd, resourceCmd, tfTreeCmd, tfEchoCmd, bagRecordCmd, bagPlayCmd, bagCompareCmd, msgDefCmd } from './lib/commands.js';
+import { connectionsCmd, resourceCmd, tfTreeCmd, tfEchoCmd, bagRecordCmd, bagPlayCmd, bagCompareCmd, msgDefCmd, paramListCmd, paramGetCmd, paramSetCmd } from './lib/commands.js';
 import { useRosVersion } from './hooks/useRosVersion.js';
 import { useTopics } from './hooks/useTopics.js';
 import { useTermSize } from './hooks/useTermSize.js';
@@ -46,6 +46,7 @@ export function StoreProvider({ children }) {
   const [graphOpen, setGraphOpen] = useState(null);     // 노드 그래프 오버레이 {focus,top} 또는 null
   const [qosOpen, setQosOpen] = useState(null);         // QoS 오버레이 {name} 또는 null
   const [logOpen, setLogOpen] = useState(null);         // 로그 뷰어 {min,top,text,typing} 또는 null
+  const [paramPanel, setParamPanel] = useState(null);   // 파라미터 튜닝 {node,rows,idx,edit} 또는 null
   const [pkgNames, setPkgNames] = useState([]);         // 패키지 이름(자동완성용) — ros2 pkg list / rospack
   const [jobs, setJobs] = useState([]);                 // 실행 중/종료 작업(북마크·rosbag·플롯…)
   const [jobsOpen, setJobsOpen] = useState(null);       // Jobs 오버레이 {idx} 또는 null
@@ -364,6 +365,24 @@ export function StoreProvider({ children }) {
   };
   // QoS 뷰 — 선택 토픽만. 엣지(pubs/subs 의 reliability/durability)에서 계산.
   const openLog = () => setLogOpen({ min: 20, top: null, text: '', typing: false });
+  // 파라미터 튜닝 패널 — ROS2 노드별. 라이브로 값 조회/설정.
+  const openParamPanel = () => {
+    if (ver !== '2') { setStatus('파라미터 패널은 ROS2 노드 전용 (ROS1은 트리 params/ 에서 x)'); return; }
+    if (!active || active.kind !== 'node') { setStatus('노드를 선택하세요'); return; }
+    const node = active.name;
+    setParamPanel({ node, rows: null, idx: 0, edit: null });
+    setStatus(`⚙ ${node} 파라미터 조회 중…`);
+    runText(paramListCmd(node), (out) => {
+      const rows = out.split('\n').filter(Boolean).map((l) => { const i = l.indexOf('\t'); return { name: i < 0 ? l : l.slice(0, i), value: (i < 0 ? '' : l.slice(i + 1)).trim() }; });
+      setParamPanel((p) => (p && p.node === node ? { ...p, rows } : p));
+    });
+  };
+  const refreshParam = (node, name) => runText(paramGetCmd(node, name), (nv) =>
+    setParamPanel((p) => (p && p.node === node ? { ...p, rows: (p.rows || []).map((r) => (r.name === name ? { ...r, value: nv.trim() } : r)) } : p)));
+  const setParam = (node, name, val) => {
+    setStatus(`set ${name} = ${val} …`);
+    run(paramSetCmd(node, name, val), (o) => { setStatus(`${name} = ${val}  (${o})`); refreshParam(node, name); });
+  };
   const openQos = () => {
     if (!active || active.kind !== 'topic') { setStatus('토픽을 선택하세요'); return; }
     setQosOpen({ name: active.name });
@@ -414,7 +433,7 @@ export function StoreProvider({ children }) {
   // 오버레이/입력창이 열려 있으면 트리는 가려져 있으므로 트리용 마우스(스크롤/호버/클릭)를 무시한다.
   const busyRef = useRef(false);
   busyRef.current = !!(edit || plotPick || searching || domainEdit || bmOpen || bmAdd || infoView
-    || bagPlay || jobsOpen || help || watchOpen || tfEcho || preflightOpen || bagCmp || pubForm || graphOpen || qosOpen || logOpen);
+    || bagPlay || jobsOpen || help || watchOpen || tfEcho || preflightOpen || bagCmp || pubForm || graphOpen || qosOpen || logOpen || paramPanel);
 
   useEffect(() => {
     if (!process.stdin.isTTY || process.env.RDASH_MOUSE === '0') return;
@@ -460,9 +479,10 @@ export function StoreProvider({ children }) {
     edit, searching, filter, plotPick, status, actHint, hzHistRef, listRef,
     hzMode, domain, domainEdit, env: rosEnv(ver, domain),
     bookmarks, bmOpen, bmAdd, infoView, rec, bagPlay, tfEcho, bagCmp, jobs, jobsOpen, jobLogsRef,
-    treeHidden, help, watches, watchOpen, preflight, preflightOpen, pubForm, pkgNames, graphOpen, graphFocusName, qosOpen, logOpen,
+    treeHidden, help, watches, watchOpen, preflight, preflightOpen, pubForm, pkgNames, graphOpen, graphFocusName, qosOpen, logOpen, paramPanel,
     setSel, setTop, setValTop, setExpanded, setActive, setEdit, setSearching, setPubForm, submitPubForm,
     setGraphOpen, openGraph, setQosOpen, openQos, setLogOpen, openLog, openMsgDef, copySelection,
+    setParamPanel, openParamPanel, setParam,
     setFilter, setFrozen, setPlotPick, setRateIdx, setStatus, setDomainEdit,
     setBmOpen, setBmAdd, setInfoView, setBagPlay, setJobsOpen, setHelp, setWatchOpen, setTfEcho, setPreflightOpen, setBagCmp,
     openFieldPicker, addWatch, removeWatch, submitTfEcho, submitBagCompare,

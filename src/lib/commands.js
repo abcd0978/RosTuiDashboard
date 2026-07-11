@@ -15,6 +15,16 @@ export const msgDefCmd = (ver, ty) => ver === '2'
   ? `ros2 interface show ${shq(ty)} 2>&1`
   : `rosmsg show ${shq(ty)} 2>&1`;
 
+// ROS2 노드 파라미터: 이름<TAB>값 목록 / 값 설정 / 단일 값 조회.
+export const paramListCmd = (node) =>
+  `NODE=${shq(node)}; for p in $(ros2 param list "$NODE" 2>/dev/null); do `
+  + `v=$(ros2 param get "$NODE" "$p" 2>/dev/null | sed -n 's/.*value is: //p'); `
+  + `printf '%s\\t%s\\n' "$p" "$v"; done`;
+export const paramGetCmd = (node, name) =>
+  `ros2 param get ${shq(node)} ${shq(name)} 2>/dev/null | sed -n 's/.*value is: //p'`;
+export const paramSetCmd = (node, name, val) =>
+  `ros2 param set ${shq(node)} ${shq(name)} ${shq(val)} 2>&1`;
+
 // 노드 리소스: 노드명 토큰으로 PID 찾아 /proc·ps 에서 CPU%/RSS. (best-effort: 독립 프로세스 노드만)
 export const resourceCmd = (nodes) => {
   const args = nodes.slice(0, 60).map(shq).join(' ');
