@@ -55,9 +55,10 @@ export function BookmarkAdd() {
 
   useInput((input, key) => {
     if (key.escape) { if (a.comp) d.setBmAdd((e) => e && ({ ...e, comp: null })); else d.setBmAdd(null); return; }
-    if (key.ctrl && input === 'd') { save(); return; }               // 저장
+    if (key.ctrl && input === 's') { save(); return; }               // 저장(Ctrl+S)
     if (key.tab && key.shift) { gotoField(field === 'name' ? 'cmd' : 'name'); return; }
-    if (key.tab) {                                                    // 자동완성(명령칸)
+    // 자동완성: Ctrl+Space(실제 에디터처럼) — Ctrl+Space 는 NUL→'`' 로 들어온다. Tab 은 폴백.
+    if ((key.ctrl && input === '`') || key.tab) {
       if (field !== 'cmd') { gotoField('cmd'); return; }
       d.setBmAdd((e) => {
         if (!e) return e;
@@ -112,5 +113,5 @@ export function BookmarkAdd() {
     live.cands.length
       ? h(Text, { dimColor: true }, ` ↹ ${live.cands.slice(0, 6).map((c, i) => (a.comp && a.comp.idx === i ? `[${c}]` : c)).join('  ')}${live.cands.length > 6 ? ` … +${live.cands.length - 6}` : ''}`)
       : null,
-    h(Text, { dimColor: true }, ' Tab=자동완성 · Enter=줄바꿈 · Ctrl+D=저장 · Shift+Tab=칸 · ←→↑↓ 커서 · 붙여넣기 OK · Esc=취소'));
+    h(Text, { dimColor: true }, ' Ctrl+Space=자동완성 · Enter=줄바꿈 · Ctrl+S=저장 · Shift+Tab=칸 · ←→↑↓ 커서 · 붙여넣기 OK · Esc=취소'));
 }
