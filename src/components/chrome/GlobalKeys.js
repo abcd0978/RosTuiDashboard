@@ -7,7 +7,7 @@ import { clamp, RATES } from '../../lib/util.js';
 export function GlobalKeys() {
   const d = useDashboard();
   const active = !!process.stdin.isTTY && !d.edit && !d.plotPick && !d.searching && !d.domainEdit && !d.pubForm
-    && !d.bmOpen && !d.bmAdd && !d.infoView && !d.bagPlay && !d.jobsOpen && !d.help && !d.watchOpen && !d.tfEcho && !d.preflightOpen && !d.bagCmp;
+    && !d.bmOpen && !d.bmAdd && !d.infoView && !d.bagPlay && !d.jobsOpen && !d.help && !d.watchOpen && !d.tfEcho && !d.preflightOpen && !d.bagCmp && !d.teleopOpen;
   useInput((ch, key) => {
     if (ch === 'q') d.quit();
     else if (ch === '?') d.setHelp(true);                // 도움말
@@ -31,6 +31,7 @@ export function GlobalKeys() {
     else if (ch === 'O') d.openOverview();               // 시스템 개요(ROS htop)
     else if (ch === 'v') d.openDiag();                   // 진단(/diagnostics)
     else if (ch === 'V') d.openLifecycle();              // 라이프사이클(ROS2 managed 노드)
+    else if (ch === 'W') d.openTeleop();                 // Teleop(Twist 조종, WASD)
     else if (ch === '.') d.toggleMark();                 // 토픽 표시(멀티선택 녹화/스냅샷)
     else if (ch === 'X') d.snapshot();                   // 스냅샷(표시 토픽 값 덤프)
     else if (ch === 't') d.openTf();

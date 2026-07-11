@@ -53,6 +53,7 @@ export function StoreProvider({ children }) {
   const [overviewOpen, setOverviewOpen] = useState(null);   // 시스템 개요 오버레이 또는 null
   const [diagOpen, setDiagOpen] = useState(null);       // 진단 뷰어 또는 null
   const [lifeOpen, setLifeOpen] = useState(null);       // 라이프사이클 전환 {node,idx} 또는 null
+  const [teleopOpen, setTeleopOpen] = useState(null);   // Teleop 오버레이 {topic,lin,ang,dir} 또는 null
   const [marked, setMarked] = useState(() => new Set());   // 표시된 토픽(멀티선택 녹화/스냅샷)
   const [pkgNames, setPkgNames] = useState([]);         // 패키지 이름(자동완성용) — ros2 pkg list / rospack
   const [jobs, setJobs] = useState([]);                 // 실행 중/종료 작업(북마크·rosbag·플롯…)
@@ -482,6 +483,25 @@ export function StoreProvider({ children }) {
   const runLifecycle = (node, transition) => {
     run(`ros2 lifecycle set ${shq(node)} ${transition} 2>&1`, (o) => setStatus(`lifecycle ${transition}: ${o}`));
   };
+  // Teleop — geometry_msgs/Twist 를 하나의 지속 퍼블리셔(-r 10 Hz)로. 방향 바뀔 때만 재기동, 정지 시 0 트위스트.
+  const teleopChildRef = useRef(null);
+  const teleopKill = () => { if (teleopChildRef.current) { try { killTree(teleopChildRef.current, 'SIGINT'); } catch { /* */ } teleopChildRef.current = null; } };
+  const teleopStop = (topic) => {
+    teleopKill();
+    const a = actionFor(ver, 'topic', topic, '{linear: {x: 0.0, y: 0.0, z: 0.0}, angular: {x: 0.0, y: 0.0, z: 0.0}}');
+    if (a && a.cmd) runAction(a.cmd, () => {});   // 0 트위스트 1회
+  };
+  const teleopDrive = (topic, lin, ang) => {
+    teleopKill();
+    const yaml = `{linear: {x: ${lin}, y: 0.0, z: 0.0}, angular: {x: 0.0, y: 0.0, z: ${ang}}}`;
+    const cmd = ver === '2'
+      ? `ros2 topic pub -r 10 ${shq(topic)} geometry_msgs/msg/Twist ${shq(yaml)}`
+      : `rostopic pub -r 10 ${shq(topic)} geometry_msgs/Twist ${shq(yaml)}`;
+    teleopChildRef.current = rosSpawn(cmd, undefined, true);
+    teleopChildRef.current.on('error', () => {});
+  };
+  const openTeleop = () => setTeleopOpen({ topic: '/cmd_vel', lin: 0.5, ang: 1.0, dir: 'stop' });
+  const closeTeleop = () => { setTeleopOpen((p) => { teleopStop(p ? p.topic : '/cmd_vel'); return null; }); };
   const submitBagPlay = (path) => {
     const s = String(path).trim();
     if (!s) return;
@@ -500,14 +520,14 @@ export function StoreProvider({ children }) {
   };
 
   // 종료(언마운트) 시 모든 작업 정리
-  useEffect(() => () => killAllJobs(), []);
+  useEffect(() => () => { killAllJobs(); teleopKill(); }, []);
 
   // 마우스: 스크롤(트리/값) + 클릭(트리 행 선택/펼침) + 호버(트리 행 하이라이트). RDASH_MOUSE=0 이면 비활성.
   // 깜빡임은 라인 diff 출력기가 "바뀐 줄만" 다시 그려 해결 → 호버는 상태가 바뀔 때만 리렌더(모션마다 X).
   // 오버레이/입력창이 열려 있으면 트리는 가려져 있으므로 트리용 마우스(스크롤/호버/클릭)를 무시한다.
   const busyRef = useRef(false);
   busyRef.current = !!(edit || plotPick || searching || domainEdit || bmOpen || bmAdd || infoView
-    || bagPlay || jobsOpen || help || watchOpen || tfEcho || preflightOpen || bagCmp || pubForm || graphOpen || qosOpen || logOpen || paramPanel || overviewOpen || diagOpen || lifeOpen);
+    || bagPlay || jobsOpen || help || watchOpen || tfEcho || preflightOpen || bagCmp || pubForm || graphOpen || qosOpen || logOpen || paramPanel || overviewOpen || diagOpen || lifeOpen || teleopOpen);
 
   useEffect(() => {
     if (!process.stdin.isTTY || process.env.RDASH_MOUSE === '0') return;
@@ -553,11 +573,11 @@ export function StoreProvider({ children }) {
     edit, searching, filter, plotPick, status, actHint, hzHistRef, listRef,
     hzMode, domain, domainEdit, env: rosEnv(ver, domain),
     bookmarks, bmOpen, bmAdd, infoView, rec, bagPlay, tfEcho, bagCmp, jobs, jobsOpen, jobLogsRef,
-    treeHidden, help, watches, watchOpen, preflight, preflightOpen, pubForm, pkgNames, graphOpen, graphFocusName, qosOpen, logOpen, paramPanel, overviewOpen, diagOpen, lifeOpen, marked,
+    treeHidden, help, watches, watchOpen, preflight, preflightOpen, pubForm, pkgNames, graphOpen, graphFocusName, qosOpen, logOpen, paramPanel, overviewOpen, diagOpen, lifeOpen, teleopOpen, marked,
     setSel, setTop, setValTop, setExpanded, setActive, setEdit, setSearching, setPubForm, submitPubForm,
     setGraphOpen, openGraph, setQosOpen, openQos, setLogOpen, openLog, openMsgDef, copySelection,
     setParamPanel, openParamPanel, setParam, setOverviewOpen, openOverview, setDiagOpen, openDiag,
-    setLifeOpen, openLifecycle, runLifecycle, toggleMark, clearMarks, snapshot,
+    setLifeOpen, openLifecycle, runLifecycle, setTeleopOpen, openTeleop, closeTeleop, teleopDrive, teleopStop, toggleMark, clearMarks, snapshot,
     setFilter, setFrozen, setPlotPick, setRateIdx, setStatus, setDomainEdit,
     setBmOpen, setBmAdd, setInfoView, setBagPlay, setJobsOpen, setHelp, setWatchOpen, setTfEcho, setPreflightOpen, setBagCmp,
     openFieldPicker, addWatch, removeWatch, submitTfEcho, submitBagCompare,
