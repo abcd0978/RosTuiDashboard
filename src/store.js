@@ -63,6 +63,7 @@ export function StoreProvider({ children }) {
 
   const [sel, setSel] = useState(0);
   const [top, setTop] = useState(0);
+  const [hoverIdx, setHoverIdx] = useState(-1);   // 마우스가 얹힌 트리 행(호버 하이라이트). 바뀔 때만 갱신.
   const [expanded, setExpanded] = useState(() => new Set());
   const [active, setActive] = useState(null);   // 오른쪽에 볼 항목(item 객체)
   const [valTop, setValTop] = useState(0);       // 값 패널 세로 스크롤 오프셋
@@ -383,9 +384,8 @@ export function StoreProvider({ children }) {
   // 종료(언마운트) 시 모든 작업 정리
   useEffect(() => () => killAllJobs(), []);
 
-  // 마우스: 스크롤(트리/값) + 클릭(트리 행 선택/펼침).  RDASH_MOUSE=0 이면 완전 비활성.
-  // (입력창 오염은 typable 필터로, 깜빡임은 Button 의 hover 재렌더 제거로 해결 — 모션은 클릭 감지에
-  //  필요하므로 끄지 않는다.)
+  // 마우스: 스크롤(트리/값) + 클릭(트리 행 선택/펼침) + 호버(트리 행 하이라이트). RDASH_MOUSE=0 이면 비활성.
+  // 깜빡임은 라인 diff 출력기가 "바뀐 줄만" 다시 그려 해결 → 호버는 상태가 바뀔 때만 리렌더(모션마다 X).
   useEffect(() => {
     if (!process.stdin.isTTY || process.env.RDASH_MOUSE === '0') return;
     mouse.enable();
@@ -395,29 +395,35 @@ export function StoreProvider({ children }) {
       if (p && p.x > LEFT_W) setValTop((v) => clamp(v + d, 0, valMaxRef.current));
       else setTop((t) => clamp(t + d, 0, Math.max(0, R.current.n - R.current.VISIBLE)));
     };
+    // 트리 행 호버 → hoverIdx (클릭 히트테스트와 같은 좌표 계산). 값이 바뀔 때만 setState.
+    const treeRowAt = (p) => {
+      if (!p || p.x > LEFT_W + 1) return -1;
+      const slot = p.y - (R.current.listPos.top || 0) - 1;
+      if (slot < 0 || slot >= R.current.VISIBLE) return -1;
+      const idx = R.current.dtop + slot;
+      return idx < R.current.n ? idx : -1;
+    };
+    const onMove = (p) => { const idx = treeRowAt(p); setHoverIdx((cur) => (cur === idx ? cur : idx)); };
     let down = false;   // press→release 한 사이클. 중복 press 무시(열자마자 닫힘 방지)
     const onClick = (pos, action) => {
       if (action === 'release') { down = false; return; }
       if (action !== 'press' || down) return;
       down = true;
-      if (pos.x > LEFT_W + 1) return;
-      const slot = pos.y - (R.current.listPos.top || 0) - 1;
-      if (slot >= 0 && slot < R.current.VISIBLE) {
-        const idx = R.current.dtop + slot;
-        if (idx < R.current.n) { setSel(idx); activateRef.current(idx); }
-      }
+      const idx = treeRowAt(pos);
+      if (idx >= 0) { setSel(idx); activateRef.current(idx); }
     };
     mouse.events.on('scroll', onScroll);
+    mouse.events.on('position', onMove);
     mouse.events.on('click', onClick);
     return () => {
-      mouse.events.off('scroll', onScroll); mouse.events.off('click', onClick);
+      mouse.events.off('scroll', onScroll); mouse.events.off('position', onMove); mouse.events.off('click', onClick);
       try { mouse.disable(); } catch { /* */ }
     };
   }, []);
 
   const ctx = {
     ver, conn, topics, cols, rows,
-    sel: dsel, top: dtop, n, maxTop, flat, list, VISIBLE, LW, RW, rightW,
+    sel: dsel, top: dtop, n, maxTop, flat, list, VISIBLE, LW, RW, rightW, hoverIdx,
     expanded, active, echo, bw, activeHz, activeAge, valTop, valMaxRef, frozen, renderHz,
     edit, searching, filter, plotPick, status, actHint, hzHistRef, listRef,
     hzMode, domain, domainEdit, env: rosEnv(ver, domain),

@@ -6,7 +6,7 @@ import { pad, padL, sparkline, LEFT_W } from '../lib/util.js';
 
 export function TreePanel() {
   const d = useDashboard();
-  const { flat, top: dtop, sel: dsel, VISIBLE, LW, expanded, hzHistRef } = d;
+  const { flat, top: dtop, sel: dsel, VISIBLE, LW, expanded, hzHistRef, hoverIdx } = d;
 
   // ROS 데이터 도착 전/그래프 비었을 때 트리 자리 힌트(연결 상태별)
   const emptyHint = !d.ver ? 'ROS 버전 감지 중…'
@@ -18,6 +18,7 @@ export function TreePanel() {
     if (!r && flat.length === 0 && i === 0) return h(Box, { key: i }, h(Text, { color: 'yellow' }, ' ' + emptyHint));
     if (!r) return h(Box, { key: i }, h(Text, null, ' '));
     const selected = (dtop + i === dsel);
+    const hovered = !selected && (dtop + i === hoverIdx);   // 마우스 호버 하이라이트
     const it = r.node.item;
     const kind = it && it.kind;
     const isTopic = kind === 'topic';
@@ -32,9 +33,9 @@ export function TreePanel() {
     const kindColor = { param: 'magenta', service: 'blue', node: 'green' }[kind];
     return h(Box, { key: i },
       h(Text, {
-        backgroundColor: selected ? 'cyan' : undefined,
-        color: selected ? 'black' : (it ? (isTopic ? (live ? undefined : stale ? 'red' : 'gray') : kindColor) : 'yellow'),
-        bold: selected || (r.hasKids && !it),
+        backgroundColor: selected ? 'cyan' : hovered ? 'blue' : undefined,
+        color: selected ? 'black' : hovered ? 'white' : (it ? (isTopic ? (live ? undefined : stale ? 'red' : 'gray') : kindColor) : 'yellow'),
+        bold: selected || hovered || (r.hasKids && !it),
       }, pad(line, LW)));
   });
 
