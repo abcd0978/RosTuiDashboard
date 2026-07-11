@@ -42,25 +42,37 @@ function render() {
   G = g; renderSidebar(); if (activeModal) activeModal.refresh && activeModal.refresh();
 }
 function neighbors(id) { const s = new Set(); for (const e of G.edges) { if (e.from === id) s.add(e.to); if (e.to === id) s.add(e.from); } return s; }
+const HALF_H = 11, GAP = 18;                              // 노드 높이 절반 · 충돌 여백
+const nodeW = (id) => Math.max(64, id.replace(/^\//, '').length * 7 + 18);
+const halfW = (id) => nodeW(id) / 2;
+// 사각형 경계와 중심→방향 직선의 교점 — 화살표가 박스 테두리에 딱 붙게(겹침 방지).
+function borderPt(p, hw, hh, dx, dy) { const s = 1 / Math.max(Math.abs(dx) / hw, Math.abs(dy) / hh, 1e-6); return { x: p.x + dx * s, y: p.y + dy * s }; }
 function tick() {
   const W = $('#graph').clientWidth || 800, H = $('#graph').clientHeight || 600, ids = [...pos.keys()];
-  for (const a of ids) { const pa = pos.get(a); for (const b of ids) { if (a === b) continue; const pb = pos.get(b); const dx = pa.x - pb.x, dy = pa.y - pb.y, d2 = dx * dx + dy * dy || 1, f = 34000 / d2; pa.vx += dx / Math.sqrt(d2) * f * 0.02; pa.vy += dy / Math.sqrt(d2) * f * 0.02; } pa.vx += (W / 2 - pa.x) * 0.0016; pa.vy += (H / 2 - pa.y) * 0.0016; }
-  for (const e of G.edges) { const pa = pos.get(e.from), pb = pos.get(e.to); if (!pa || !pb) continue; const dx = pb.x - pa.x, dy = pb.y - pa.y, d = Math.hypot(dx, dy) || 1, f = (d - 175) * 0.008; pa.vx += dx / d * f; pa.vy += dy / d * f; pb.vx -= dx / d * f; pb.vy -= dy / d * f; }
-  for (const id of ids) { const p = pos.get(id); if (dragging === id) continue; p.x += p.vx *= 0.82; p.y += p.vy *= 0.82; p.x = Math.max(60, Math.min(W - 60, p.x)); p.y = Math.max(28, Math.min(H - 22, p.y)); }
+  // 척력(Coulomb) — 넉넉하게 밀어 노드가 서로 안 겹치게.
+  for (const a of ids) { const pa = pos.get(a); for (const b of ids) { if (a === b) continue; const pb = pos.get(b); const dx = pa.x - pb.x, dy = pa.y - pb.y, d2 = dx * dx + dy * dy || 1, f = 95000 / d2, d = Math.sqrt(d2); pa.vx += dx / d * f * 0.02; pa.vy += dy / d * f * 0.02; } pa.vx += (W / 2 - pa.x) * 0.0012; pa.vy += (H / 2 - pa.y) * 0.0018; }
+  // 인력(스프링) — 연결 노드는 적당한 거리로, 토픽 수(가중치)가 많을수록 살짝 더 가깝게.
+  for (const e of G.edges) { const pa = pos.get(e.from), pb = pos.get(e.to); if (!pa || !pb) continue; const dx = pb.x - pa.x, dy = pb.y - pa.y, d = Math.hypot(dx, dy) || 1, ideal = 210 - Math.min(60, e.topics.length * 8), f = (d - ideal) * 0.009; pa.vx += dx / d * f; pa.vy += dy / d * f; pb.vx -= dx / d * f; pb.vy -= dy / d * f; }
+  for (const id of ids) { const p = pos.get(id); if (dragging === id) continue; p.x += p.vx *= 0.82; p.y += p.vy *= 0.82; }
+  // 충돌 해소(위치 직접 분리) — 겹치는 사각형을 침투 적은 축으로 밀어냄. 라벨 겹침도 크게 줄어듦.
+  for (let it = 0; it < 2; it++) for (const a of ids) { if (dragging === a) continue; const pa = pos.get(a); for (const b of ids) { if (a === b) continue; const pb = pos.get(b); const dx = pb.x - pa.x, dy = pb.y - pa.y; const minX = halfW(a) + halfW(b) + GAP, minY = 2 * HALF_H + GAP; const ox = minX - Math.abs(dx), oy = minY - Math.abs(dy); if (ox > 0 && oy > 0) { if (ox < oy) { const s = (dx >= 0 ? 1 : -1) * ox / 2; pa.x -= s; if (dragging !== b) pb.x += s; } else { const s = (dy >= 0 ? 1 : -1) * oy / 2; pa.y -= s; if (dragging !== b) pb.y += s; } } } }
+  for (const id of ids) { const p = pos.get(id); p.x = Math.max(halfW(id) + 4, Math.min(W - halfW(id) - 4, p.x)); p.y = Math.max(HALF_H + 4, Math.min(H - HALF_H - 4, p.y)); }
   paint();
-  if (!(SNAP && ++tick.n > 420)) requestAnimationFrame(tick);
+  if (!(SNAP && ++tick.n > 480)) requestAnimationFrame(tick);
 }
 tick.n = 0;
 const NS = 'http://www.w3.org/2000/svg';
 function paint() {
   const eg = $('#edges'), ng = $('#nodes'); const nb = sel ? neighbors(sel) : null; eg.innerHTML = ''; ng.innerHTML = '';
-  for (const e of G.edges) { const pa = pos.get(e.from), pb = pos.get(e.to); if (!pa || !pb) continue; const hi = sel && (e.from === sel || e.to === sel);
-    const dx = pb.x - pa.x, dy = pb.y - pa.y, d = Math.hypot(dx, dy) || 1;
-    const ln = document.createElementNS(NS, 'line'); ln.setAttribute('x1', pa.x + dx / d * 46); ln.setAttribute('y1', pa.y + dy / d * 12); ln.setAttribute('x2', pb.x - dx / d * 46); ln.setAttribute('y2', pb.y - dy / d * 12); ln.setAttribute('class', 'edge' + (hi ? ' hi' : '')); eg.appendChild(ln);
-    if (hi || G.edges.length < 26) { const tx = document.createElementNS(NS, 'text'); tx.setAttribute('x', (pa.x + pb.x) / 2); tx.setAttribute('y', (pa.y + pb.y) / 2 - 2); tx.setAttribute('text-anchor', 'middle'); tx.setAttribute('class', 'elabel' + (hi ? ' hi' : '')); tx.textContent = e.topics.length > 1 ? e.topics[0] + ' +' + (e.topics.length - 1) : e.topics[0]; eg.appendChild(tx); } }
+  for (const e of G.edges) { const pa = pos.get(e.from), pb = pos.get(e.to); if (!pa || !pb) continue; const hi = sel && (e.from === sel || e.to === sel); const cnt = e.topics.length;
+    const dx = pb.x - pa.x, dy = pb.y - pa.y; const s = borderPt(pa, halfW(e.from) + 3, HALF_H + 3, dx, dy), t = borderPt(pb, halfW(e.to) + 8, HALF_H + 8, -dx, -dy);
+    const ln = document.createElementNS(NS, 'line'); ln.setAttribute('x1', s.x); ln.setAttribute('y1', s.y); ln.setAttribute('x2', t.x); ln.setAttribute('y2', t.y); ln.setAttribute('class', 'edge' + (hi ? ' hi' : '')); ln.setAttribute('stroke-width', Math.min(5, 1.1 + cnt * 0.7)); const ti = document.createElementNS(NS, 'title'); ti.textContent = e.topics.join('\n'); ln.appendChild(ti); eg.appendChild(ln);
+    // 라벨 = 토픽 개수(가중치)만. 노드/엣지 위 겹침을 줄이려 중점에서 법선방향으로 살짝 띄움.
+    const d = Math.hypot(dx, dy) || 1; const mx = (s.x + t.x) / 2 - dy / d * 7, my = (s.y + t.y) / 2 + dx / d * 7;
+    const tx = document.createElementNS(NS, 'text'); tx.setAttribute('x', mx); tx.setAttribute('y', my + 3); tx.setAttribute('text-anchor', 'middle'); tx.setAttribute('class', 'elabel' + (hi ? ' hi' : '')); tx.textContent = cnt; const t2 = document.createElementNS(NS, 'title'); t2.textContent = e.topics.join('\n'); tx.appendChild(t2); eg.appendChild(tx); }
   for (const id of pos.keys()) { const p = pos.get(id); const dim = sel && id !== sel && nb && !nb.has(id);
     const g = document.createElementNS(NS, 'g'); g.setAttribute('class', 'node' + (id === sel ? ' hi' : '') + (dim ? ' dim' : '')); g.setAttribute('transform', `translate(${p.x},${p.y})`);
-    const label = id.replace(/^\//, ''); const w = Math.max(60, label.length * 7 + 16);
+    const label = id.replace(/^\//, ''); const w = nodeW(id);
     const r = document.createElementNS(NS, 'rect'); r.setAttribute('x', -w / 2); r.setAttribute('y', -11); r.setAttribute('width', w); r.setAttribute('height', 22); g.appendChild(r);
     const tx = document.createElementNS(NS, 'text'); tx.setAttribute('text-anchor', 'middle'); tx.setAttribute('y', 4); tx.textContent = label; g.appendChild(tx);
     g.onmousedown = (ev) => { dragging = id; selectNode(id); const mv = (m) => { const rc = $('#graph').getBoundingClientRect(); const pp = pos.get(id); pp.x = m.clientX - rc.left; pp.y = m.clientY - rc.top; }; const up = () => { dragging = null; document.removeEventListener('mousemove', mv); document.removeEventListener('mouseup', up); }; document.addEventListener('mousemove', mv); document.addEventListener('mouseup', up); ev.preventDefault(); };

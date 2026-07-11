@@ -27,7 +27,7 @@
   svg { width:100%; height:100%; display:block; }
   .edge { stroke:#3a4658; stroke-width:1.2; marker-end:url(#arrow); }
   .edge.hi { stroke:var(--cyan); stroke-width:2; }
-  .elabel { fill:var(--dim); font-size:9px; } .elabel.hi { fill:var(--cyan); }
+  .elabel { fill:#9aa7b8; font-size:11px; font-weight:600; paint-order:stroke; stroke:#0d1116; stroke-width:3px; stroke-linejoin:round; } .elabel.hi { fill:var(--cyan); }
   .node rect { fill:#1c2531; stroke:#3a4658; rx:5; } .node.hi rect { stroke:var(--cyan); fill:#243244; }
   .node.dim { opacity:.28; } .node text { fill:var(--fg); font-size:11px; } .node { cursor:grab; }
   #right .box { padding:8px 10px; border-bottom:1px solid var(--line); }
@@ -63,7 +63,7 @@
   <aside id="side"></aside>
   <main>
     <svg id="graph"><defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#3a4658"/></marker></defs><g id="edges"></g><g id="nodes"></g></svg>
-    <div class="legend">노드 위상 그래프 — 드래그 이동 · 노드 클릭 강조 · 화살표=발행→구독(라벨=토픽)</div>
+    <div class="legend">노드 위상 그래프 — 드래그 이동 · 노드 클릭 강조 · 화살표=발행→구독 · 숫자·굵기=토픽 수(엣지에 마우스 올리면 토픽 목록)</div>
   </main>
   <aside id="right">
     <div class="sec">선택 값</div>
