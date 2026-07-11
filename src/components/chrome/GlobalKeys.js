@@ -26,6 +26,7 @@ export function GlobalKeys() {
     else if (ch === 'm') d.openMsgDef();                 // 메시지 정의(타입 구조)
     else if (ch === 'Q') d.openQos();                    // QoS 검사(발행/구독)
     else if (ch === 'y') d.copySelection();              // 선택 이름 클립보드 복사(OSC52)
+    else if (ch === 'L') d.openLog();                    // 로그 뷰어(/rosout)
     else if (ch === 't') d.openTf();
     else if (ch === 'T') d.setTfEcho({ step: 'src', src: '', tgt: '' });   // 두 프레임 tf echo
     else if (ch === 'S') d.openResource();
