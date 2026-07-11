@@ -51,6 +51,23 @@ A terminal dashboard (TUI) for browsing **ROS topics / services / params / nodes
 - **Keyboard + mouse**: hover highlight on tree rows and footer buttons, click to select/expand, **double-click a bookmark to run it**, wheel to scroll.
 - **Flicker-free rendering**: a line-diff writer repaints only the lines that changed, so high-rate values (and hover) update at the target rate without the whole screen blinking — even on slower terminals (WSL / Windows Terminal). Configurable **max render rate**.
 
+## Web UI (localhost)
+
+Some things read better as a real GUI than in a terminal — the **node topology
+graph** and **plots** especially. RDash ships an optional web server that reuses
+the exact same telemetry/echo pipeline and serves a browser UI on localhost
+(the TUI stays as-is; this is an extra entry point):
+
+```bash
+npm run web        # → http://localhost:8080   (RDASH_WEB_PORT to change)
+```
+
+It renders an interactive **force-directed node graph** (drag nodes, click to
+highlight a node's edges; arrows are publish→subscribe, labeled by topic), a
+topic/node/service list with live Hz, and a live value panel with an in-browser
+**line plot** (tick the numeric fields to chart). Runs in a ROS-sourced shell
+just like the TUI; `RDASH_TELEM=<file>` overrides the telemetry source.
+
 ## Requirements
 - **Node.js ≥ 18**
 - A shell where **ROS works** (`rostopic`/`rospy` for ROS1, or `ros2` for ROS2) — i.e. run it after `source`-ing your ROS setup. RDash inherits that environment; it knows nothing about how ROS is deployed (native, Docker, …).

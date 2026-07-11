@@ -1,13 +1,14 @@
 {
   "name": "rdash",
   "version": "1.0.0",
-  "description": "RDash — a terminal dashboard (TUI) for browsing ROS topics/services/params/nodes with live values. ROS1 & ROS2, built with React Ink.",
+  "description": "RDash \u2014 a terminal dashboard (TUI) for browsing ROS topics/services/params/nodes with live values. ROS1 & ROS2, built with React Ink.",
   "type": "module",
   "bin": {
     "rdash": "index.js"
   },
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+    "web": "node web/server.js"
   },
   "keywords": [
     "ros",
