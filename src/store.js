@@ -43,6 +43,7 @@ export function StoreProvider({ children }) {
   const [tfEcho, setTfEcho] = useState(null);           // tf echo 프레임 입력 {step,src,tgt} 또는 null
   const [bagCmp, setBagCmp] = useState(null);           // A/B bag 비교 경로 입력 {step,a,b} 또는 null
   const [pubForm, setPubForm] = useState(null);         // 토픽 발행 폼 {name,type,fields,idx} 또는 null
+  const [pkgNames, setPkgNames] = useState([]);         // 패키지 이름(자동완성용) — ros2 pkg list / rospack
   const [jobs, setJobs] = useState([]);                 // 실행 중/종료 작업(북마크·rosbag·플롯…)
   const [jobsOpen, setJobsOpen] = useState(null);       // Jobs 오버레이 {idx} 또는 null
   const [treeHidden, setTreeHidden] = useState(false);  // 트리 숨김(값 패널 전체폭) — Tab 토글
@@ -96,6 +97,18 @@ export function StoreProvider({ children }) {
       m.set(it.p, a);
     }
   }, [topics]);
+
+  // 패키지 이름 목록(북마크 자동완성용) — 버전 감지 후 1회, 백그라운드로.
+  useEffect(() => {
+    if (!ver) return undefined;
+    const p = rosSpawn(ver === '2' ? 'ros2 pkg list' : 'rospack list-names');
+    let out = '';
+    if (p.stderr) p.stderr.on('data', () => {});
+    p.stdout.on('data', (dd) => { out += dd.toString(); });
+    p.on('close', () => setPkgNames(out.trim() ? out.trim().split(/\s+/) : []));
+    p.on('error', () => {});
+    return () => { try { p.kill(); } catch { /* */ } };
+  }, [ver]);
 
   const fullList = topics || [];
   const filt = filter.trim().toLowerCase();
@@ -409,7 +422,7 @@ export function StoreProvider({ children }) {
     edit, searching, filter, plotPick, status, actHint, hzHistRef, listRef,
     hzMode, domain, domainEdit, env: rosEnv(ver, domain),
     bookmarks, bmOpen, bmAdd, infoView, rec, bagPlay, tfEcho, bagCmp, jobs, jobsOpen, jobLogsRef,
-    treeHidden, help, watches, watchOpen, preflight, preflightOpen, pubForm,
+    treeHidden, help, watches, watchOpen, preflight, preflightOpen, pubForm, pkgNames,
     setSel, setTop, setValTop, setExpanded, setActive, setEdit, setSearching, setPubForm, submitPubForm,
     setFilter, setFrozen, setPlotPick, setRateIdx, setStatus, setDomainEdit,
     setBmOpen, setBmAdd, setInfoView, setBagPlay, setJobsOpen, setHelp, setWatchOpen, setTfEcho, setPreflightOpen, setBagCmp,

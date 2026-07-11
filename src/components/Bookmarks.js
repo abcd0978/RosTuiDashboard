@@ -24,11 +24,11 @@ export function Bookmarks() {
   const idx = clamp(d.bmOpen.idx, 0, Math.max(0, list.length - 1));
   useInput((ch, key) => {
     if (key.escape || ch === 'q') d.setBmOpen(null);
-    else if (ch === 'a') { d.setBmOpen(null); d.setBmAdd({ step: 'name', name: '', cmd: d.bmSeedCmd(), ti: -1 }); }
+    else if (ch === 'a') { d.setBmOpen(null); d.setBmAdd({ field: 'name', name: '', cmd: d.bmSeedCmd(), cur: 0, comp: null }); }
     else if (!list.length) return;
     else if (key.return) { d.setBmOpen(null); d.runBookmark(list[idx]); }
     // 수정 — 기존 이름/명령을 채워서 입력창을 연다. 단축키는 그대로 유지된다.
-    else if (ch === 'e') { const b = list[idx]; d.setBmOpen(null); d.setBmAdd({ step: 'name', name: b.name || '', cmd: b.cmd || '', ti: -1, editIdx: idx }); }
+    else if (ch === 'e') { const b = list[idx]; d.setBmOpen(null); d.setBmAdd({ field: 'name', name: b.name || '', cmd: b.cmd || '', cur: 0, comp: null, editIdx: idx }); }
     else if (ch === 'd') d.deleteBookmark(idx);
     else if (key.downArrow || ch === 'j') d.setBmOpen((p) => p && ({ ...p, idx: clamp(idx + 1, 0, list.length - 1) }));
     else if (key.upArrow || ch === 'k') d.setBmOpen((p) => p && ({ ...p, idx: clamp(idx - 1, 0, list.length - 1) }));
