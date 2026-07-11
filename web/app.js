@@ -273,6 +273,26 @@ const Views = {
     base = (await api('/api/baseline')).baseline; draw();
     const iv = setInterval(() => { if (!$('#modal').classList.contains('on')) { clearInterval(iv); return; } draw(); }, 2000);
   },
+  procmon() {
+    const wrap = el('div', {}); openModal('📊 노드 프로세스 (CPU/RSS/스레드 · 라이브)', wrap, () => {});
+    const nodes = () => items.filter((i) => i.kind === 'node').map((i) => i.name);
+    const draw = async () => {
+      const r = await post('/api/resource', { nodes: nodes() });
+      const lines = (r.out || '').split('\n').filter((l) => l.trim() && !l.startsWith('('));
+      wrap.innerHTML = '';
+      wrap.append(el('div', { class: 'hint', style: 'margin-bottom:6px' }, 'CPU% 내림차순 · 2초 갱신 · 노드별 kill/restart (독립 프로세스 노드만 값 표시)'));
+      const tbl = el('table', { class: 'tbl' }); tbl.append(el('tr', {}, el('th', {}, 'CPU%'), el('th', {}, '노드'), el('th', {}, 'PID'), el('th', {}, 'RSS'), el('th', {}, 'THR'), el('th', {}, '')));
+      const seen = new Set();
+      lines.forEach((l) => { const m = l.match(/^\s*(\S+)\s+(\S+)\s+pid\s+(\S+)\s+(\S+)\s*MB\s+(\S+)\s*thr/); if (!m) return; const [, cpu, name, pid, rss, thr] = m; seen.add(name);
+        const kill = el('button', { class: 'act', onclick: () => post('/api/killnode', { name }).then((rr) => toast('kill ' + name + ': ' + rr.out)) }, 'kill');
+        const rest = el('button', { class: 'act', onclick: () => post('/api/restart', { name }).then((rr) => toast('restart ' + name)) }, 'restart');
+        tbl.append(el('tr', {}, el('td', { style: 'color:' + (parseFloat(cpu) > 50 ? 'var(--red)' : parseFloat(cpu) > 20 ? 'var(--yellow)' : 'var(--fg)') }, cpu), el('td', { style: 'color:var(--green)' }, name), el('td', {}, pid), el('td', {}, rss + ' MB'), el('td', {}, thr), el('td', {}, kill, ' ', rest))); });
+      // 프로세스를 못 찾은 노드도 표시(값 ?) + 액션 제공
+      nodes().filter((n) => !seen.has(n)).forEach((name) => { const kill = el('button', { class: 'act', onclick: () => post('/api/killnode', { name }).then((rr) => toast('kill ' + name)) }, 'kill'); const rest = el('button', { class: 'act', onclick: () => post('/api/restart', { name }).then(() => toast('restart ' + name)) }, 'restart'); tbl.append(el('tr', { style: 'opacity:.6' }, el('td', {}, '?'), el('td', { style: 'color:var(--green)' }, name), el('td', {}, '—'), el('td', {}, '—'), el('td', {}, '—'), el('td', {}, kill, ' ', rest))); });
+      wrap.append(tbl);
+    };
+    draw(); const iv = setInterval(() => { if (!$('#modal').classList.contains('on')) { clearInterval(iv); return; } draw(); }, 2000);
+  },
   trigger() {
     const wrap = el('div', {}); openModal('🔴 트리거 녹화 — 조건부 자동 캡처', wrap, () => {});
     const draw = () => { wrap.innerHTML = '';
@@ -356,7 +376,7 @@ const Views = {
 };
 
 // ── 툴바 + 키보드 ─────────────────────────────────────────────────────────────
-const TOOLS = [['H', '🩺 Doctor', () => Views.doctor()], ['K', '📌 Baseline', () => Views.baseline()], ['A', '🔴 Trigger', () => Views.trigger()], ['g', '🎮 Teleop', () => Views.teleop()], ['b', '북마크', () => Views.bookmarks()], ['J', 'Jobs', () => Views.jobs()], ['L', '로그', () => Views.log()], ['v', '진단', () => Views.diag()], ['O', '개요', () => Views.overview()], ['t', 'TF', () => Views.tftree()]];
+const TOOLS = [['H', '🩺 Doctor', () => Views.doctor()], ['K', '📌 Baseline', () => Views.baseline()], ['A', '🔴 Trigger', () => Views.trigger()], ['g', '🎮 Teleop', () => Views.teleop()], ['b', '북마크', () => Views.bookmarks()], ['J', 'Jobs', () => Views.jobs()], ['L', '로그', () => Views.log()], ['v', '진단', () => Views.diag()], ['O', '개요', () => Views.overview()], ['P', '📊 프로세스', () => Views.procmon()], ['t', 'TF', () => Views.tftree()]];
 const tb = $('#toolbar'); TOOLS.forEach(([k, label, fn]) => tb.append(el('button', { title: k, onclick: fn }, label)));
 window.addEventListener('keydown', (e) => {
   if (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) return;
