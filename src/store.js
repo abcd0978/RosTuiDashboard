@@ -17,6 +17,7 @@ import { rosEnv } from './lib/env.js';
 import { loadBookmarks, saveBookmarks } from './lib/bookmarks.js';
 import { loadPreflight } from './lib/preflight.js';
 import { loadSession, saveSession, loadHistory, pushHistory } from './lib/session.js';
+import { loadBaseline, saveBaseline, snapshot as snapProfile } from './lib/baseline.js';
 import { connectionsCmd, resourceCmd, tfTreeCmd, tfEchoCmd, bagRecordCmd, bagPlayCmd, bagCompareCmd, msgDefCmd, paramListCmd, paramGetCmd, paramSetCmd } from './lib/commands.js';
 import { useRosVersion } from './hooks/useRosVersion.js';
 import { useTopics } from './hooks/useTopics.js';
@@ -55,6 +56,8 @@ export function StoreProvider({ children }) {
   const [lifeOpen, setLifeOpen] = useState(null);       // 라이프사이클 전환 {node,idx} 또는 null
   const [teleopOpen, setTeleopOpen] = useState(null);   // Teleop 오버레이 {topic,lin,ang,dir} 또는 null
   const [doctorOpen, setDoctorOpen] = useState(null);   // 🩺 Doctor(헬스 스캔) 오버레이 {idx} 또는 null
+  const [baselineOpen, setBaselineOpen] = useState(null);   // 📌 Baseline/회귀 오버레이 {idx} 또는 null
+  const [baseline, setBaseline] = useState(() => loadBaseline());   // 저장된 기준선 프로파일
   const [marked, setMarked] = useState(() => new Set());   // 표시된 토픽(멀티선택 녹화/스냅샷)
   const [pkgNames, setPkgNames] = useState([]);         // 패키지 이름(자동완성용) — ros2 pkg list / rospack
   const [jobs, setJobs] = useState([]);                 // 실행 중/종료 작업(북마크·rosbag·플롯…)
@@ -503,6 +506,8 @@ export function StoreProvider({ children }) {
   };
   const openTeleop = () => setTeleopOpen({ topic: '/cmd_vel', lin: 0.5, ang: 1.0, dir: 'stop' });
   const openDoctor = () => setDoctorOpen({ idx: 0 });
+  const openBaseline = () => setBaselineOpen({ idx: 0 });
+  const saveBaselineNow = () => { const prof = snapProfile(fullList, Date.now()); const ok = saveBaseline(prof); if (ok) setBaseline(prof); setStatus(ok ? `📌 기준선 저장 — 노드 ${prof.nodes.length}·토픽 ${Object.keys(prof.topics).length}` : '기준선 저장 실패'); };
   const closeTeleop = () => { setTeleopOpen((p) => { teleopStop(p ? p.topic : '/cmd_vel'); return null; }); };
   const submitBagPlay = (path) => {
     const s = String(path).trim();
@@ -529,7 +534,7 @@ export function StoreProvider({ children }) {
   // 오버레이/입력창이 열려 있으면 트리는 가려져 있으므로 트리용 마우스(스크롤/호버/클릭)를 무시한다.
   const busyRef = useRef(false);
   busyRef.current = !!(edit || plotPick || searching || domainEdit || bmOpen || bmAdd || infoView
-    || bagPlay || jobsOpen || help || watchOpen || tfEcho || preflightOpen || bagCmp || pubForm || graphOpen || qosOpen || logOpen || paramPanel || overviewOpen || diagOpen || lifeOpen || teleopOpen || doctorOpen);
+    || bagPlay || jobsOpen || help || watchOpen || tfEcho || preflightOpen || bagCmp || pubForm || graphOpen || qosOpen || logOpen || paramPanel || overviewOpen || diagOpen || lifeOpen || teleopOpen || doctorOpen || baselineOpen);
 
   useEffect(() => {
     if (!process.stdin.isTTY || process.env.RDASH_MOUSE === '0') return;
@@ -575,11 +580,11 @@ export function StoreProvider({ children }) {
     edit, searching, filter, plotPick, status, actHint, hzHistRef, listRef,
     hzMode, domain, domainEdit, env: rosEnv(ver, domain),
     bookmarks, bmOpen, bmAdd, infoView, rec, bagPlay, tfEcho, bagCmp, jobs, jobsOpen, jobLogsRef,
-    treeHidden, help, watches, watchOpen, preflight, preflightOpen, pubForm, pkgNames, graphOpen, graphFocusName, qosOpen, logOpen, paramPanel, overviewOpen, diagOpen, lifeOpen, teleopOpen, doctorOpen, allItems: fullList, marked,
+    treeHidden, help, watches, watchOpen, preflight, preflightOpen, pubForm, pkgNames, graphOpen, graphFocusName, qosOpen, logOpen, paramPanel, overviewOpen, diagOpen, lifeOpen, teleopOpen, doctorOpen, baselineOpen, baseline, allItems: fullList, marked,
     setSel, setTop, setValTop, setExpanded, setActive, setEdit, setSearching, setPubForm, submitPubForm,
     setGraphOpen, openGraph, setQosOpen, openQos, setLogOpen, openLog, openMsgDef, copySelection,
     setParamPanel, openParamPanel, setParam, setOverviewOpen, openOverview, setDiagOpen, openDiag,
-    setLifeOpen, openLifecycle, runLifecycle, setTeleopOpen, openTeleop, closeTeleop, teleopDrive, teleopStop, setDoctorOpen, openDoctor, toggleMark, clearMarks, snapshot,
+    setLifeOpen, openLifecycle, runLifecycle, setTeleopOpen, openTeleop, closeTeleop, teleopDrive, teleopStop, setDoctorOpen, openDoctor, setBaselineOpen, openBaseline, saveBaselineNow, toggleMark, clearMarks, snapshot,
     setFilter, setFrozen, setPlotPick, setRateIdx, setStatus, setDomainEdit,
     setBmOpen, setBmAdd, setInfoView, setBagPlay, setJobsOpen, setHelp, setWatchOpen, setTfEcho, setPreflightOpen, setBagCmp,
     openFieldPicker, addWatch, removeWatch, submitTfEcho, submitBagCompare,

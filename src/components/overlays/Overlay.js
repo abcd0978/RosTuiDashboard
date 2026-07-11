@@ -26,12 +26,14 @@ import { DiagnosticsView } from './DiagnosticsView.js';
 import { LifecycleView } from './LifecycleView.js';
 import { TeleopView } from './TeleopView.js';
 import { DoctorView } from './DoctorView.js';
+import { BaselineView } from './BaselineView.js';
 import { StatusLine } from './StatusLine.js';
 
 export function Overlay() {
-  const { plotPick, searching, edit, domainEdit, bmOpen, bmAdd, infoView, bagPlay, tfEcho, bagCmp, jobsOpen, help, watchOpen, preflightOpen, pubForm, graphOpen, qosOpen, logOpen, paramPanel, overviewOpen, diagOpen, lifeOpen, teleopOpen, doctorOpen } = useDashboard();
+  const { plotPick, searching, edit, domainEdit, bmOpen, bmAdd, infoView, bagPlay, tfEcho, bagCmp, jobsOpen, help, watchOpen, preflightOpen, pubForm, graphOpen, qosOpen, logOpen, paramPanel, overviewOpen, diagOpen, lifeOpen, teleopOpen, doctorOpen, baselineOpen } = useDashboard();
   if (help) return h(Help);
   if (doctorOpen) return h(DoctorView);
+  if (baselineOpen) return h(BaselineView);
   if (teleopOpen) return h(TeleopView);
   if (preflightOpen) return h(Preflight);
   if (graphOpen) return h(GraphView);

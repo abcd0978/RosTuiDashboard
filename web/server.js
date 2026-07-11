@@ -15,6 +15,7 @@ import {
 } from '../src/lib/commands.js';
 import { loadBookmarks, saveBookmarks } from '../src/lib/bookmarks.js';
 import { loadPreflight } from '../src/lib/preflight.js';
+import { loadBaseline, saveBaseline } from '../src/lib/baseline.js';
 import { shq } from '../src/lib/util.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -157,6 +158,10 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/record' && post) { const b = await readBody(req); const out = `rdash_rec_${Date.now()}`; const r = spawnJob(`rosbag rec → ${out}`, bagRecordCmd(VER, b.topics && b.topics.length ? b.topics : null, out)); return json(res, 200, jobView(r)); }
     if (p === '/api/play' && post) { const b = await readBody(req); const r = spawnJob(`rosbag play ${b.path}`, bagPlayCmd(VER, b.path)); return json(res, 200, jobView(r)); }
     if (p.startsWith('/api/job/') && p.endsWith('/kill') && post) { const id = Number(p.split('/')[3]); const r = jobs.get(id); if (r) { try { process.kill(-r.child.pid, 'SIGINT'); } catch { try { r.child.kill('SIGINT'); } catch { /* */ } } } return json(res, 200, { ok: true }); }
+
+    // 기준선(Baseline) — 프로파일은 브라우저가 계산해 저장, diff 도 브라우저에서.
+    if (p === '/api/baseline' && !post) return json(res, 200, { baseline: loadBaseline() });
+    if (p === '/api/baseline' && post) { const b = await readBody(req); saveBaseline(b.profile || {}); return json(res, 200, { ok: true }); }
 
     // 북마크
     if (p === '/api/bookmarks' && !post) return json(res, 200, { bookmarks: loadBookmarks() });
