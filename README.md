@@ -39,20 +39,20 @@ A terminal dashboard (TUI) for browsing **ROS topics / services / params / nodes
 - **Connection view** (`c`): publishers/subscribers of a topic, or a node's in/out topics (rqt_graph-lite). **TF frame tree** (`t`), **tf echo between two frames** (`T`), and **node resource monitor** (`S`, CPU%/RSS).
 - **rosbag** — record (`R`) the filtered topics (or `-a`) with a live REC indicator; play (`P`) a bag by path; **A/B compare** (`B`) two bags' info side by side.
 - **Help overlay** (`?`) with categorized shortcuts, a **clickable footer** button bar, and **`Tab`** to hide the tree so the value pane spans full width.
-- **Command bookmarks** (`b`): name frequently-used shell commands and run them by shortcut (number keys `1`-`9`). Persisted per-container to `~/.rdashrc`.
+- **Command bookmarks** (`b`): name frequently-used shell commands (launch scripts, canned publishes like arm/disarm) and run them — by number key `1`-`9`,`0`, from the scrollable list (Enter or **double-click**), any number of them. Add/`e`dit them in a **multi-line command editor** built to be easier than a shell: **paste** support (multi-line), **Ctrl+Space** autocomplete (ROS subcommands + topic/node/service/package names), cursor editing, **Ctrl+S** to save. Persisted per-container to `~/.rdashrc`.
 - **Selective Hz measurement** (`h` cycles `all`/`selected`/`off`): only subscribe to the topics you're looking at (or none), cutting the observer-effect bandwidth of measuring every topic. High-rate topics are counted via raw (non-deserialized) subscriptions.
 - **Container / domain awareness**: an env bar shows host, ROS version, `ROS_DOMAIN_ID`, and RMW. `D` switches `ROS_DOMAIN_ID` and reconnects — to peek at another container's ROS2 graph reachable over DDS.
-- **Control actions** (`x` on a selection): kill node (ROS1 `rosnode kill`; ROS2 SIGINT by node→PID, best-effort), **call a service with a request argument** (YAML/JSON, e.g. Gazebo `spawn_entity` / `set_entity_state`), set param — the rqt-style *control* half.
+- **Control actions** (`x` on a selection): **publish to a topic via a field form** — the message type's fields are listed (`linear.x`, `angular.z`, …) so you fill values instead of hand-typing YAML; kill node (ROS1 `rosnode kill`; ROS2 SIGINT by node→PID, best-effort); **call a service with a request argument** (YAML/JSON, e.g. Gazebo `spawn_entity` / `set_entity_state`); set param — the rqt-style *control* half.
 - **ROS1 & ROS2 auto-detected** from the environment.
-- **Keyboard + mouse** (click to select/expand, wheel to scroll, hover on buttons).
-- Configurable **max render rate** (fast topics don't flood the screen).
+- **Keyboard + mouse**: hover highlight on tree rows and footer buttons, click to select/expand, **double-click a bookmark to run it**, wheel to scroll.
+- **Flicker-free rendering**: a line-diff writer repaints only the lines that changed, so high-rate values (and hover) update at the target rate without the whole screen blinking — even on slower terminals (WSL / Windows Terminal). Configurable **max render rate**.
 
 ## Requirements
 - **Node.js ≥ 18**
 - A shell where **ROS works** (`rostopic`/`rospy` for ROS1, or `ros2` for ROS2) — i.e. run it after `source`-ing your ROS setup. RDash inherits that environment; it knows nothing about how ROS is deployed (native, Docker, …).
+- **Python plot deps** (`numpy` / `matplotlib` / `PyYAML`, see `requirements.txt`): **auto-installed on first run** if missing (the install log shows, then press Enter to start). Opt out with `RDASH_NO_AUTOPIP=1` and install manually with `pip install -r requirements.txt`.
 - **Per-feature (optional):**
-  - Plotting (`p`): `python3` with **numpy** + **matplotlib**, and a display for the window.
-  - TF tree (`t`): `python3` with **PyYAML** (usually present with ROS).
+  - Plotting (`p`): the Python deps above, plus a display for the window.
   - rosbag (`R`/`P`): `ros2 bag` / `rosbag` on `PATH`.
   - Bandwidth / resource monitor: standard `ros2 topic bw` / `rostopic bw`, `ps`, `/proc`.
 
@@ -79,8 +79,9 @@ node index.js
 | `↑↓` / `j` `k` | move selection |
 | `Enter` / click | expand folder / select item |
 | `/` | fuzzy-search the tree (`Esc` clears) |
+| `x` | control the selection: **publish to topic (field form)** / call service / kill node / set param |
 | `p` | plot the selected topic (matplotlib: raw / n-th d·∫ / FFT / XY+regression / 3D) |
-| `b` / `1`-`9` | bookmarks: open manager / run bookmark by shortcut |
+| `b` / `1`-`9`,`0` | bookmarks: open manager / run bookmark by shortcut (Enter or double-click in the list; `a` add, `e` edit) |
 | `J` | jobs manager (view output / kill spawned processes) |
 | `w` | watch list (pin fields from several topics) |
 | `F` | preflight / health check (✓/✗ vs `~/.rdash_preflight.json`) |
@@ -104,8 +105,12 @@ node index.js
 | `ROS_VER` | auto | force `1` or `2` |
 | `ROS_DOMAIN_ID` | inherited | ROS2 domain (also switchable at runtime with `D`) |
 | `RDASH_MOUSE` | `1` | set `0` to disable mouse entirely (for terminals where mouse tracking misbehaves) |
+| `RDASH_DIFF` | `1` | line-diff rendering (flicker-free); set `0` to fall back to Ink's default full-frame writes |
+| `RDASH_NO_AUTOPIP` | `0` | set `1` to skip auto-installing the Python plot deps on startup |
+| `RDASH_PYTHON` | `python3` | interpreter used for telemetry / plot / autocomplete / dep install |
 
 ### Files
+- `requirements.txt` — Python plot deps (auto-installed on first run).
 - `~/.rdashrc` — saved command bookmarks (JSON).
 - `~/.rdash_preflight.json` — preflight check definitions, e.g. `{"checks":[{"type":"topic","name":"/livox/imu","minHz":150},{"type":"node","name":"/fast_lio_mapping"}]}`.
 - `rdash_rec_<ts>` — rosbag output directories created by `R`.

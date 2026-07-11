@@ -8,7 +8,13 @@ command bookmarks, and a jobs manager.
 
 Guiding rule: **`index.js` only bootstraps and renders; all logic lives in
 separated modules.** `lib/` has no React, `hooks/` own a stream/subprocess,
-`components/` render and own their own keyboard input.
+`components/` render and own their own keyboard input (grouped into
+`common/ chrome/ panels/ overlays/`).
+
+`index.js` also, before entering the alt screen, auto-installs the plot's
+Python deps (`pydeps.js`) and wraps stdout in a **line-diff writer**
+(`diffstdout.js`) so streaming values redraw at the target rate without
+flicker (see *Rendering* below).
 
 ## Top-level layout
 
@@ -22,16 +28,19 @@ src/
   react.js             # single place to import React `h` + hooks
   store.js             # central Context store: all shared state, derived values, actions, effects
   lib/                 # pure / side-effecting helpers, NO React
-    util.js            #   clamp, pad/padL, sparkline, fuzzy, shq, constants (LEFT_W, RATES, MIN_COLS/ROWS)
+    util.js            #   clamp, pad/padL, sparkline, fuzzy, shq, typable/editable, constants (LEFT_W, RATES, MIN_COLS/ROWS)
     tree.js            #   buildTree / flattenTree (item list → namespace tree)
-    ros.js             #   command builders, rosSpawn(env), control actions, numericFields
+    ros.js             #   command builders, rosSpawn(env), killTree/killTreeHard, control actions, numericFields, protoCmd (msg skeleton)
+    msgform.js         #   flatten a message skeleton into labeled fields + rebuild a YAML message (publish form)
+    complete.js        #   ROS command autocomplete engine (subcommands + topic/node/service/pkg names)
     commands.js        #   builders for connections / resource / tf tree+echo / rosbag rec·play·compare
     paths.js           #   repo-root paths; loads telemetry(.py), plot.py, tf_tree.py
     env.js             #   host / ROS version / ROS_DOMAIN_ID / RMW context
     bookmarks.js       #   load/save ~/.rdashrc
     preflight.js       #   load ~/.rdash_preflight.json + evaluate checks vs graph
-    fieldValue (ros.js) #  extract one dotted field value from echo YAML (watch/age)
     screen.js          #   alt-screen enter/restore + exit wiring
+    diffstdout.js      #   line-diff writer: rewrite only changed lines (flicker-free at target rate)
+    pydeps.js          #   auto-install plot deps (numpy/matplotlib/PyYAML) before the TUI starts
   hooks/               # React hooks that own a data stream / subprocess
     useRosVersion.js   #   detect ROS 1 vs 2
     useTopics.js       #   run telemetry(.py) via python3, parse JSON stream (env: RDASH_CTRL, ROS_DOMAIN_ID)
@@ -39,31 +48,38 @@ src/
     useBandwidth.js    #   `rostopic/ros2 topic bw` for the selected topic
     useWatches.js      #   watch-list: one echo per watched topic → latest field values
     useTermSize.js     #   terminal cols/rows (resize)
-  components/
-    Layout.js          #   composition root: size guard / GlobalKeys + panels + Overlay + EnvBar + Footer (always renders; no full-screen loading)
-    GlobalKeys.js      #   HEADLESS global/nav key handler (survives tree being hidden)
-    TreePanel.js       #   left "file component": namespace tree + Hz sparkline (render only)
-    ValuePanel.js      #   right "data component": live value, scroll, bandwidth, freeze
-    EnvBar.js          #   host/ROS/domain/rmw/Hz-mode + live REC indicator
-    Footer.js          #   compact, mouse-clickable button bar (Help/Find/Jobs/Tree/Quit)
-    Overlay.js         #   mounts exactly one mode component (below)
-    StatusLine.js      #   default: last action / active filter / action hint
-    SearchBar.js       #   '/' fuzzy search input
-    ParamEdit.js       #   param set / service-call request input (routes by edit.kind)
-    FieldPicker.js     #   plot field multi-select + mode (time / xy / xyz)
-    Bookmarks.js       #   bookmark manager (run/add/delete)
-    BookmarkAdd.js     #   two-step bookmark add (name → cmd)
-    DomainEdit.js      #   ROS_DOMAIN_ID switch input
-    BagPlay.js         #   rosbag play path input
-    TfEcho.js          #   two-frame input → live transform (T)
-    BagCompare.js      #   two bag-path input → side-by-side bag info (B)
-    WatchList.js       #   watch-list overlay: pinned fields + live values (w)
-    Preflight.js       #   health-check overlay: expected conditions ✓/✗ (F)
-    InfoView.js        #   scrollable command output (connections / resource / tf / bag compare)
-    Jobs.js            #   jobs manager (list + output + kill/remove)
-    Help.js            #   categorized shortcut reference (?)
-    Button.js          #   hover/click mouse button
-    TooSmall.js        #   terminal-too-small guard (< MIN_COLS×MIN_ROWS)
+  components/          # grouped by role; each renders + owns its own keyboard input
+    common/            #   reusable building blocks
+      Button.js        #     hover/click footer button (live-bounds press hit-test)
+      List.js          #     scrollable selectable list: selection + hover + click-select + double-click-activate
+      OverlayFrame.js  #     bordered box + title/hint header (overlay chrome)
+    chrome/            #   app frame
+      Layout.js        #     composition root: size guard / GlobalKeys + panels|modal + inline overlay + EnvBar + Footer
+      GlobalKeys.js    #     HEADLESS global/nav key handler (survives tree being hidden)
+      EnvBar.js        #     host/ROS/domain/rmw/Hz-mode + live REC indicator
+      Footer.js        #     compact, mouse-clickable button bar (Help/Find/Jobs/Tree/Quit)
+      TooSmall.js      #     terminal-too-small guard (< MIN_COLS×MIN_ROWS)
+    panels/            #   main split view
+      TreePanel.js     #     left "file component": namespace tree + Hz sparkline + hover highlight
+      ValuePanel.js    #     right "data component": live value, scroll, bandwidth, freeze
+    overlays/          #   the Overlay router + every overlay / input mode
+      Overlay.js       #     mounts exactly one mode component (below)
+      StatusLine.js    #     default: last action / active filter / action hint
+      SearchBar.js     #     '/' fuzzy search input
+      ParamEdit.js     #     param set / service-call request input (routes by edit.kind)
+      PublishForm.js   #     topic publish: fields derived from the message type, fill values (x on a topic)
+      FieldPicker.js   #     plot/watch field multi-select + mode (time / xy / xyz) — uses common List
+      Bookmarks.js     #     bookmark manager (run/add/edit/delete) — uses common List (double-click runs)
+      BookmarkAdd.js   #     bookmark add/edit: multi-line command editor + paste + Ctrl+Space autocomplete
+      DomainEdit.js    #     ROS_DOMAIN_ID switch input
+      BagPlay.js       #     rosbag play path input
+      TfEcho.js        #     two-frame input → live transform (T)
+      BagCompare.js    #     two bag-path input → side-by-side bag info (B)
+      WatchList.js     #     watch-list overlay: pinned fields + live values (w) — uses common List
+      Preflight.js     #     health-check overlay: expected conditions ✓/✗ (F)
+      InfoView.js      #     scrollable command output (connections / resource / tf / bag compare)
+      Jobs.js          #     jobs manager (list + output + kill/remove) — uses common List
+      Help.js          #     categorized shortcut reference (?)
 ```
 
 ## Data flow
@@ -96,17 +112,22 @@ shell's ROS environment (`ROS_MASTER_URI`, `ROS_DOMAIN_ID`, …).
 
 - calls the data hooks (`useRosVersion`, `useTopics`, `useValue`, `useBandwidth`, `useTermSize`);
 - holds all UI state — selection/scroll (`sel`, `top`, `valTop`, `expanded`,
-  `active`), mode flags (`edit`, `searching`, `frozen`, `plotPick`, `domainEdit`,
-  `bmOpen`, `bmAdd`, `infoView`, `bagPlay`, `jobsOpen`, `help`, `treeHidden`),
-  and subsystem state (`hzMode`, `domain`, `rec`, `jobs`, `bookmarks`);
+  `active`, `hoverIdx`), mode flags (`edit`, `searching`, `frozen`, `plotPick`,
+  `domainEdit`, `bmOpen`, `bmAdd`, `infoView`, `bagPlay`, `jobsOpen`, `help`,
+  `watchOpen`, `preflightOpen`, `tfEcho`, `bagCmp`, `pubForm`, `treeHidden`),
+  and subsystem state (`hzMode`, `domain`, `rec`, `jobs`, `bookmarks`, `pkgNames`);
 - computes derived values every render (filtered `list`, `flat` rows, panel
   widths — right pane goes full width when `treeHidden`, clamped selection);
 - exposes actions (`activate`, `move`, `doAction`, `doRestart`, `submitEdit`,
-  `doPlot`/`launchPlot`, `openConnections`/`openTf`/`openResource`, `toggleRec`,
-  `runBookmark`, `cycleHz`, `submitDomain`, `killJob`/`removeJob`, `quit`, …);
-- runs effects: the mouse handler (scroll + click-to-select via
-  `useElementPosition`), the Hz-history ring buffer for sparklines, writing the
-  selective-Hz control file, and killing all jobs on unmount;
+  `openPublishForm`/`submitPubForm`, `doPlot`/`launchPlot`, `openConnections`/
+  `openTf`/`openResource`, `toggleRec`, `runBookmark`, `addBookmark`/
+  `updateBookmark`/`deleteBookmark`, `cycleHz`, `submitDomain`,
+  `killJob`/`removeJob`, `quit`, …);
+- runs effects: the mouse handler (scroll + click-to-select + tree-row hover via
+  `useElementPosition`, gated by a `busyRef` so an open overlay doesn't drive the
+  hidden tree), a background `ros2 pkg list` fetch for autocomplete, the
+  Hz-history ring buffer for sparklines, writing the selective-Hz control file,
+  and killing all jobs on unmount;
 - provides everything through `DashboardContext`; components read it with
   `useDashboard()`.
 
@@ -124,9 +145,10 @@ mode, so input lands in the right place with no central dispatcher.
 | `GlobalKeys`   | no overlay open (headless, always mounted)    | nav (↑↓/jk, Enter, g/G), `/ space p x r c t T S R P B b w J F h D Tab ? 1-9 [ ] +/- q` |
 | `SearchBar`    | `searching`                                   | text, Enter, Esc, Backspace |
 | `ParamEdit`    | `edit`                                         | text, Enter, Esc (param set or service request) |
-| `FieldPicker`  | `plotPick`                                     | ↑↓, space (multi-select), Enter (time), `x` (xy/xyz), Esc |
-| `Bookmarks`    | `bmOpen`                                       | ↑↓, Enter (run), `a` add, `d` delete, Esc |
-| `BookmarkAdd`  | `bmAdd`                                         | text, Enter (next/save), Esc |
+| `PublishForm`  | `pubForm`                                      | ↑↓ fields, type value, Enter (publish once), Esc |
+| `FieldPicker`  | `plotPick`                                     | ↑↓/click, space/double-click (multi-select), Enter (time), `x` (xy/xyz), Esc |
+| `Bookmarks`    | `bmOpen`                                       | ↑↓/click, Enter/double-click (run), `a` add, `e` edit, `d` delete, Esc |
+| `BookmarkAdd`  | `bmAdd`                                         | text + paste, Ctrl+Space (autocomplete dropdown), Enter (newline/next), Ctrl+S (save), Tab (field), Esc |
 | `DomainEdit` / `BagPlay` | `domainEdit` / `bagPlay`             | text, Enter, Esc |
 | `TfEcho` / `BagCompare` | `tfEcho` / `bagCmp`                  | two-step text input, Enter/Esc |
 | `WatchList`    | `watchOpen`                                     | ↑↓, `a` add, `d` remove, Esc |
@@ -138,8 +160,12 @@ mode, so input lands in the right place with no central dispatcher.
 
 Global keys live in a **headless `GlobalKeys`** component (not `TreePanel`) so
 they keep working when the tree is hidden (`Tab`) and its panel is unmounted.
-Mouse (scroll / click-to-select / clickable footer buttons) is handled in the
-store and the `Button` component.
+Mouse for the tree (scroll / hover / click-to-select) is handled in the store;
+footer buttons hover/click via `Button`; list overlays get hover + click-select
++ double-click-activate from the shared `common/List` (each hit-tests the mouse
+against its own rendered rows via `useElementPosition`). Text inputs accept
+**paste** (multi-char / multi-line) through `editable()`, which still filters out
+mouse-report and escape-sequence noise.
 
 ## Subsystems
 
@@ -179,6 +205,65 @@ goes through `spawnJob(label, cmd)`: the child is tracked with a status
 (`run`/`done`/`error`) and a bounded output ring buffer (in a ref to avoid
 re-render storms). The `Jobs` overlay (`J`) lists them, shows output, and kills
 (SIGINT/SIGKILL) or removes them. `quit` kills every job.
+
+### Rendering — flicker-free at the target rate
+Ink regenerates the **whole frame string** on any state change and, if that
+frame's height reaches the terminal's, clears the entire screen each time. Two
+things keep streaming values (e.g. a 30 Hz pose) smooth:
+
+1. **`Layout` is pinned to `rows-1` height with `overflow: hidden`.** The frame
+   can never reach the terminal height, so Ink never takes its full-screen-clear
+   branch. Big overlays (Jobs / Help / publish form / bookmarks) **replace** the
+   panel area instead of stacking on top of the full-height tree; small input
+   bars (search / edit) stay inline. `EnvBar`+`Footer` are pinned at the bottom.
+2. **`diffstdout.js` wraps stdout with a line diff.** It intercepts the frame Ink
+   hands to `log-update`, compares it line-by-line to the previous frame, and
+   rewrites **only the changed lines in place** (no erase-then-write). A value
+   update repaints ~1–2 lines instead of the whole frame — so hover highlights
+   and high-rate values update at full rate with no flicker. Disable with
+   `RDASH_DIFF=0`.
+
+### Publish form (message skeleton from the type)
+`x` on a topic opens `PublishForm` instead of a raw-YAML prompt. `protoCmd`
+(`ros.js`) gets a default-filled skeleton for the topic's message type — ROS2 via
+`ros2 interface proto`, ROS1 via `roslib` introspection — as JSON `{type, skel}`.
+`msgform.js` flattens that into labeled leaf fields (`linear.x`, `linear.y`, …);
+the user fills only the values, and `buildYaml()` reassembles a flow-YAML message
+for `topic pub`. Falls back to free YAML input if the type can't be resolved.
+
+### Bookmark command editor & autocomplete
+`BookmarkAdd` is a multi-line command editor (cursor, arrows, paste). Its goal is
+"easier than typing in a shell": **Ctrl+Space** opens a completion dropdown from
+`complete.js`, which knows ROS2/ROS1 subcommands and pulls topic/node/service
+names from the data the store already holds (package names come from a one-shot
+`ros2 pkg list`). ↑↓ pick, Enter inserts, and typing re-filters live. **Ctrl+S**
+saves (safe under Ink's raw mode, which disables IXON flow control). Edit mode
+(`bmAdd.editIdx`, opened with `e`) reuses the form and writes back in place,
+keeping the hotkey. Bookmark hotkeys are the first free digit of `1-9,0`; entries
+past ten run from the list (Enter or double-click).
+
+### Common list overlay
+`common/List` is the shared list widget behind Bookmarks / Jobs / WatchList /
+FieldPicker: a scroll window that follows the selection, selection + mouse-hover
+highlight, and mouse **single-click = select / double-click = activate** (each
+list hit-tests against its own rows). `common/OverlayFrame` is the shared bordered
+box + title/hint header. Callers keep their own `useInput` for feature keys and
+pass `items / idx / onSelect / onActivate / renderRow`.
+
+### Python deps auto-install
+`pydeps.js` runs before the alt screen: it import-checks `numpy` / `matplotlib` /
+`PyYAML` and pip-installs only the missing ones (plain → `--user` →
+`--break-system-packages` fallback), then waits for Enter so the install log is
+readable before the TUI takes over. No-ops silently once present. Opt out with
+`RDASH_NO_AUTOPIP=1`; choose the interpreter with `RDASH_PYTHON`. The canonical
+list is `requirements.txt` (telemetry's `rospy`/`rclpy` come from ROS, not pip).
+
+### Killing spawned processes
+`killTree` signals a job's process **group** plus every `/proc` descendant (so a
+`bash -c` pipeline dies whole). `killTreeHard` (used for `K`) sends SIGINT first
+and only SIGKILLs whatever is still alive after a grace period — `roslaunch`
+puts each node in its own session via `setsid`, so an instant SIGKILL would
+orphan the nodes and leak their ports.
 
 ### Message age / latency
 The telemetry scripts record each topic's last-arrival time and emit `age`
