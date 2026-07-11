@@ -29,6 +29,7 @@ export function GlobalKeys() {
     else if (ch === 'L') d.openLog();                    // 로그 뷰어(/rosout)
     else if (ch === 'o') d.openParamPanel();             // 파라미터 튜닝(ROS2 노드)
     else if (ch === 'O') d.openOverview();               // 시스템 개요(ROS htop)
+    else if (ch === 'v') d.openDiag();                   // 진단(/diagnostics)
     else if (ch === 't') d.openTf();
     else if (ch === 'T') d.setTfEcho({ step: 'src', src: '', tgt: '' });   // 두 프레임 tf echo
     else if (ch === 'S') d.openResource();

@@ -16,7 +16,7 @@ import { TooSmall } from './TooSmall.js';
 // 큰(모달) 오버레이 — 트리 대신 전체 영역을 차지한다(Jobs·Help·발행 폼 등). 작은 입력줄(검색·값 편집)은
 // 트리를 보면서 아래에 인라인으로 뜬다.
 const isModal = (d) => !!(d.help || d.preflightOpen || d.watchOpen || d.pubForm || d.jobsOpen
-  || d.bmOpen || d.bmAdd || d.infoView || d.plotPick || d.graphOpen || d.qosOpen || d.logOpen || d.paramPanel || d.overviewOpen);
+  || d.bmOpen || d.bmAdd || d.infoView || d.plotPick || d.graphOpen || d.qosOpen || d.logOpen || d.paramPanel || d.overviewOpen || d.diagOpen);
 
 export function Layout() {
   const d = useDashboard();
