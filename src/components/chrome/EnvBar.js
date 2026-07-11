@@ -9,6 +9,7 @@ export function EnvBar() {
   if (env.ver === '2') parts.push(`dom:${env.domain}`, `rmw:${env.rmw}`);
   else if (env.master) parts.push(`master:${env.master.replace(/^https?:\/\//, '')}`);
   parts.push(`Hz:${hzMode}`);
+  if (process.env.RDASH_WEB_ACTIVE) parts.push(`web:${process.env.RDASH_WEB_ACTIVE}`);
   const base = h(Text, { dimColor: true }, ' ' + parts.join('  ·  '));
   if (!rec) return base;
   const el = Math.floor((Date.now() - rec.started) / 1000);   // 경과(초)

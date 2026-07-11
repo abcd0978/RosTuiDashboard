@@ -6,7 +6,8 @@ import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join, extname } from 'path';
 import { spawnSync } from 'child_process';
-import { rosSpawn, echoFullCmd, actionFor, restartFor } from '../src/lib/ros.js';
+import { rosSpawn, echoFullCmd, actionFor, restartFor, protoCmd } from '../src/lib/ros.js';
+import { flattenSkeleton, buildYaml } from '../src/lib/msgform.js';
 import { TELEM, TELEM2 } from '../src/lib/paths.js';
 import {
   connectionsCmd, resourceCmd, tfTreeCmd, tfEchoCmd, bagRecordCmd, bagPlayCmd, bagCompareCmd,
@@ -107,6 +108,12 @@ const server = http.createServer(async (req, res) => {
 
     // 조회(one-shot)
     if (p === '/api/msgdef') return json(res, 200, { out: await runOnce(msgDefCmd(VER, q.get('type'))) });
+    if (p === '/api/proto') {   // 발행 폼 프리필: 타입 스켈레톤 → flow-style YAML 한 줄 (TUI 와 동일)
+      const cmd = protoCmd(VER, 'topic', q.get('name'), q.get('type'));
+      if (!cmd) return json(res, 200, { yaml: '{}' });
+      try { const skel = JSON.parse((await runOnce(cmd)).trim() || '{}').skel || {}; return json(res, 200, { yaml: buildYaml(flattenSkeleton(skel)) || '{}' }); }
+      catch { return json(res, 200, { yaml: '{}' }); }
+    }
     if (p === '/api/connections') return json(res, 200, { out: await runOnce(connectionsCmd(VER, q.get('kind'), q.get('name'))) });
     if (p === '/api/resource') { const b = await readBody(req); return json(res, 200, { out: await runOnce(resourceCmd(b.nodes || [])) }); }
     if (p === '/api/tftree') return json(res, 200, { out: await runOnce(tfTreeCmd(VER)) });
