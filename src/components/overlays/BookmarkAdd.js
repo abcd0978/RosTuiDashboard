@@ -92,6 +92,17 @@ export function BookmarkAdd() {
     }
     if (key.escape) { d.setBmAdd(null); return; }
     if (key.ctrl && input === 's') { save(); return; }                       // 저장(Ctrl+S)
+    if (key.ctrl && (input === 'p' || input === 'n')) {                      // 명령 히스토리 recall
+      const hist = d.history || [];
+      if (!hist.length) return;
+      d.setBmAdd((e) => {
+        if (!e) return e;
+        const hi = clamp((e.hidx == null ? hist.length : e.hidx) + (input === 'p' ? -1 : 1), 0, hist.length);
+        const cmd = hi >= hist.length ? '' : hist[hi];
+        return { ...e, field: 'cmd', cmd, cur: cmd.length, hidx: hi, comp: null };
+      });
+      return;
+    }
     if (key.ctrl && input === '`') { openComplete(); return; }               // 자동완성(Ctrl+Space)
     if (key.tab) { gotoField(field === 'name' ? 'cmd' : 'name'); return; }   // 칸 전환
     if (key.return || input === '\n') {                                      // 이름칸=다음, 명령칸=줄바꿈
@@ -139,5 +150,5 @@ export function BookmarkAdd() {
           const on = drop.base + i === comp.idx;
           return h(Text, { key: i, backgroundColor: on ? 'cyan' : undefined, color: on ? 'black' : 'white' }, ` ${on ? '▶' : ' '} ${c} `);
         }))
-      : h(Text, { dimColor: true }, ' Ctrl+Space=자동완성 · Enter=줄바꿈 · Ctrl+S=저장 · Tab=칸 · ←→↑↓ 커서 · 붙여넣기 OK · Esc=취소'));
+      : h(Text, { dimColor: true }, ' Ctrl+Space=자동완성 · Ctrl+P/N=히스토리 · Enter=줄바꿈 · Ctrl+S=저장 · Tab=칸 · Esc=취소'));
 }

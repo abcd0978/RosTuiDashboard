@@ -13,3 +13,19 @@ export function loadSession() {
 export function saveSession(s) {
   try { writeFileSync(SESSION_PATH, JSON.stringify(s, null, 2)); } catch { /* */ }
 }
+
+// 명령 히스토리 — 실행한 셸 명령을 ~/.rdash_history 에 누적(중복 제거, 최근 200개). 북마크 에디터에서 Ctrl+P/N.
+export const HISTORY_PATH = join(homedir(), '.rdash_history');
+export function loadHistory() {
+  try { const a = JSON.parse(readFileSync(HISTORY_PATH, 'utf8')); return Array.isArray(a) ? a : []; }
+  catch { return []; }
+}
+export function pushHistory(cmd) {
+  const c = (cmd || '').trim();
+  if (!c) return loadHistory();
+  const a = loadHistory().filter((x) => x !== c);
+  a.push(c);
+  const t = a.slice(-200);
+  try { writeFileSync(HISTORY_PATH, JSON.stringify(t)); } catch { /* */ }
+  return t;
+}

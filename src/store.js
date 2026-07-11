@@ -16,7 +16,7 @@ import { PLOT_PY } from './lib/paths.js';
 import { rosEnv } from './lib/env.js';
 import { loadBookmarks, saveBookmarks } from './lib/bookmarks.js';
 import { loadPreflight } from './lib/preflight.js';
-import { loadSession, saveSession } from './lib/session.js';
+import { loadSession, saveSession, loadHistory, pushHistory } from './lib/session.js';
 import { connectionsCmd, resourceCmd, tfTreeCmd, tfEchoCmd, bagRecordCmd, bagPlayCmd, bagCompareCmd, msgDefCmd, paramListCmd, paramGetCmd, paramSetCmd } from './lib/commands.js';
 import { useRosVersion } from './hooks/useRosVersion.js';
 import { useTopics } from './hooks/useTopics.js';
@@ -175,7 +175,8 @@ export function StoreProvider({ children }) {
 
   // 마지막으로 실행한 셸 명령 기억 → 북마크 추가 시 자동 채움(명령 안 외워도 됨)
   const lastCmdRef = useRef('');
-  const run = (cmd, onDone) => { lastCmdRef.current = cmd; runAction(cmd, onDone); };
+  const historyRef = useRef(loadHistory());   // 명령 히스토리(북마크 에디터 Ctrl+P/N)
+  const run = (cmd, onDone) => { lastCmdRef.current = cmd; historyRef.current = pushHistory(cmd); runAction(cmd, onDone); };
 
   // 토픽 발행 폼 — 타입에서 필드를 뽑아 값만 채우게 한다(구조를 손으로 안 침).
   const openPublishForm = () => {
@@ -277,6 +278,7 @@ export function StoreProvider({ children }) {
   // ── 작업(Jobs) 레지스트리 — RDash 가 띄운 프로세스를 추적/조회/종료 ──────────────
   const spawnJob = (label, cmd) => {
     lastCmdRef.current = cmd;               // 북마크 자동채움용
+    historyRef.current = pushHistory(cmd);  // 히스토리 누적
     const id = ++jobSeqRef.current;
     const child = rosSpawn(cmd, undefined, true);   // detached=새 그룹 → 파이프라인째 종료 가능
     const lines = []; jobLogsRef.current.set(id, lines);
@@ -506,6 +508,7 @@ export function StoreProvider({ children }) {
     toggleTree: () => setTreeHidden((v) => !v),
     activate, move, doAction, doRestart, submitSet, submitEdit, doPlot, launchPlot, quit,
     cycleHz, submitDomain, runBookmark, runBookmarkKey, addBookmark, deleteBookmark, updateBookmark, bmSeedCmd,
+    history: historyRef.current,
     openConnections, openResource, openTf, closeInfo, toggleRec, submitBagPlay,
     killJob, removeJob,
   };
