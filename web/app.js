@@ -282,14 +282,21 @@ function mkScene(cv, labelDiv, info) {
   const VS = 'attribute vec3 p; attribute vec4 col; uniform mat4 mvp; uniform float psize; varying vec4 vc; void main(){ gl_Position = mvp*vec4(p,1.0); gl_PointSize = psize; vc = col; }';
   const FS = 'precision mediump float; varying vec4 vc; uniform float round; void main(){ if(round>0.5){ vec2 d=gl_PointCoord-0.5; if(dot(d,d)>0.25) discard; } gl_FragColor = vc; }';
   // 클라우드 전용 셰이더 — xyz 만 올리고 높이색을 GPU(FS)에서 계산: 점당 JS 색 루프 제거 + 버퍼 절반(3f vs 7f).
-  const VSC = 'attribute vec3 p; uniform mat4 mvp; uniform float psize; varying float vz; void main(){ gl_Position = mvp*vec4(p,1.0); gl_PointSize = psize; vz = p.z; }';
-  const FSC = 'precision mediump float; varying float vz; uniform float zmin; uniform float zmax; void main(){ vec2 d=gl_PointCoord-0.5; if(dot(d,d)>0.25) discard; float h=clamp((vz-zmin)/max(zmax-zmin,1e-4),0.0,1.0); gl_FragColor=vec4(0.2+h*0.7, 0.66+h*0.14, 0.87-h*0.55, 1.0); }';
+  // 거리 LOD(GPU): lodDist 너머는 keep=lodDist/depth 비율만 유지(위치 해시로 안정, 깜빡임 없음) + 생존점을 1/√keep 로
+  // 키워 밀도 보존. CPU 재정렬 불필요 → 전량 무복사 업로드. (참고: Gaussian-splat 뷰어의 거리 LOD 기법을 점군에 적용.)
+  const VSC = 'attribute vec3 p; uniform mat4 mvp; uniform float psize; uniform float lodDist; varying float vz;'
+    + ' void main(){ vec4 clip = mvp*vec4(p,1.0); float depth = clip.w; float ps = psize;'
+    + ' if(lodDist>0.0 && depth>lodDist){ float keep=max(lodDist/depth,0.04); float h=fract(sin(dot(p,vec3(12.9898,78.233,37.719)))*43758.5453);'
+    + ' if(h>keep){ gl_Position=vec4(2.0,2.0,2.0,1.0); gl_PointSize=0.0; return; } ps = psize/sqrt(keep); }'
+    + ' gl_Position = clip; gl_PointSize = ps; vz = p.z; }';
+  const FSC = 'precision mediump float; varying float vz; uniform float zmin; uniform float zmax; uniform float round;'
+    + ' void main(){ if(round>0.5){ vec2 d=gl_PointCoord-0.5; if(dot(d,d)>0.25) discard; } float h=clamp((vz-zmin)/max(zmax-zmin,1e-4),0.0,1.0); gl_FragColor=vec4(0.2+h*0.7, 0.66+h*0.14, 0.87-h*0.55, 1.0); }';
   const sh = (t, s) => { const o = gl.createShader(t); gl.shaderSource(o, s); gl.compileShader(o); if (!gl.getShaderParameter(o, gl.COMPILE_STATUS)) console.warn(gl.getShaderInfoLog(o)); return o; };
   const mkProg = (vs, fs) => { const p = gl.createProgram(); gl.attachShader(p, sh(gl.VERTEX_SHADER, vs)); gl.attachShader(p, sh(gl.FRAGMENT_SHADER, fs)); gl.linkProgram(p); return p; };
   const prog = mkProg(VS, FS); gl.useProgram(prog);
   const aP = gl.getAttribLocation(prog, 'p'), aC = gl.getAttribLocation(prog, 'col'), uMVP = gl.getUniformLocation(prog, 'mvp'), uPS = gl.getUniformLocation(prog, 'psize'), uRound = gl.getUniformLocation(prog, 'round');
   const cprog = mkProg(VSC, FSC);
-  const caP = gl.getAttribLocation(cprog, 'p'), cuMVP = gl.getUniformLocation(cprog, 'mvp'), cuPS = gl.getUniformLocation(cprog, 'psize'), cuZmin = gl.getUniformLocation(cprog, 'zmin'), cuZmax = gl.getUniformLocation(cprog, 'zmax');
+  const caP = gl.getAttribLocation(cprog, 'p'), cuMVP = gl.getUniformLocation(cprog, 'mvp'), cuPS = gl.getUniformLocation(cprog, 'psize'), cuZmin = gl.getUniformLocation(cprog, 'zmin'), cuZmax = gl.getUniformLocation(cprog, 'zmax'), cuLod = gl.getUniformLocation(cprog, 'lodDist'), cuRound = gl.getUniformLocation(cprog, 'round');
   gl.enableVertexAttribArray(aP); gl.enableVertexAttribArray(aC);
   gl.clearColor(0.043, 0.055, 0.071, 1); gl.enable(gl.DEPTH_TEST); gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
   const bufs = { pts: gl.createBuffer(), line: gl.createBuffer(), tri: gl.createBuffer(), triA: gl.createBuffer() };
@@ -299,12 +306,14 @@ function mkScene(cv, labelDiv, info) {
   const cloudBuf = gl.createBuffer(); let cloudN = 0, zmin = 0, zmax = 1;   // 클라우드는 xyz 전용 버퍼 + zmin/zmax 유니폼
   const permCache = { n: -1, perm: null };   // 거리 LOD 순열 캐시(점수 바뀔 때만 재계산)
   let yaw = 0.7, pitch = -0.6, dist = 12, center = [0, 0, 0.5], psize = 2.4, pan = [0, 0], raf = 0, alive = true;
-  const opt = { grid: true, axes: true, lod: true };
+  // 최적화 옵션(선택 가능) — lodMode: off|distance|adaptive · lodDist: 거리 임계(월드) · targetFps: 적응형 목표 ·
+  // maxPoints: 하드 상한(0=무제한) · round: 둥근 점(off=사각, 소프트웨어에서 더 빠름).
+  const opt = { grid: true, axes: true, lodMode: 'adaptive', lodDist: 60, targetFps: 40, maxPoints: 0, round: true };
   let frames = [], labels = [];
   const labelPool = [];          // 라벨 span 재사용(프레임마다 DOM 재생성 방지)
   const clouds = new Map();      // 디스플레이 id → {data:Float32Array(xyz), visible} — 여러 클라우드 동시 렌더
   const markerSets = new Map();  // 디스플레이 id → {markers:[], visible}
-  let fps = 0, lastDrawn = 0, frameN = 0, fpsClock = (typeof performance !== 'undefined' ? performance.now() : 0), budget = 500000;   // budget: 적응형 LOD 점 예산
+  let fps = 0, lastDrawn = 0, frameN = 0, fpsClock = (typeof performance !== 'undefined' ? performance.now() : 0);
   const gcd = (a, b) => { while (b) { const t = b; b = a % b; a = t; } return a; };
   // prefix 가 공간적으로 대표성 있도록 큰 서로소 곱 순열(거리 LOD 로 앞쪽 N개만 그려도 골고루).
   const stridePermute = (n) => { const idx = new Uint32Array(n); if (!n) return idx; let step = (Math.floor(n * 0.6180339887) | 1); while (gcd(step, n) !== 1) step++; for (let k = 0, j = 0; k < n; k++, j = (j + step) % n) idx[k] = j; return idx; };
@@ -356,8 +365,8 @@ function mkScene(cv, labelDiv, info) {
     const src = vis.length === 1 ? vis[0] : (() => { const m = new Float32Array(total * 3); let o = 0; for (const a of vis) { m.set(a, o); o += a.length; } return m; })();
     let mn = Infinity, mx = -Infinity; for (let i = 0; i < total; i++) { const z = src[i * 3 + 2]; if (z < mn) mn = z; if (z > mx) mx = z; } zmin = mn; zmax = mx;
     let out;
-    // LOD 켜짐 + 대용량일 때만 대표성 순열(적응형 프리픽스용). LOD 꺼짐/단일 클라우드는 무복사 업로드 → GPU 여유 최대.
-    if (opt.lod && total > 4000) { if (permCache.n !== total) { permCache.perm = stridePermute(total); permCache.n = total; } const perm = permCache.perm; out = new Float32Array(total * 3); for (let k = 0; k < total; k++) { const i = perm[k]; out[k * 3] = src[i * 3]; out[k * 3 + 1] = src[i * 3 + 1]; out[k * 3 + 2] = src[i * 3 + 2]; } }
+    // 거리 LOD 는 셰이더가 처리 → 보통은 무복사 업로드. 하드 상한(maxPoints)이 걸릴 때만 대표성 순열로 프리픽스 샘플.
+    if (opt.maxPoints > 0 && opt.maxPoints < total) { if (permCache.n !== total) { permCache.perm = stridePermute(total); permCache.n = total; } const perm = permCache.perm; out = new Float32Array(total * 3); for (let k = 0; k < total; k++) { const i = perm[k]; out[k * 3] = src[i * 3]; out[k * 3 + 1] = src[i * 3 + 1]; out[k * 3 + 2] = src[i * 3 + 2]; } }
     else out = src;
     gl.bindBuffer(gl.ARRAY_BUFFER, cloudBuf); gl.bufferData(gl.ARRAY_BUFFER, out, gl.DYNAMIC_DRAW);
   }
@@ -376,14 +385,15 @@ function mkScene(cv, labelDiv, info) {
     if (nV.pts) { gl.uniform1f(uPS, psize); gl.uniform1f(uRound, 1); bind('pts'); gl.drawArrays(gl.POINTS, 0, nV.pts); gl.uniform1f(uRound, 0); }
     // 클라우드 — 전용 셰이더(GPU 높이색) + 거리 LOD(멀수록 앞쪽 일부만, 순열로 대표성 유지).
     if (cloudN) { gl.useProgram(cprog); gl.uniformMatrix4fv(cuMVP, false, mvpF); gl.uniform1f(cuPS, psize); gl.uniform1f(cuZmin, zmin); gl.uniform1f(cuZmax, zmax);
+      gl.uniform1f(cuLod, opt.lodMode === 'off' ? 0 : opt.lodDist); gl.uniform1f(cuRound, opt.round ? 1 : 0);
       gl.bindBuffer(gl.ARRAY_BUFFER, cloudBuf); gl.vertexAttribPointer(caP, 3, gl.FLOAT, false, 0, 0);
-      let dc = cloudN; if (opt.lod) { const frac = Math.max(0.1, Math.min(1, 9 / dist)); dc = Math.min(cloudN, Math.round(cloudN * frac), budget); } dc = Math.max(1, dc); lastDrawn = dc;
+      const dc = opt.maxPoints > 0 ? Math.min(cloudN, opt.maxPoints) : cloudN; lastDrawn = dc;   // 셰이더가 거리 LOD 로 추가 컬링
       gl.drawArrays(gl.POINTS, 0, dc); gl.useProgram(prog); } else lastDrawn = 0;
     if (nV.triA) { gl.depthMask(false); bind('triA'); gl.drawArrays(gl.TRIANGLES, 0, nV.triA); gl.depthMask(true); }
     projectLabels(mvp);
     frameN++; const now = (typeof performance !== 'undefined' ? performance.now() : fpsClock + 16); if (now - fpsClock >= 500) { fps = Math.round(frameN * 1000 / (now - fpsClock)); frameN = 0; fpsClock = now;
-      // 적응형 LOD — FPS 가 낮으면 점 예산을 줄이고, 여유 있으면 늘려 목표 프레임(≈40)을 유지.
-      if (opt.lod && cloudN) { if (fps < 30) budget = Math.max(8000, (budget * 0.8) | 0); else if (fps > 50) budget = Math.min(3000000, (budget * 1.2) | 0); } } }
+      // 적응형 LOD — FPS 가 목표보다 낮으면 거리 임계(lodDist)를 낮춰 먼 점을 더 솎고, 여유 있으면 높여 디테일 복원.
+      if (opt.lodMode === 'adaptive' && cloudN) { if (fps < opt.targetFps - 5) opt.lodDist = Math.max(3, opt.lodDist * 0.85); else if (fps > opt.targetFps + 8) opt.lodDist = Math.min(200, opt.lodDist * 1.12); } } }
   let drag = null, btn = 0;
   cv.addEventListener('mousedown', (e) => { drag = { x: e.clientX, y: e.clientY }; btn = e.button; cv.style.cursor = 'grabbing'; e.preventDefault(); });
   window.addEventListener('mouseup', () => { drag = null; cv.style.cursor = 'grab'; });
@@ -406,7 +416,7 @@ function mkScene(cv, labelDiv, info) {
     opts(o) { Object.assign(opt, o); rebuildScene(); },
     view(p) { pan = [0, 0]; if (p === 'top') { yaw = 0; pitch = -1.554; } else if (p === 'front') { yaw = 0; pitch = 0; } else if (p === 'side') { yaw = Math.PI / 2; pitch = 0; } else if (p === 'back') { yaw = Math.PI; pitch = 0; } else { yaw = 0.7; pitch = -0.6; dist = 12; center = [0, 0, 0.5]; } },
     setPointSize(s) { psize = s; },
-    getStats() { return { fps, points: cloudN, drawn: lastDrawn }; },
+    getStats() { return { fps, points: cloudN, drawn: lastDrawn, lodDist: opt.lodDist, lodMode: opt.lodMode }; },
     dispose() { alive = false; cancelAnimationFrame(raf); if (labelDiv) labelDiv.innerHTML = ''; try { for (const k in bufs) gl.deleteBuffer(bufs[k]); gl.deleteBuffer(cloudBuf); gl.deleteProgram(prog); gl.deleteProgram(cprog); } catch (_) { /* */ } },
   };
 }
@@ -516,14 +526,14 @@ const Views = {
     const addDisplay = (kind, topic) => { const id = idOf(kind, topic); if (displays.has(id)) return; const d = { id, kind, topic, on: true }; displays.set(id, d); subscribe(d); renderList(); };
     const toggle = (d) => { d.on = !d.on; if (d.on) subscribe(d); else unsubscribe(d); renderList(); };
     const removeD = (d) => { unsubscribe(d); scene.removeDisplay(d.kind, d.id); displays.delete(d.id); renderList(); };
-    const builtin = { grid: true, axes: true, tf: true, lod: true }; let tfES = null;
+    const builtin = { grid: true, axes: true, tf: true }; let tfES = null;
     const subTF = (on) => { if (tfES) { tfES.close(); tfES = null; } scene.setTF([]); if (!on) return; tfES = new EventSource('/tfstream'); tfES.onmessage = (e) => { if (!e.data) return; try { const o = JSON.parse(e.data); scene.setTF(o.frames || []); } catch (_) { /* */ } }; };
     const listBox = el('div', {});
     const DR = 'display:flex;align-items:center;gap:5px;padding:2px 4px;font-size:11px;cursor:default';
     function renderList() { listBox.innerHTML = '';
       const chk = (label, key, fn) => { const c = el('input', { type: 'checkbox' }); c.checked = builtin[key]; c.onchange = () => { builtin[key] = c.checked; fn(c.checked); }; return el('label', { style: DR }, c, el('span', {}, label)); };
       listBox.append(el('div', { class: 'hint', style: 'margin:4px 0 2px;text-transform:uppercase;letter-spacing:.05em' }, '내장'));
-      listBox.append(chk('Grid', 'grid', (v) => scene.opts({ grid: v })), chk('Axes', 'axes', (v) => scene.opts({ axes: v })), chk('TF', 'tf', (v) => subTF(v)), chk('LOD (거리)', 'lod', (v) => scene.opts({ lod: v })));
+      listBox.append(chk('Grid', 'grid', (v) => scene.opts({ grid: v })), chk('Axes', 'axes', (v) => scene.opts({ axes: v })), chk('TF', 'tf', (v) => subTF(v)));
       listBox.append(el('div', { class: 'hint', style: 'margin:6px 0 2px;text-transform:uppercase;letter-spacing:.05em' }, '디스플레이'));
       if (!displays.size) listBox.append(el('div', { class: 'hint', style: 'padding:2px 4px' }, '아래에서 토픽 추가'));
       for (const d of displays.values()) { const c = el('input', { type: 'checkbox' }); c.checked = d.on; c.onchange = () => toggle(d);
@@ -540,9 +550,30 @@ const Views = {
     const topbar = el('div', { style: 'display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:6px' },
       el('span', { style: 'display:inline-flex;gap:3px' }, vbtn('Top', 'top'), vbtn('Front', 'front'), vbtn('Side', 'side'), vbtn('Iso', 'iso')),
       el('label', { style: 'display:inline-flex;align-items:center;gap:4px' }, el('span', { class: 'hint' }, '점크기'), ptSize));
+    // ── ⚙ 최적화 옵션(선택 가능) — LOD 모드/거리/목표FPS/최대점수/점모양 ──
+    const O = { lodMode: 'adaptive', lodDist: 60, targetFps: 40, maxPoints: 0, round: true };
+    const optBox = el('div', { style: 'margin-top:10px;border-top:1px solid var(--line);padding-top:8px' });
+    const olbl = (t, node) => el('label', { class: 'hint', style: 'display:block;margin:5px 0 2px' }, t, node);
+    function renderOpt() { optBox.innerHTML = '';
+      optBox.append(el('div', { class: 'hint', style: 'font-weight:600;margin-bottom:2px' }, '⚙ 최적화'));
+      const modeSel = el('select', { style: 'width:100%;font:11px monospace' });
+      [['off', '끄기 (전량 렌더)'], ['distance', '거리 LOD'], ['adaptive', '적응형 (FPS 유지)']].forEach(([v, l]) => modeSel.append(el('option', { value: v }, l)));
+      modeSel.value = O.lodMode; modeSel.onchange = () => { O.lodMode = modeSel.value; scene.opts({ lodMode: O.lodMode }); renderOpt(); };
+      optBox.append(olbl('LOD 모드', modeSel));
+      if (O.lodMode !== 'off') { const d = el('input', { type: 'range', min: '5', max: '120', step: '1', value: String(Math.round(O.lodDist)), style: 'width:100%' });
+        if (O.lodMode === 'adaptive') d.disabled = true;
+        d.oninput = () => { O.lodDist = +d.value; scene.opts({ lodDist: O.lodDist }); }; optBox.append(olbl(O.lodMode === 'adaptive' ? '거리 임계 (자동)' : '거리 임계 (m)', d)); }
+      if (O.lodMode === 'adaptive') { const f = el('input', { type: 'range', min: '20', max: '60', step: '5', value: String(O.targetFps), style: 'width:100%' }); const fl = el('span', {}, ' ' + O.targetFps + ' fps');
+        f.oninput = () => { O.targetFps = +f.value; scene.opts({ targetFps: O.targetFps }); fl.textContent = ' ' + O.targetFps + ' fps'; }; optBox.append(olbl(el('span', {}, '목표 FPS', fl), f)); }
+      const capSel = el('select', { style: 'width:100%;font:11px monospace' });
+      [[0, '무제한'], [50000, '5만'], [100000, '10만'], [200000, '20만'], [500000, '50만']].forEach(([v, l]) => capSel.append(el('option', { value: v }, l)));
+      capSel.value = String(O.maxPoints); capSel.onchange = () => { O.maxPoints = +capSel.value; scene.opts({ maxPoints: O.maxPoints }); }; optBox.append(olbl('최대 점수 (하드 상한)', capSel));
+      const rc = el('input', { type: 'checkbox' }); rc.checked = O.round; rc.onchange = () => { O.round = rc.checked; scene.opts({ round: O.round }); };
+      optBox.append(el('label', { style: 'display:flex;align-items:center;gap:5px;margin-top:6px;font-size:11px' }, rc, el('span', {}, '둥근 점 (끄면 사각·더 빠름)'))); }
+    renderOpt();
     const timeBar = el('div', { class: 'hint', style: 'margin-top:4px' });
     const panel = el('div', { style: 'display:flex;gap:10px' },
-      el('div', { style: 'width:210px;flex:none;border-right:1px solid var(--line);padding-right:8px' }, el('div', { class: 'hint', style: 'font-weight:600;margin-bottom:2px' }, '🗂 Displays'), listBox),
+      el('div', { style: 'width:210px;flex:none;border-right:1px solid var(--line);padding-right:8px;overflow:auto;max-height:78vh' }, el('div', { class: 'hint', style: 'font-weight:600;margin-bottom:2px' }, '🗂 Displays'), listBox, optBox),
       el('div', { style: 'flex:1;min-width:0;display:flex;flex-direction:column' }, topbar, stage, info, timeBar));
     openModal('🧊 3D 씬 (RViz 식)', panel);
     const M = document.querySelector('#modal .m'); if (M) { M.style.width = 'min(1300px,96vw)'; }
@@ -552,7 +583,7 @@ const Views = {
     else if (it && cloudTopics().includes(it.name)) addDisplay('cloud', it.name);
     else { if (cloudTopics()[0]) addDisplay('cloud', cloudTopics()[0]); if (markerTopics()[0]) addDisplay('marker', markerTopics()[0]); }
     const statIv = setInterval(() => { if (!$('#modal').classList.contains('on')) { clearInterval(statIv); return; }
-      const s = scene.getStats(); fpsOv.textContent = `${s.fps} FPS · ${s.drawn.toLocaleString()} / ${s.points.toLocaleString()} pts`;
+      const s = scene.getStats(); fpsOv.textContent = `${s.fps} FPS · ${s.drawn.toLocaleString()} / ${s.points.toLocaleString()} pts${s.lodMode !== 'off' ? ` · LOD ${Math.round(s.lodDist)}m` : ''}`;
       const wall = new Date().toLocaleTimeString(); const sim = Clock.sim != null ? Clock.sim.toFixed(2) + 's' : '—';
       timeBar.textContent = `🕒 wall ${wall} · sim ${sim}${Clock.sim == null ? ' (no /clock)' : Clock.stale() ? ' (paused)' : ''}`; }, 500);
     modalSub = { close: () => { clearInterval(statIv); for (const d of displays.values()) if (d.es) d.es.close(); if (tfES) tfES.close(); scene.dispose(); } };
