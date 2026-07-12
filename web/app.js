@@ -308,11 +308,11 @@ function mkScene(cv, labelDiv, info) {
   // 클라우드 전용 셰이더 — xyz 만 올리고 높이색을 GPU(FS)에서 계산: 점당 JS 색 루프 제거 + 버퍼 절반(3f vs 7f).
   // 거리 LOD(GPU): lodDist 너머는 keep=lodDist/depth 비율만 유지(위치 해시로 안정, 깜빡임 없음) + 생존점을 1/√keep 로
   // 키워 밀도 보존. CPU 재정렬 불필요 → 전량 무복사 업로드. (참고: Gaussian-splat 뷰어의 거리 LOD 기법을 점군에 적용.)
-  const VSC = 'attribute vec3 p; attribute float c; uniform mat4 mvp; uniform float psize; uniform float lodDist; varying float vz; varying float vc;'
-    + ' void main(){ vec4 clip = mvp*vec4(p,1.0); float depth = clip.w; float ps = psize;'
+  const VSC = 'attribute vec3 p; attribute float c; uniform mat4 mvp; uniform mat4 world; uniform float psize; uniform float lodDist; varying float vz; varying float vc;'
+    + ' void main(){ vec4 wp = world*vec4(p,1.0); vec4 clip = mvp*wp; float depth = clip.w; float ps = psize;'
     + ' if(lodDist>0.0 && depth>lodDist){ float keep=max(lodDist/depth,0.04); float h=fract(sin(dot(p,vec3(12.9898,78.233,37.719)))*43758.5453);'
     + ' if(h>keep){ gl_Position=vec4(2.0,2.0,2.0,1.0); gl_PointSize=0.0; return; } ps = psize/sqrt(keep); }'
-    + ' gl_Position = clip; gl_PointSize = ps; vz = p.z; vc = c; }';
+    + ' gl_Position = clip; gl_PointSize = ps; vz = wp.z; vc = c; }';
   // 색상 모드: 0=높이(z) · 1=intensity(jet) · 2=rgb(패킹 언팩) · 3=단색.
   const FSC = 'precision mediump float; varying float vz; varying float vc; uniform float zmin, zmax, round, colorMode, cmin, cmax;'
     + ' void main(){ if(round>0.5){ vec2 d=gl_PointCoord-0.5; if(dot(d,d)>0.25) discard; } vec3 col;'
@@ -325,7 +325,10 @@ function mkScene(cv, labelDiv, info) {
   const prog = mkProg(VS, FS); gl.useProgram(prog);
   const aP = gl.getAttribLocation(prog, 'p'), aC = gl.getAttribLocation(prog, 'col'), uMVP = gl.getUniformLocation(prog, 'mvp'), uPS = gl.getUniformLocation(prog, 'psize'), uRound = gl.getUniformLocation(prog, 'round');
   const cprog = mkProg(VSC, FSC);
-  const caP = gl.getAttribLocation(cprog, 'p'), caC = gl.getAttribLocation(cprog, 'c'), cuMVP = gl.getUniformLocation(cprog, 'mvp'), cuPS = gl.getUniformLocation(cprog, 'psize'), cuZmin = gl.getUniformLocation(cprog, 'zmin'), cuZmax = gl.getUniformLocation(cprog, 'zmax'), cuLod = gl.getUniformLocation(cprog, 'lodDist'), cuRound = gl.getUniformLocation(cprog, 'round'), cuCM = gl.getUniformLocation(cprog, 'colorMode'), cuCmin = gl.getUniformLocation(cprog, 'cmin'), cuCmax = gl.getUniformLocation(cprog, 'cmax');
+  const caP = gl.getAttribLocation(cprog, 'p'), caC = gl.getAttribLocation(cprog, 'c'), cuMVP = gl.getUniformLocation(cprog, 'mvp'), cuWorld = gl.getUniformLocation(cprog, 'world'), cuPS = gl.getUniformLocation(cprog, 'psize'), cuZmin = gl.getUniformLocation(cprog, 'zmin'), cuZmax = gl.getUniformLocation(cprog, 'zmax'), cuLod = gl.getUniformLocation(cprog, 'lodDist'), cuRound = gl.getUniformLocation(cprog, 'round'), cuCM = gl.getUniformLocation(cprog, 'colorMode'), cuCmin = gl.getUniformLocation(cprog, 'cmin'), cuCmax = gl.getUniformLocation(cprog, 'cmax');
+  const IDENT16 = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
+  const gMat4 = () => { const g = computeG(); if (!g) return IDENT16; const q = g.q, x = q[0], y = q[1], z = q[2], w = q[3], xx = x * x, yy = y * y, zz = z * z, xy = x * y, xz = x * z, yz = y * z, wx = w * x, wy = w * y, wz = w * z;
+    return [1 - 2 * (yy + zz), 2 * (xy + wz), 2 * (xz - wy), 0, 2 * (xy - wz), 1 - 2 * (xx + zz), 2 * (yz + wx), 0, 2 * (xz + wy), 2 * (yz - wx), 1 - 2 * (xx + yy), 0, g.p[0], g.p[1], g.p[2], 1]; };
   gl.enableVertexAttribArray(caC);
   gl.enableVertexAttribArray(aP); gl.enableVertexAttribArray(aC);
   gl.clearColor(0.043, 0.055, 0.071, 1); gl.enable(gl.DEPTH_TEST); gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
@@ -338,8 +341,11 @@ function mkScene(cv, labelDiv, info) {
   let yaw = 0.7, pitch = -0.6, dist = 12, center = [0, 0, 0.5], psize = 2.4, pan = [0, 0], raf = 0, alive = true;
   // 최적화 옵션(선택 가능) — lodMode: off|distance|adaptive · lodDist: 거리 임계(월드) · targetFps: 적응형 목표 ·
   // maxPoints: 하드 상한(0=무제한) · round: 둥근 점(off=사각, 소프트웨어에서 더 빠름).
-  const opt = { grid: true, axes: true, lodMode: 'adaptive', lodDist: 60, targetFps: 40, maxPoints: 0, round: true, colorMode: 0 };   // colorMode 0=높이 1=intensity 2=rgb 3=단색
-  let frames = [], labels = [];
+  const opt = { grid: true, axes: true, lodMode: 'adaptive', lodDist: 60, targetFps: 40, maxPoints: 0, round: true, colorMode: 0, follow: null, ortho: false, fixedFrame: null };
+  let frames = [], labels = [], frameMap = {};   // frameMap: frame_id → 루트 기준 {p,q}
+  // 고정 프레임 변환 g(루트→고정): 고정 프레임의 역변환. null=identity.
+  const computeG = () => { const F = opt.fixedFrame && frameMap[opt.fixedFrame]; if (!F) return null; const cq = [-F.q[0], -F.q[1], -F.q[2], F.q[3]]; const pg = qrot(cq, F.p); return { q: cq, p: [-pg[0], -pg[1], -pg[2]] }; };
+  const applyG = (g, r) => { if (!g) return r; const v = qrot(g.q, r); return [v[0] + g.p[0], v[1] + g.p[1], v[2] + g.p[2]]; };
   const labelPool = [];          // 라벨 span 재사용(프레임마다 DOM 재생성 방지)
   const clouds = new Map();      // 디스플레이 id → {data:Float32Array(xyz), visible} — 여러 클라우드 동시 렌더
   const markerSets = new Map();  // 디스플레이 id → {markers:[], visible}
@@ -349,7 +355,8 @@ function mkScene(cv, labelDiv, info) {
   const stridePermute = (n) => { const idx = new Uint32Array(n); if (!n) return idx; let step = (Math.floor(n * 0.6180339887) | 1); while (gcd(step, n) !== 1) step++; for (let k = 0, j = 0; k < n; k++, j = (j + step) % n) idx[k] = j; return idx; };
   const perspective = (fov, asp, n, f) => { const t = 1 / Math.tan(fov / 2), nf = 1 / (n - f); return [t / asp, 0, 0, 0, 0, t, 0, 0, 0, 0, (f + n) * nf, -1, 0, 0, 2 * f * n * nf, 0]; };
   const mul = (a, b) => { const o = new Array(16); for (let r = 0; r < 4; r++) for (let c = 0; c < 4; c++) { let s = 0; for (let k = 0; k < 4; k++) s += a[k * 4 + r] * b[c * 4 + k]; o[c * 4 + r] = s; } return o; };
-  function mvpMat() { const asp = (cv.clientWidth || 900) / (cv.clientHeight || 520); const P = perspective(45 * Math.PI / 180, asp, 0.05, 5000);
+  const orthoM = (r, t, n, f) => { const nf = 1 / (n - f); return [1 / r, 0, 0, 0, 0, 1 / t, 0, 0, 0, 0, 2 * nf, 0, 0, 0, (f + n) * nf, 1]; };
+  function mvpMat() { const asp = (cv.clientWidth || 900) / (cv.clientHeight || 520); const P = opt.ortho ? orthoM(dist * asp * 0.5, dist * 0.5, 0.05, 5000) : perspective(45 * Math.PI / 180, asp, 0.05, 5000);
     const cy = Math.cos(yaw), sy = Math.sin(yaw), cp = Math.cos(pitch), sp = Math.sin(pitch);
     const Ry = [cy, sy, 0, 0, -sy, cy, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1], Rp = [1, 0, 0, 0, 0, cp, sp, 0, 0, -sp, cp, 0, 0, 0, 0, 1];
     const T = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, -center[0] + pan[0], -center[1], -center[2] + pan[1], 1], V = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, -dist, 1];
@@ -379,12 +386,14 @@ function mkScene(cv, labelDiv, info) {
     const L = [], T = [], TA = [], Pc = []; labels = [];
     if (opt.grid) { const g = 8; for (let i = -g; i <= g; i++) { const c = [0.22, 0.27, 0.34, 1]; put(L, [i, -g, 0], c); put(L, [i, g, 0], c); put(L, [-g, i, 0], c); put(L, [g, i, 0], c); } }
     if (opt.axes) { const O = { q: [0, 0, 0, 1], p: [0, 0, 0] }; line(L, O, [0, 0, 0], [1.2, 0, 0], [0.9, 0.35, 0.35, 1]); line(L, O, [0, 0, 0], [0, 1.2, 0], [0.44, 0.82, 0.55, 1]); line(L, O, [0, 0, 0], [0, 0, 1.2], [0.4, 0.6, 0.95, 1]); }
-    for (const f of frames) { const po = { q: f.q || [0, 0, 0, 1], p: f.p || [0, 0, 0] }; line(L, po, [0, 0, 0], [0.3, 0, 0], [0.9, 0.35, 0.35, 1]); line(L, po, [0, 0, 0], [0, 0.3, 0], [0.44, 0.82, 0.55, 1]); line(L, po, [0, 0, 0], [0, 0, 0.3], [0.4, 0.6, 0.95, 1]); labels.push({ p: po.p, t: f.id, c: '#9aa7b8' }); }
-    // frame_id → 루트 기준 변환(TF). 마커/디스플레이를 해당 프레임에 배치(RViz 식). 없으면 identity.
-    const frameMap = {}; for (const f of frames) frameMap[f.id] = { p: f.p || [0, 0, 0], q: f.q || [0, 0, 0, 1] };
+    frameMap = {}; for (const f of frames) frameMap[f.id] = { p: f.p || [0, 0, 0], q: f.q || [0, 0, 0, 1] };
+    const g = computeG();
+    for (const f of frames) { let po = { q: f.q || [0, 0, 0, 1], p: f.p || [0, 0, 0] }; if (g) po = { q: qmul(g.q, po.q), p: applyG(g, po.p) }; line(L, po, [0, 0, 0], [0.3, 0, 0], [0.9, 0.35, 0.35, 1]); line(L, po, [0, 0, 0], [0, 0.3, 0], [0.44, 0.82, 0.55, 1]); line(L, po, [0, 0, 0], [0, 0, 0.3], [0.4, 0.6, 0.95, 1]); labels.push({ p: po.p, t: f.id, c: '#9aa7b8' }); }
+    // frame_id → 루트 기준 변환(TF), 이후 고정 프레임 g 적용. 마커/디스플레이를 해당 프레임에 배치(RViz 식).
     for (const set of markerSets.values()) { if (!set.visible) continue; for (const m of set.markers) { if (m.action === 2 || m.action === 3) continue;
       let po = { q: (m.pose && m.pose.q) || [0, 0, 0, 1], p: (m.pose && m.pose.p) || [0, 0, 0] };
       const fr = m.frame_id && frameMap[m.frame_id]; if (fr) { const wp = qrot(fr.q, po.p); po = { q: qmul(fr.q, po.q), p: [wp[0] + fr.p[0], wp[1] + fr.p[1], wp[2] + fr.p[2]] }; }
+      if (g) po = { q: qmul(g.q, po.q), p: applyG(g, po.p) };
       const col = m.color && m.color.length === 4 ? m.color : [0.6, 0.8, 0.9, 1]; const A = col[3] < 0.99 ? TA : T; const s = m.scale || [1, 1, 1]; const pts = m.points || [];
       if (m.type === 1) box(A, po, s, col);
       else if (m.type === 2) sphere(A, po, s, col);
@@ -419,6 +428,7 @@ function mkScene(cv, labelDiv, info) {
       sp.style.display = ''; sp.textContent = l.t; sp.style.left = sx + 'px'; sp.style.top = sy + 'px'; sp.style.color = l.c; u++; }
     for (let i = u; i < labelPool.length; i++) labelPool[i].style.display = 'none'; }
   function draw() { const W = cv.clientWidth || 900, H = cv.clientHeight || 520; if (cv.width !== W) cv.width = W; if (cv.height !== H) cv.height = H;
+    if (opt.follow && frameMap[opt.follow]) center = applyG(computeG(), frameMap[opt.follow].p);   // 프레임 추종: 카메라 중심 = 그 프레임 위치
     gl.viewport(0, 0, cv.width, cv.height); gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
     const mvp = mvpMat(), mvpF = new Float32Array(mvp);
     gl.useProgram(prog); gl.uniformMatrix4fv(uMVP, false, mvpF); gl.uniform1f(uRound, 0); gl.depthMask(true);
@@ -426,7 +436,7 @@ function mkScene(cv, labelDiv, info) {
     if (nV.line) { bind('line'); gl.drawArrays(gl.LINES, 0, nV.line); }
     if (nV.pts) { gl.uniform1f(uPS, psize); gl.uniform1f(uRound, 1); bind('pts'); gl.drawArrays(gl.POINTS, 0, nV.pts); gl.uniform1f(uRound, 0); }
     // 클라우드 — 전용 셰이더(GPU 높이색) + 거리 LOD(멀수록 앞쪽 일부만, 순열로 대표성 유지).
-    if (cloudN) { gl.useProgram(cprog); gl.uniformMatrix4fv(cuMVP, false, mvpF); gl.uniform1f(cuPS, psize); gl.uniform1f(cuZmin, zmin); gl.uniform1f(cuZmax, zmax);
+    if (cloudN) { gl.useProgram(cprog); gl.uniformMatrix4fv(cuMVP, false, mvpF); gl.uniformMatrix4fv(cuWorld, false, new Float32Array(gMat4())); gl.uniform1f(cuPS, psize); gl.uniform1f(cuZmin, zmin); gl.uniform1f(cuZmax, zmax);
       gl.uniform1f(cuLod, opt.lodMode === 'off' ? 0 : opt.lodDist); gl.uniform1f(cuRound, opt.round ? 1 : 0); gl.uniform1f(cuCM, opt.colorMode); gl.uniform1f(cuCmin, cmin); gl.uniform1f(cuCmax, cmax);
       gl.bindBuffer(gl.ARRAY_BUFFER, cloudBuf); gl.vertexAttribPointer(caP, 3, gl.FLOAT, false, 16, 0); gl.vertexAttribPointer(caC, 1, gl.FLOAT, false, 16, 12);
       const dc = opt.maxPoints > 0 ? Math.min(cloudN, opt.maxPoints) : cloudN; lastDrawn = dc;   // 셰이더가 거리 LOD 로 추가 컬링
@@ -565,7 +575,7 @@ const Views = {
     const scene = mkScene(cv, labelDiv, info);
     const displays = new Map();   // id → {id,kind,topic,es,on}
     const idOf = (kind, topic) => kind + ':' + topic;
-    let cloudMode = 'xyz', colorSel = null;   // 최근 클라우드 채널(자동 색상용) + 색상 셀렉트 참조
+    let cloudMode = 'xyz', colorSel = null, frameIds = [], lastFrameIds = '';   // 클라우드 채널 + TF 프레임 목록(카메라 옵션용)
     const subscribe = (d) => { if (d.kind === 'cloud') { d.es = new EventSource('/cloudstream?topic=' + encodeURIComponent(d.topic)); d.es.onmessage = (e) => { if (!e.data) return; const r = decodeCloud(e.data); if (!r) return; cloudMode = r.mode; if (colorSel && colorSel.value === 'auto') applyAutoColor(); scene.setCloudById(d.id, r.arr); }; }
       else if (d.kind === 'geom') { d.es = new EventSource('/geomstream?topic=' + encodeURIComponent(d.topic) + '&type=' + encodeURIComponent(d.ty || '')); d.es.onmessage = (e) => { if (!e.data) return; try { const o = JSON.parse(e.data); scene.setMarkersById(d.id, o.markers || []); } catch (_) { /* */ } }; }
       else { d.es = new EventSource('/markerstream?topic=' + encodeURIComponent(d.topic)); d.es.onmessage = (e) => { if (!e.data) return; try { const o = JSON.parse(e.data); scene.setMarkersById(d.id, o.markers || (Array.isArray(o) ? o : [o])); } catch (_) { /* */ } }; } };
@@ -575,7 +585,7 @@ const Views = {
     const toggle = (d) => { d.on = !d.on; if (d.on) subscribe(d); else unsubscribe(d); renderList(); };
     const removeD = (d) => { unsubscribe(d); scene.removeDisplay(d.kind, d.id); displays.delete(d.id); renderList(); };
     const builtin = { grid: true, axes: true, tf: true, robot: false }; let tfES = null, urdfES = null;
-    const subTF = (on) => { if (tfES) { tfES.close(); tfES = null; } scene.setTF([]); if (!on) return; tfES = new EventSource('/tfstream'); tfES.onmessage = (e) => { if (!e.data) return; try { const o = JSON.parse(e.data); scene.setTF(o.frames || []); } catch (_) { /* */ } }; };
+    const subTF = (on) => { if (tfES) { tfES.close(); tfES = null; } scene.setTF([]); if (!on) return; tfES = new EventSource('/tfstream'); tfES.onmessage = (e) => { if (!e.data) return; try { const o = JSON.parse(e.data); const fr = o.frames || []; scene.setTF(fr); const ids = fr.map((f) => f.id).join(','); if (ids !== lastFrameIds) { lastFrameIds = ids; frameIds = fr.map((f) => f.id); renderCam(); } } catch (_) { /* */ } }; };
     const subRobot = (on) => { if (urdfES) { urdfES.close(); urdfES = null; } scene.setMarkersById('__robot__', []); if (!on) return; urdfES = new EventSource('/urdfstream'); urdfES.onmessage = (e) => { if (!e.data) return; try { const o = JSON.parse(e.data); scene.setMarkersById('__robot__', o.markers || []); } catch (_) { /* */ } }; };
     const listBox = el('div', {});
     const DR = 'display:flex;align-items:center;gap:5px;padding:2px 4px;font-size:11px;cursor:default';
@@ -663,9 +673,20 @@ const Views = {
       toolBox.append(tb('📍 Point', 'point'), tb('🎯 Nav Goal', 'goal'), tb('📌 Pose', 'pose'), tb('📏 측정', 'measure'));
       toolBox.append(el('div', { class: 'hint', style: 'margin-top:3px' }, activeTool ? (activeTool === 'point' ? '그라운드 클릭 → 발행' : activeTool === 'measure' ? '두 점 클릭 → 거리(반복)' : '클릭=위치, 다시 클릭=방향') : '도구 선택 후 씬 클릭 (z=0 평면)')); }
     renderTools();
+    // ── 📷 카메라/프레임 — 고정 프레임(fixed frame) · 추종(follow) · 직교 투영 ──
+    const camBox = el('div', { style: 'margin-top:10px;border-top:1px solid var(--line);padding-top:8px' });
+    const CO = { fixedFrame: '', follow: '', ortho: false };
+    function frameSelect(cur, first, cb) { const s = el('select', { style: 'width:100%;font:11px monospace' }); s.append(el('option', { value: '' }, first)); frameIds.forEach((f) => s.append(el('option', { value: f }, f))); s.value = cur; s.onchange = () => cb(s.value); return s; }
+    function renderCam() { camBox.innerHTML = '';
+      camBox.append(el('div', { class: 'hint', style: 'font-weight:600;margin-bottom:2px' }, '📷 카메라 / 프레임'));
+      camBox.append(el('label', { class: 'hint', style: 'display:block;margin:4px 0 2px' }, '고정 프레임 (Fixed Frame)'), frameSelect(CO.fixedFrame, '기본 (루트)', (v) => { CO.fixedFrame = v; scene.opts({ fixedFrame: v || null }); }));
+      camBox.append(el('label', { class: 'hint', style: 'display:block;margin:5px 0 2px' }, '추종 (Follow)'), frameSelect(CO.follow, '끔', (v) => { CO.follow = v; scene.opts({ follow: v || null }); if (!v) scene.view('iso'); }));
+      const oc = el('input', { type: 'checkbox' }); oc.checked = CO.ortho; oc.onchange = () => { CO.ortho = oc.checked; scene.opts({ ortho: oc.checked }); };
+      camBox.append(el('label', { style: 'display:flex;align-items:center;gap:5px;margin-top:6px;font-size:11px' }, oc, el('span', {}, '직교 투영 (Orthographic)'))); }
+    renderCam();
     const timeBar = el('div', { class: 'hint', style: 'margin-top:4px' });
     const panel = el('div', { style: 'display:flex;gap:10px' },
-      el('div', { style: 'width:210px;flex:none;border-right:1px solid var(--line);padding-right:8px;overflow:auto;max-height:78vh' }, el('div', { class: 'hint', style: 'font-weight:600;margin-bottom:2px' }, '🗂 Displays'), listBox, optBox, toolBox),
+      el('div', { style: 'width:210px;flex:none;border-right:1px solid var(--line);padding-right:8px;overflow:auto;max-height:78vh' }, el('div', { class: 'hint', style: 'font-weight:600;margin-bottom:2px' }, '🗂 Displays'), listBox, optBox, toolBox, camBox),
       el('div', { style: 'flex:1;min-width:0;display:flex;flex-direction:column' }, topbar, stage, info, timeBar));
     openModal('🧊 3D 씬 (RViz 식)', panel);
     const M = document.querySelector('#modal .m'); if (M) { M.style.width = 'min(1300px,96vw)'; }
