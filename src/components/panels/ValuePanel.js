@@ -2,7 +2,7 @@
 import { h } from '../../react.js';
 import { Box, Text } from 'ink';
 import { useDashboard } from '../../store.js';
-import { pad, clamp } from '../../lib/util.js';
+import { pad, clamp, sparkline } from '../../lib/util.js';
 import { fieldValue } from '../../lib/ros.js';
 
 // header.stamp 가 있으면 지연(ms), 없으면 telemetry 수신 age(s) 를 색과 함께 반환.
@@ -20,8 +20,10 @@ function ageTag(active, echo, activeAge) {
 }
 
 export function ValuePanel() {
-  const { active, echo, VISIBLE, RW, rightW, valTop, valMaxRef, activeHz, activeAge, bw, frozen } = useDashboard();
+  const { active, echo, VISIBLE, RW, rightW, valTop, valMaxRef, activeHz, activeAge, bw, frozen, hzHistRef } = useDashboard();
   const age = ageTag(active, echo, activeAge);
+  // Hz 스파크라인 — 최근 수신율 추세(hzHistRef 는 토픽별 최근 8샘플).
+  const spark = active && active.kind === 'topic' ? sparkline(hzHistRef.current.get(active.p) || [], 8) : '';
 
   const raw = active ? echo : '  <- select a topic on the left (Enter / click)\n  expand a folder ( > ) to see its topics';
   const rawLines = raw.split('\n');
@@ -35,11 +37,12 @@ export function ValuePanel() {
         ? ` ${activeHz != null ? activeHz : '?'}Hz${bw ? ` · ${bw}` : ''}${frozen ? ' ❄' : ''}` : ''}`
     : '(선택 없음)';
 
-  const rightLen = scrollTag.length + (age ? age.text.length + 2 : 0);
+  const rightLen = scrollTag.length + (age ? age.text.length + 2 : 0) + (spark ? spark.length + 1 : 0);
   return h(Box, { flexDirection: 'column', borderStyle: 'round', borderColor: 'gray', width: rightW, paddingX: 1, marginLeft: 1 },
     h(Box, { justifyContent: 'space-between' },
       h(Text, { bold: true, color: 'green' }, titleTxt.slice(0, Math.max(0, RW - rightLen - 1))),
       h(Box, null,
+        spark ? h(Text, { color: 'cyan' }, `${spark} `) : null,
         age ? h(Text, { color: age.color }, ` ${age.text} `) : null,
         h(Text, { color: 'yellow' }, scrollTag))),
     ...valLines.map((l, i) => h(Text, { key: i, color: active ? undefined : 'gray' }, l)));
