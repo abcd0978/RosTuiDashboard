@@ -4,7 +4,10 @@ RDash is a terminal dashboard (TUI) for browsing **and controlling** a ROS graph
 (ROS1 & ROS2), plus analysis tools: a native **matplotlib** plot window
 (time-series / n-th derivative·integral / FFT / XY-regression / 3D), pub/sub
 connection view, TF frame tree, node resource monitor, rosbag record/play,
-command bookmarks, and a jobs manager.
+command bookmarks, and a jobs manager. It also ships an optional **web GUI**
+(`web/`) that reuses the same telemetry/command layer through a swappable
+**backend interface** (CLI / single-rclpy-node / remote rosbridge) — see
+*Backend interface* and *Web application* below.
 
 Guiding rule: **`index.js` only bootstraps and renders; all logic lives in
 separated modules.** `lib/` has no React, `hooks/` own a stream/subprocess,
@@ -35,8 +38,12 @@ src/
     complete.js        #   ROS command autocomplete engine (subcommands + topic/node/service/pkg names)
     graph.js           #   node topology from telemetry edges (node-centric / whole-graph)
     session.js         #   ~/.rdash_session.json (UI state) + ~/.rdash_history (command history)
-    commands.js        #   builders: connections / resource / tf / rosbag / msg-def / param list·get·set
-    paths.js           #   repo-root paths; loads telemetry(.py), plot.py, tf_tree.py
+    commands.js        #   builders: connections / resource(CPU·RSS·threads) / tf / rosbag / msg-def / param list·get·set
+    backend.js         #   RosBackend interface + CliBackend (facade over the builders) + RclNodeBackend / RosbridgeBackend + makeBackend()
+    doctor.js          #   diagnose(items): QoS mismatch / stale / dead-end rules → ranked issues (Doctor)
+    baseline.js        #   snapshot(items) + diffBaseline(base, items) → regression report; ~/.rdash_baseline.json
+    rosbridge.js       #   dependency-free rosbridge_suite websocket client (subscribe / call_service / publish) + msgToYaml / looseJson
+    paths.js           #   repo-root paths; loads telemetry(.py), plot.py, tf_tree.py, and bridge script paths
     env.js             #   host / ROS version / ROS_DOMAIN_ID / RMW context
     bookmarks.js       #   load/save ~/.rdashrc
     preflight.js       #   load ~/.rdash_preflight.json + evaluate checks vs graph
@@ -61,7 +68,7 @@ src/
       Layout.js        #     composition root: size guard / GlobalKeys + panels|modal + inline overlay + EnvBar + Footer
       GlobalKeys.js    #     HEADLESS global/nav key handler (survives tree being hidden)
       EnvBar.js        #     host/ROS/domain/rmw/Hz-mode + live REC indicator
-      Footer.js        #     compact, mouse-clickable button bar (Help/Find/Jobs/Tree/Quit)
+      Footer.js        #     bottom hint line ("? = 전체 단축키 · 마우스 …"); keyboard-centric (buttons removed)
       TooSmall.js      #     terminal-too-small guard (< MIN_COLS×MIN_ROWS)
     panels/            #   main split view
       TreePanel.js     #     left "file component": namespace tree + Hz sparkline + hover highlight
@@ -87,7 +94,25 @@ src/
       LogViewer.js     #     live /rosout with level/text filter (L) · DiagnosticsView.js /diagnostics (v)
       ParamPanel.js    #     ROS2 param list + live set/nudge (o) · LifecycleView.js transitions (V)
       SystemOverview.js #    "ROS htop": nodes+topics+preflight in one screen (O)
+      DoctorView.js    #     🩺 graph auto-diagnosis, severity-ranked (H) — uses lib/doctor.js
+      BaselineView.js  #     📌 baseline save + regression diff (K) — uses lib/baseline.js
+      TeleopView.js    #     🎮 WASD → geometry_msgs/Twist publisher (W)
       Help.js          #     categorized shortcut reference (?)
+```
+
+The **web application** (`web/`) reuses the same `src/lib` builders/telemetry
+and is a thin API + single-page GUI (see *Web application* below):
+
+```
+web/
+  server.js          # HTTP + SSE server: static files, telemetry/echo/img/cloud streams, JSON action/query API, jobs registry, echo-mux + rosbridge relay
+  app.js             # single-file SPA: node graph (rqt_graph modes), value/plot/gauge, PlotLab, Doctor/Baseline/Trigger, Teleop, Map/Image/3D(WebGL), all TUI modals
+  index.html         # shell: dark theme, toolbar, modal container, graph controls, PlotLab styles
+  popup.html         # standalone pop-out plot window (own SSE, own transforms)
+img_bridge.py        # CompressedImage/Image → base64 JPEG stream (Image panel)
+cloud_bridge.py      # PointCloud2 → base64 float32 xyz stream (3D panel)
+bag_dump.py          # rosbag2 (sqlite3/mcap) → numeric leaf time-series JSON (PlotLab bag load)
+ros_echo_mux.py      # single rclpy node echo multiplexer (RclNodeBackend — one process for N topics)
 ```
 
 Beyond the tree/value browse+control core, RDash covers a real debugging loop:
@@ -132,8 +157,11 @@ shell's ROS environment (`ROS_MASTER_URI`, `ROS_DOMAIN_ID`, …).
 - holds all UI state — selection/scroll (`sel`, `top`, `valTop`, `expanded`,
   `active`, `hoverIdx`), mode flags (`edit`, `searching`, `frozen`, `plotPick`,
   `domainEdit`, `bmOpen`, `bmAdd`, `infoView`, `bagPlay`, `jobsOpen`, `help`,
-  `watchOpen`, `preflightOpen`, `tfEcho`, `bagCmp`, `pubForm`, `treeHidden`),
-  and subsystem state (`hzMode`, `domain`, `rec`, `jobs`, `bookmarks`, `pkgNames`);
+  `watchOpen`, `preflightOpen`, `tfEcho`, `bagCmp`, `pubForm`, `graphOpen`,
+  `qosOpen`, `logOpen`, `paramPanel`, `overviewOpen`, `diagOpen`, `lifeOpen`,
+  `teleopOpen`, `doctorOpen`, `baselineOpen`, `treeHidden`),
+  and subsystem state (`hzMode`, `domain`, `rec`, `jobs`, `bookmarks`, `pkgNames`,
+  `baseline`, `triggerArmed`);
 - computes derived values every render (filtered `list`, `flat` rows, panel
   widths — right pane goes full width when `treeHidden`, clamped selection);
 - exposes actions (`activate`, `move`, `doAction`, `doRestart`, `submitEdit`,
@@ -160,7 +188,8 @@ mode, so input lands in the right place with no central dispatcher.
 
 | Handler        | active when                                   | keys |
 |----------------|-----------------------------------------------|------|
-| `GlobalKeys`   | no overlay open (headless, always mounted)    | nav (↑↓/jk, Enter, g/G), `/ space p x r c t T S R P B b w J F h D Tab ? 1-9 [ ] +/- q` |
+| `GlobalKeys`   | no overlay open (headless, always mounted)    | nav (↑↓/jk, Enter, g/G), `/ space p x r c n m Q y L o O v V t T S R P B b w J F H K A W h D Tab ? 1-9 [ ] +/- q` |
+| `DoctorView` / `BaselineView` / `TeleopView` | `doctorOpen` / `baselineOpen` / `teleopOpen` | ↑↓/Enter (jump); `b` save baseline; WASD/arrows drive, Space stop, +/- speed |
 | `SearchBar`    | `searching`                                   | text, Enter, Esc, Backspace |
 | `ParamEdit`    | `edit`                                         | text, Enter, Esc (param set or service request) |
 | `PublishForm`  | `pubForm`                                      | ↑↓ fields, type value, Enter (publish once), Esc |
@@ -323,6 +352,57 @@ reachable over DDS.
 `Layout` renders `TooSmall` below `MIN_COLS×MIN_ROWS` (~65×10, where the two-pane
 layout would overflow); resizing larger returns automatically via the resize
 listener.
+
+### Backend interface (`lib/backend.js`)
+
+All ROS operations go through a `RosBackend` interface so the data source is
+swappable without touching UI/server code. `CliBackend` (default) is a facade
+over the existing `commands.js`/`ros.js` builders — it just returns shell command
+strings. Both the web server and the TUI store build their commands through a
+`be = makeBackend(ver)` instance, chosen by `RDASH_BACKEND`:
+
+- **`cli`** — one `ros2/ros` process per stream (echo, bw, …). Simplest.
+- **`rcl`** — `usesMux=true`: the server routes `/echo`,`/rosout`,`/diagnostics`
+  through **one** `ros_echo_mux.py` rclpy node (stdin `+topic`/`-topic`,
+  ref-counted fan-out), instead of one `ros2 topic echo` per topic — killing the
+  process explosion when many topics are plotted. Actions stay on the CLI
+  builders (inherited from `CliBackend`).
+- **`rosbridge`** — `kind='rosbridge'`: the server becomes a `RosbridgeClient`
+  (`lib/rosbridge.js`, on Node's global WebSocket, no deps) to a remote
+  `rosbridge_suite`. `/events` is built from rosapi (`/rosapi/topics|nodes|
+  services|publishers|subscribers`, Hz measured over live subscriptions); echo
+  subscribes over WS; publish/service/connections use rosbridge/rosapi. Lets a
+  browser drive a **remote** robot with no local ROS.
+
+`RclNodeBackend`/`RosbridgeBackend` extend `CliBackend`, so unimplemented ops
+gracefully fall back to CLI builders. The interface is verified with mocks
+(mock echo-mux, mock rosbridge WS server) without a real ROS install.
+
+### Web application (server + SPA + bridges)
+
+`web/server.js` is a thin HTTP/SSE layer over the same infrastructure: it serves
+the static SPA, exposes the telemetry graph and per-topic echo as **SSE**
+streams and the one-shot queries/actions as **JSON** endpoints (all built via
+`be`), and keeps a server-side **jobs registry** (bookmarks / rosbag / action
+goals / a single persistent Teleop publisher). Sensor data that the CLI can't
+stream cheaply comes from small path-configurable **bridges**: `img_bridge.py`
+(Compressed/Image → base64 JPEG), `cloud_bridge.py` (PointCloud2 → base64
+float32 xyz), `bag_dump.py` (rosbag2 → numeric time-series), `ros_echo_mux.py`
+(the rcl echo mux). `index.js` also spawns the web server as a silent companion
+so `npm start` boots both (opt out with `RDASH_NO_WEB=1`; the TUI's `EnvBar`
+shows the web URL and a `🔴 TRIG` indicator when a trigger is armed).
+
+`web/app.js` is a single-file SPA (its own tiny DOM/`el()` + SSE helpers, no
+framework) that renders: the **node graph** (nodes-only / bipartite rqt_graph
+modes with services=diamonds, actions=hexagons, filter bar), the right-hand
+value/plot/**gauge**, **PlotLab** (multi-plot, drag-resize, pop-out via
+`popup.html`, shared time cursor + scrub, n-th derivative/integral, FFT via an
+in-page radix-2 transform, XY, custom-expression curves, bag load), and a modal
+system for every TUI tool plus the GUI-native views (**Doctor**/**Baseline**
+reuse the same `lib/doctor.js`/`lib/baseline.js` rules ported to the browser,
+**Trigger**, **Teleop**, **Map**, **Image**, **3D** in raw WebGL, **State
+Transitions**). The browser talks only to `web/server.js` over SSE/JSON, so the
+backend (cli/rcl/rosbridge) is transparent to it.
 
 ## Design principles
 
