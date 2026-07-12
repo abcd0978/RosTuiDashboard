@@ -521,6 +521,8 @@ const Views = {
     //   TF·그리드·축·LOD 내장 디스플레이, 거리 LOD 렌더, FPS·점수·벽시계/시뮬시각 표시.
     const cloudTopics = () => items.filter((i) => (i.ty || '').includes('PointCloud2')).map((i) => i.name);
     const markerTopics = () => items.filter((i) => /visualization_msgs\/(msg\/)?Marker(Array)?/.test(i.ty || '')).map((i) => i.name);
+    const GEOMRE = /LaserScan|nav_msgs\/(msg\/)?Path|Odometry|PoseArray|PoseStamped|PointStamped|OccupancyGrid/;
+    const geomTopics = () => items.filter((i) => GEOMRE.test(i.ty || '')).map((i) => [i.name, i.ty || '']);
     const cv = el('canvas', { width: 900, height: 560, style: 'width:100%;height:560px;background:#0b0e12;border:1px solid var(--line);border-radius:6px;cursor:grab;display:block' });
     const labelDiv = el('div', { style: 'position:absolute;inset:0;pointer-events:none;overflow:hidden' });
     const fpsOv = el('div', { style: 'position:absolute;left:8px;top:8px;font:11px monospace;color:#9aa7b8;background:rgba(13,17,22,.6);padding:2px 7px;border-radius:4px;pointer-events:none' });
@@ -531,10 +533,11 @@ const Views = {
     const idOf = (kind, topic) => kind + ':' + topic;
     let cloudMode = 'xyz', colorSel = null;   // 최근 클라우드 채널(자동 색상용) + 색상 셀렉트 참조
     const subscribe = (d) => { if (d.kind === 'cloud') { d.es = new EventSource('/cloudstream?topic=' + encodeURIComponent(d.topic)); d.es.onmessage = (e) => { if (!e.data) return; const r = decodeCloud(e.data); if (!r) return; cloudMode = r.mode; if (colorSel && colorSel.value === 'auto') applyAutoColor(); scene.setCloudById(d.id, r.arr); }; }
+      else if (d.kind === 'geom') { d.es = new EventSource('/geomstream?topic=' + encodeURIComponent(d.topic) + '&type=' + encodeURIComponent(d.ty || '')); d.es.onmessage = (e) => { if (!e.data) return; try { const o = JSON.parse(e.data); scene.setMarkersById(d.id, o.markers || []); } catch (_) { /* */ } }; }
       else { d.es = new EventSource('/markerstream?topic=' + encodeURIComponent(d.topic)); d.es.onmessage = (e) => { if (!e.data) return; try { const o = JSON.parse(e.data); scene.setMarkersById(d.id, o.markers || (Array.isArray(o) ? o : [o])); } catch (_) { /* */ } }; } };
     const applyAutoColor = () => scene.opts({ colorMode: cloudMode === 'rgb' ? 2 : cloudMode === 'intensity' ? 1 : 0 });
     const unsubscribe = (d) => { if (d.es) { d.es.close(); d.es = null; } if (d.kind === 'cloud') scene.setCloudById(d.id, null); else scene.setMarkersById(d.id, []); };
-    const addDisplay = (kind, topic) => { const id = idOf(kind, topic); if (displays.has(id)) return; const d = { id, kind, topic, on: true }; displays.set(id, d); subscribe(d); renderList(); };
+    const addDisplay = (kind, topic, ty) => { const id = idOf(kind, topic); if (displays.has(id)) return; const d = { id, kind, topic, ty, on: true }; displays.set(id, d); subscribe(d); renderList(); };
     const toggle = (d) => { d.on = !d.on; if (d.on) subscribe(d); else unsubscribe(d); renderList(); };
     const removeD = (d) => { unsubscribe(d); scene.removeDisplay(d.kind, d.id); displays.delete(d.id); renderList(); };
     const builtin = { grid: true, axes: true, tf: true }; let tfES = null;
@@ -547,13 +550,14 @@ const Views = {
       listBox.append(chk('Grid', 'grid', (v) => scene.opts({ grid: v })), chk('Axes', 'axes', (v) => scene.opts({ axes: v })), chk('TF', 'tf', (v) => subTF(v)));
       listBox.append(el('div', { class: 'hint', style: 'margin:6px 0 2px;text-transform:uppercase;letter-spacing:.05em' }, '디스플레이'));
       if (!displays.size) listBox.append(el('div', { class: 'hint', style: 'padding:2px 4px' }, '아래에서 토픽 추가'));
+      const ICON = { cloud: '🌩 ', marker: '📐 ', geom: '🧭 ' };
       for (const d of displays.values()) { const c = el('input', { type: 'checkbox' }); c.checked = d.on; c.onchange = () => toggle(d);
         const rm = el('span', { style: 'cursor:pointer;color:var(--dim)', title: '제거', onclick: () => removeD(d) }, '✕');
-        listBox.append(el('label', { style: DR }, c, el('span', { style: 'flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap', title: d.topic }, (d.kind === 'cloud' ? '🌩 ' : '📐 ') + d.topic), rm)); }
-      const avail = [...cloudTopics().map((t) => ['cloud', t]), ...markerTopics().map((t) => ['marker', t])].filter(([k, t]) => !displays.has(idOf(k, t)));
+        listBox.append(el('label', { style: DR }, c, el('span', { style: 'flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap', title: d.topic }, (ICON[d.kind] || '') + d.topic), rm)); }
+      const avail = [...cloudTopics().map((t) => ['cloud', t, '']), ...markerTopics().map((t) => ['marker', t, '']), ...geomTopics().map(([t, ty]) => ['geom', t, ty])].filter(([k, t]) => !displays.has(idOf(k, t)));
       const addSel = el('select', { style: 'width:100%;margin-top:5px;font:11px monospace' }); addSel.append(el('option', { value: '' }, '＋ 토픽 추가…'));
-      avail.forEach(([k, t]) => addSel.append(el('option', { value: k + '\0' + t }, (k === 'cloud' ? '🌩 ' : '📐 ') + t)));
-      addSel.onchange = () => { if (!addSel.value) return; const [k, t] = addSel.value.split('\0'); addDisplay(k, t); };
+      avail.forEach(([k, t]) => addSel.append(el('option', { value: k + '\0' + t }, (ICON[k] || '') + t)));
+      addSel.onchange = () => { if (!addSel.value) return; const [k, t] = addSel.value.split('\0'); const ty = (geomTopics().find(([n]) => n === t) || [])[1] || ''; addDisplay(k, t, ty); };
       listBox.append(addSel); }
     const ptSize = el('input', { type: 'range', min: '1', max: '6', value: '2.4', step: '0.2', style: 'vertical-align:middle' });
     ptSize.oninput = () => scene.setPointSize(+ptSize.value);
