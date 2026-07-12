@@ -130,11 +130,17 @@ The web UI has **full parity** with the TUI plus GUI-native views:
     ImageAnnotations` points/circles/texts) and **calibration overlays**
     (`sensor_msgs/CameraInfo` principal-point reticle + `K`/`D` readout).
     **Wheel-zoom / drag-pan** with a **pixel (x,y)+rgb** readout.
-  - **🧊 3D scene** — a full raw-**WebGL** scene (no three.js): **PointCloud2**
-    (height-colored), **`visualization_msgs/Marker(Array)`** (cube / sphere /
-    cylinder / arrow / line / points / text, with transparency), and **TF
-    frames** (`/tf` → RGB axes + labels). Orbit / zoom / pan, **camera presets**
-    (Top / Front / Side / Iso), grid & axes toggles, adjustable point size.
+  - **🧊 3D scene (RViz-class)** — a full raw-**WebGL** scene (no three.js) with
+    an RViz-style **Displays panel**: add **multiple** cloud/marker topics at
+    once, **checkbox show/hide** (unchecking unsubscribes to save bandwidth),
+    remove, and a **＋ add-topic** picker; built-in **Grid / Axes / TF / LOD**
+    toggles. Renders **PointCloud2** (height-colored), **`Marker(Array)`** (cube
+    / sphere / cylinder / arrow / line / points / text, with transparency), and
+    **TF frames** (RGB axes + labels). Orbit / zoom / pan, **camera presets**
+    (Top / Front / Side / Iso), **FPS + point count** overlay, and a
+    **wallclock + simulation-time** readout (`/clock`). **Point-cloud LOD** —
+    server-side voxel downsample (`RDASH_CLOUD_VOXEL`) + client **distance LOD**
+    (fewer points when the camera is far, spatially uniform).
 - **State Transitions** — a topic field's value changes as a colored timeline
   (enums / booleans / modes). Plus the full TUI toolset: publish form (skeleton
   prefill), service call, QoS, msg def, connections, TF tree, param table,
@@ -228,6 +234,8 @@ node index.js             # TUI only (npm start also launches the web server)
 | `RDASH_PYTHON` | `python3` | interpreter used for telemetry / plot / autocomplete / dep install |
 | `RDASH_WEB_PORT` | `8080` | web server port |
 | `RDASH_WEB_HOST` | `0.0.0.0` | web bind address; `127.0.0.1` to restrict to loopback (host can't reach it) |
+| `RDASH_CLOUD_VOXEL` | `0` | point-cloud voxel downsample size in metres (0 = off); e.g. `0.05` → one point per 5 cm cell |
+| `RDASH_CLOUD_MAXN` | `30000` | max points per cloud frame sent to the browser (uniform decimation past this) |
 | `RDASH_NO_WEB` | `0` | set `1` so `npm start` launches the TUI **without** the companion web server |
 | `RDASH_BACKEND` | `cli` | web data source: `cli` / `rcl` (single rclpy echo mux) / `rosbridge` (remote websocket) |
 | `RDASH_ROSBRIDGE_URL` | `ws://localhost:9090` | rosbridge endpoint when `RDASH_BACKEND=rosbridge` |
