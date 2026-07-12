@@ -1,11 +1,16 @@
 #!/usr/bin/env python3
 """기하 브리지 — RViz 식 네이티브 디스플레이 타입을 구독해 마커 JSON 으로 변환(3D 씬이 그대로 렌더).
 지원: sensor_msgs/LaserScan, nav_msgs/Path, nav_msgs/Odometry, geometry_msgs/PoseArray,
-      geometry_msgs/PoseStamped, geometry_msgs/PointStamped, nav_msgs/OccupancyGrid.
+      geometry_msgs/PoseStamped, geometry_msgs/PointStamped, nav_msgs/OccupancyGrid,
+      px4_msgs/VehicleOdometry (PX4). Odometry 계열은 지나온 궤적(trail)을 라인으로 누적.
 출력(메시지당 한 줄): {"markers":[{ns,id,type,action,frame_id,pose:{p,q},scale,color,points,colors,text}]}
 사용: python3 geom_bridge.py <topic> <type>   (type 은 ROS 타입 문자열; 미지정 시 자동 감지)"""
 import sys
+import os
 import json
+
+TRAIL = []   # 오도메트리 궤적 누적(현재 프로세스=한 토픽)
+MAXTRAIL = int(os.environ.get('RDASH_TRAIL_MAX', '3000') or 3000)
 
 
 def emit(markers):
@@ -45,12 +50,36 @@ def path(msg):
 
 def _arrow(pose, fid, mid, color, length=0.6):
     p, o = pose.position, pose.orientation
-    return mk(id=mid, type=0, frame_id=fid, pose={"p": [p.x, p.y, p.z], "q": [o.x, o.y, o.z, o.w]},
+    return _arrow_pq([p.x, p.y, p.z], [o.x, o.y, o.z, o.w], fid, mid, color, length)
+
+
+def _arrow_pq(pos, q, fid, mid, color, length=0.6):
+    return mk(id=mid, type=0, frame_id=fid, pose={"p": [float(v) for v in pos], "q": [float(v) for v in q]},
               scale=[length, 0.08, 0.12], color=color)
 
 
+def _trail(pos, fid, color):
+    """현재 위치를 궤적에 누적하고 LINE_STRIP 마커로 반환(지나온 경로)."""
+    TRAIL.append([float(v) for v in pos])
+    if len(TRAIL) > MAXTRAIL:
+        del TRAIL[0]
+    return mk(id=99, type=4, frame_id=fid, scale=[0.05, 0, 0], color=color, points=[list(p) for p in TRAIL])
+
+
 def odometry(msg):
-    return [_arrow(msg.pose.pose, msg.header.frame_id, 1, [0.9, 0.7, 0.3, 1], 0.7)]
+    p, o = msg.pose.pose.position, msg.pose.pose.orientation
+    fid = msg.header.frame_id
+    return [_arrow_pq([p.x, p.y, p.z], [o.x, o.y, o.z, o.w], fid, 1, [0.9, 0.7, 0.3, 1], 0.7),
+            _trail([p.x, p.y, p.z], fid, [0.44, 0.82, 0.55, 1])]
+
+
+def vehicle_odometry(msg):
+    """PX4 px4_msgs/VehicleOdometry — position + q([w,x,y,z]). ROS 쿼터니언 순서로 재정렬."""
+    pos = [msg.position[0], msg.position[1], msg.position[2]]
+    q = [msg.q[1], msg.q[2], msg.q[3], msg.q[0]]   # [w,x,y,z] → [x,y,z,w]
+    fid = 'odom'
+    return [_arrow_pq(pos, q, fid, 1, [0.9, 0.5, 0.3, 1], 0.8),
+            _trail(pos, fid, [0.9, 0.6, 0.35, 1])]
 
 
 def posestamped(msg):
@@ -93,6 +122,7 @@ HANDLERS = [
     ("PoseStamped", "geometry_msgs.msg", "PoseStamped", posestamped),
     ("PointStamped", "geometry_msgs.msg", "PointStamped", pointstamped),
     ("OccupancyGrid", "nav_msgs.msg", "OccupancyGrid", occupancygrid),
+    ("VehicleOdometry", "px4_msgs.msg", "VehicleOdometry", vehicle_odometry),
 ]
 
 
