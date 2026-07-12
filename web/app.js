@@ -440,6 +440,85 @@ const Views = {
       ctx.fillStyle = '#8b97a7'; ctx.font = '10px monospace'; ctx.fillText(`${mny.toFixed(5)}..${mxy.toFixed(5)}°N`, pad, 14); ctx.fillText(`${mnx.toFixed(5)}..${mxx.toFixed(5)}°E`, pad, H - 8);
     }
   },
+  plotlab() {
+    // 📈 PlotJuggler 스타일 — 다중 동기 플롯 · 여러 토픽 커브 · 공유 시간축/커서 · 줌/팬 · 변환 · 통계.
+    const PAL = ['#57c7d4', '#e2c85a', '#6fd08c', '#c78ad2', '#e06a6a', '#6f9be0', '#d98a4b', '#7ad2b8'];
+    const S = { es: {}, series: {}, fields: {}, t0: Date.now() };
+    const sub = (topic) => { if (S.es[topic]) return; const es = new EventSource('/echo?topic=' + encodeURIComponent(topic));
+      es.onmessage = (e) => { let text; try { text = JSON.parse(e.data); } catch (_) { return; } const nums = numeric(text); const t = (Date.now() - S.t0) / 1000; S.fields[topic] = Object.keys(nums);
+        for (const [k, v] of Object.entries(nums)) { const key = topic + ' ' + k; (S.series[key] || (S.series[key] = [])).push([t, v]); if (S.series[key].length > 4000) S.series[key].shift(); } };
+      S.es[topic] = es; };
+    const view = { W: 10, follow: true, tEnd: 0 }; const plots = []; let colorI = 0, cursorT = null;
+    const TF = { raw: '원값', deriv: 'd/dt', integ: '∫dt', abs: '|x|', movavg: '이동평균' };
+    const applyT = (data, tf) => { if (!data || data.length < 2 || tf === 'raw') return data || [];
+      if (tf === 'deriv') { const o = []; for (let i = 1; i < data.length; i++) { const dt = data[i][0] - data[i - 1][0] || 1e-6; o.push([data[i][0], (data[i][1] - data[i - 1][1]) / dt]); } return o; }
+      if (tf === 'integ') { const o = []; let a = 0; for (let i = 1; i < data.length; i++) { a += (data[i][1] + data[i - 1][1]) / 2 * (data[i][0] - data[i - 1][0]); o.push([data[i][0], a]); } return o; }
+      if (tf === 'abs') return data.map(([t, v]) => [t, Math.abs(v)]);
+      if (tf === 'movavg') { const n = 12, q = []; let s = 0; const o = []; for (const [t, v] of data) { q.push(v); s += v; if (q.length > n) s -= q.shift(); o.push([t, s / q.length]); } return o; }
+      return data; };
+    const latestT = () => { let m = 0; for (const k in S.series) { const a = S.series[k]; if (a.length) m = Math.max(m, a[a.length - 1][0]); } return m; };
+
+    const list = el('div', { class: 'pl-list' }), grid = el('div', { class: 'pl-grid' }), win = el('span', { class: 'hint' });
+    const foll = el('button', { class: 'act', onclick: () => { view.follow = !view.follow; foll.textContent = view.follow ? '▶ follow' : '⏸ frozen'; } }, '▶ follow');
+    const bar = el('div', { class: 'pl-bar' },
+      el('button', { class: 'act', onclick: () => addPlot() }, '+ 플롯'),
+      el('button', { class: 'act', onclick: () => { grid.style.gridTemplateColumns = '1fr'; } }, '≡ 세로'),
+      el('button', { class: 'act', onclick: () => { grid.style.gridTemplateColumns = '1fr 1fr'; } }, '⊞ 격자'),
+      el('span', { class: 'hint' }, '창'), ...[5, 10, 30].map((w) => el('button', { class: 'act', onclick: () => { view.W = w; } }, w + 's')),
+      foll, win);
+    openModal('📈 PlotLab — 다중 동기 플롯 (PlotJuggler 스타일)', el('div', { class: 'pl' }, bar, el('div', { class: 'pl-body' }, list, grid)));
+    const M = document.querySelector('#modal .m'); const savedW = M ? M.style.cssText : ''; if (M) { M.style.width = 'min(1500px,97vw)'; M.style.height = '90vh'; M.style.maxHeight = '90vh'; }
+
+    const search = el('input', { placeholder: '토픽/필드 검색…', style: 'width:100%;margin-bottom:6px' }), listBody = el('div', {});
+    list.append(el('div', { class: 'hint', style: 'margin-bottom:4px' }, '커브 (드래그 → 플롯)'), search, listBody);
+    const drawList = () => { const f = search.value.toLowerCase(); listBody.innerHTML = '';
+      for (const tp of items.filter((i) => i.kind === 'topic' && !i.name.includes('/_action/')).map((i) => i.name).sort()) {
+        const flds = S.fields[tp] || []; if (f && !tp.toLowerCase().includes(f) && !flds.some((x) => (tp + ' ' + x).toLowerCase().includes(f))) continue;
+        const head = el('div', { class: 'pl-topic' }, (flds.length ? '▾ ' : '▸ ') + tp); head.onclick = () => { sub(tp); setTimeout(drawList, 350); }; listBody.append(head);
+        for (const fld of flds) { const key = tp + ' ' + fld; if (f && !key.toLowerCase().includes(f)) continue; const chip = el('div', { class: 'pl-chip', draggable: 'true', title: '드래그 또는 클릭 → 마지막 플롯' }, fld); chip.ondragstart = (e) => e.dataTransfer.setData('text/plain', key); chip.onclick = () => { if (plots.length) addCurve(plots[plots.length - 1], key); }; listBody.append(chip); } } };
+    search.oninput = drawList; drawList();
+    const listIv = setInterval(() => { if (!$('#modal').classList.contains('on')) { clearInterval(listIv); return; } drawList(); }, 1500);
+
+    function addCurve(plot, key) { if (!key || plot.curves.some((c) => c.key === key)) return; const sp = key.indexOf(' '); const topic = key.slice(0, sp); sub(topic); plot.curves.push({ key, topic, field: key.slice(sp + 1), color: PAL[colorI++ % PAL.length], tf: 'raw' }); plot.drawLegend(); }
+    function addPlot() {
+      const canvas = el('canvas', { class: 'pl-canvas' }), legend = el('div', { class: 'pl-legend' }), cell = el('div', { class: 'pl-cell' });
+      const plot = { curves: [], canvas, legend, cell };
+      const drawLegend = () => { legend.innerHTML = ''; plot.curves.forEach((c) => {
+        const selT = el('select', {}); for (const t in TF) selT.append(el('option', { value: t }, TF[t])); selT.value = c.tf; selT.onchange = () => { c.tf = selT.value; };
+        c._st = el('span', { class: 'pl-stat' });
+        legend.append(el('span', { class: 'pl-cv' }, el('span', { class: 'pl-dot', style: 'background:' + c.color }), c.topic.replace(/^\//, '') + '/' + c.field, selT, c._st, el('span', { class: 'pl-rm', onclick: () => { plot.curves = plot.curves.filter((z) => z !== c); drawLegend(); } }, '×'))); }); };
+      plot.drawLegend = drawLegend;
+      cell.ondragover = (e) => { e.preventDefault(); cell.classList.add('drop'); };
+      cell.ondragleave = () => cell.classList.remove('drop');
+      cell.ondrop = (e) => { e.preventDefault(); cell.classList.remove('drop'); addCurve(plot, e.dataTransfer.getData('text/plain')); };
+      cell.append(canvas, legend, el('button', { class: 'pl-x', onclick: () => { const i = plots.indexOf(plot); if (i >= 0) plots.splice(i, 1); cell.remove(); } }, '✕'));
+      plots.push(plot); grid.append(cell);
+    }
+    addPlot();
+
+    let raf = 0, alive = true;
+    function frame() { if (!alive) return; const lt = latestT(); if (view.follow) view.tEnd = lt; const t1 = view.tEnd, t0 = t1 - view.W; win.textContent = ` t=${t1.toFixed(1)}s · 창 ${view.W.toFixed(0)}s`;
+      for (const pl of plots) { const cv = pl.canvas, W = cv.width = cv.clientWidth, H = cv.height = cv.clientHeight || 150, ctx = cv.getContext('2d'); ctx.clearRect(0, 0, W, H);
+        ctx.strokeStyle = '#1b222c'; ctx.lineWidth = 1; for (let i = 0; i <= 4; i++) { const y = H * i / 4; ctx.beginPath(); ctx.moveTo(32, y); ctx.lineTo(W, y); ctx.stroke(); }
+        let mn = Infinity, mx = -Infinity; const cd = pl.curves.map((c) => ({ c, d: applyT(S.series[c.key], c.tf).filter(([t]) => t >= t0 && t <= t1) }));
+        for (const { d } of cd) for (const [, v] of d) { if (v < mn) mn = v; if (v > mx) mx = v; }
+        if (!isFinite(mn)) { mn = 0; mx = 1; } if (mx - mn < 1e-9) { mx += 1; mn -= 1; }
+        const X = (t) => 32 + (t - t0) / (view.W || 1) * (W - 36), Y = (v) => H - 4 - (v - mn) / (mx - mn) * (H - 18);
+        ctx.fillStyle = '#5c6672'; ctx.font = '9px monospace'; ctx.textAlign = 'left'; ctx.fillText(mx.toPrecision(3), 2, 9); ctx.fillText(mn.toPrecision(3), 2, H - 4);
+        for (const { c, d } of cd) { ctx.strokeStyle = c.color; ctx.lineWidth = 1.3; ctx.beginPath(); d.forEach(([t, v], i) => { const x = X(t), y = Y(v); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }); ctx.stroke();
+          if (c._st && d.length) { let s = 0, lo = Infinity, hi = -Infinity; for (const [, v] of d) { s += v; if (v < lo) lo = v; if (v > hi) hi = v; } c._st.textContent = ` [${d[d.length - 1][1].toPrecision(3)}] μ${(s / d.length).toPrecision(3)} ↕${lo.toPrecision(2)}~${hi.toPrecision(2)}`; } }
+        if (cursorT != null && cursorT >= t0 && cursorT <= t1) { const cx = X(cursorT); ctx.strokeStyle = '#8b97a7'; ctx.setLineDash([3, 3]); ctx.beginPath(); ctx.moveTo(cx, 0); ctx.lineTo(cx, H); ctx.stroke(); ctx.setLineDash([]); } }
+      raf = requestAnimationFrame(frame); if (SNAP && ++frame.n > 900) alive = false; }
+    frame.n = 0; frame();
+
+    grid.addEventListener('wheel', (e) => { e.preventDefault(); view.W = Math.max(1, Math.min(300, view.W * (e.deltaY < 0 ? 0.85 : 1.18))); }, { passive: false });
+    let pan = null;
+    grid.addEventListener('mousedown', (e) => { pan = { x: e.clientX, tEnd: view.tEnd }; view.follow = false; foll.textContent = '⏸ frozen'; });
+    window.addEventListener('mouseup', () => { pan = null; });
+    grid.addEventListener('mousemove', (e) => { const cell = e.target.closest && e.target.closest('.pl-cell'); if (cell) { const r = cell.querySelector('canvas').getBoundingClientRect(); const frac = (e.clientX - r.left - 32) / (r.width - 36); cursorT = view.tEnd - view.W + frac * view.W; } if (pan) { const r = grid.getBoundingClientRect(); view.tEnd = pan.tEnd - (e.clientX - pan.x) / r.width * view.W; } });
+
+    modalSub = { close: () => { alive = false; cancelAnimationFrame(raf); clearInterval(listIv); for (const t in S.es) S.es[t].close(); if (M) M.style.cssText = savedW; } };
+  },
   procmon() {
     const wrap = el('div', {}); openModal('📊 노드 프로세스 (CPU/RSS/스레드 · 라이브)', wrap, () => {});
     const nodes = () => items.filter((i) => i.kind === 'node').map((i) => i.name);
@@ -543,7 +622,7 @@ const Views = {
 };
 
 // ── 툴바 + 키보드 ─────────────────────────────────────────────────────────────
-const TOOLS = [['H', '🩺 Doctor', () => Views.doctor()], ['K', '📌 Baseline', () => Views.baseline()], ['A', '🔴 Trigger', () => Views.trigger()], ['g', '🎮 Teleop', () => Views.teleop()], ['b', '북마크', () => Views.bookmarks()], ['J', 'Jobs', () => Views.jobs()], ['L', '로그', () => Views.log()], ['v', '진단', () => Views.diag()], ['O', '개요', () => Views.overview()], ['P', '📊 프로세스', () => Views.procmon()], ['M', '🗺 Map', () => Views.map()], ['I', '🖼 Cam', () => Views.image()], ['C', '🧊 3D', () => Views.cloud()], ['t', 'TF', () => Views.tftree()]];
+const TOOLS = [['E', '📈 PlotLab', () => Views.plotlab()], ['H', '🩺 Doctor', () => Views.doctor()], ['K', '📌 Baseline', () => Views.baseline()], ['A', '🔴 Trigger', () => Views.trigger()], ['g', '🎮 Teleop', () => Views.teleop()], ['b', '북마크', () => Views.bookmarks()], ['J', 'Jobs', () => Views.jobs()], ['L', '로그', () => Views.log()], ['v', '진단', () => Views.diag()], ['O', '개요', () => Views.overview()], ['P', '📊 프로세스', () => Views.procmon()], ['M', '🗺 Map', () => Views.map()], ['I', '🖼 Cam', () => Views.image()], ['C', '🧊 3D', () => Views.cloud()], ['t', 'TF', () => Views.tftree()]];
 const tb = $('#toolbar'); TOOLS.forEach(([k, label, fn]) => tb.append(el('button', { title: k, onclick: fn }, label)));
 window.addEventListener('keydown', (e) => {
   if (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) return;

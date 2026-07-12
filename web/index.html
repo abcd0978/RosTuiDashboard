@@ -58,6 +58,24 @@
   button.act { background:#1c2531; color:var(--fg); border:1px solid var(--line); border-radius:4px; padding:4px 10px; cursor:pointer; font:inherit; }
   button.act:hover{ border-color:var(--cyan); color:var(--cyan); }
   .badge{ padding:0 6px; border-radius:8px; font-size:11px; } .badge.run{background:#1d3b2a;color:var(--green)} .badge.done{background:#2a2f38;color:var(--dim)} .badge.error{background:#3b1d1d;color:var(--red)}
+  /* PlotLab */
+  .pl { display:flex; flex-direction:column; height:100%; }
+  .pl-bar { display:flex; gap:6px; align-items:center; flex-wrap:wrap; padding-bottom:8px; border-bottom:1px solid var(--line); margin-bottom:8px; }
+  .pl-bar button { padding:2px 8px; }
+  .pl-body { display:flex; gap:8px; flex:1; min-height:0; }
+  .pl-list { width:220px; overflow:auto; border-right:1px solid var(--line); padding-right:6px; }
+  .pl-topic { color:var(--dim); font-size:11px; padding:3px 4px; cursor:pointer; border-top:1px solid var(--line); } .pl-topic:hover { color:var(--cyan); }
+  .pl-chip { margin:2px 0 2px 12px; padding:2px 7px; background:#1c2531; border:1px solid var(--line); border-radius:4px; font-size:11px; cursor:grab; color:var(--fg); }
+  .pl-chip:hover { border-color:var(--cyan); }
+  .pl-grid { display:grid; grid-template-columns:1fr; gap:8px; flex:1; overflow:auto; min-height:0; }
+  .pl-cell { position:relative; display:flex; flex-direction:column; background:#0d1116; border:1px solid var(--line); border-radius:6px; min-height:190px; }
+  .pl-cell.drop { border-color:var(--cyan); box-shadow:0 0 0 1px var(--cyan) inset; }
+  .pl-canvas { flex:1; width:100%; min-height:120px; display:block; }
+  .pl-legend { display:flex; flex-wrap:wrap; gap:4px 12px; padding:4px 8px; border-top:1px solid var(--line); font-size:11px; }
+  .pl-cv { display:inline-flex; align-items:center; gap:4px; color:var(--fg); }
+  .pl-dot { width:10px; height:3px; border-radius:2px; display:inline-block; }
+  .pl-cv select { padding:0 2px; font-size:10px; } .pl-stat { color:var(--dim); font-size:10px; } .pl-rm { cursor:pointer; color:var(--dim); } .pl-rm:hover{color:var(--red)}
+  .pl-x { position:absolute; top:4px; right:6px; background:none; border:none; color:var(--dim); cursor:pointer; font-size:12px; z-index:2; } .pl-x:hover{color:var(--red)}
 </style>
 </head>
 <body>
