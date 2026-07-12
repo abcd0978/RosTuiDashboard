@@ -13,6 +13,7 @@ const emptyState = (ic, msg, sub) => el('div', { class: 'empty' }, el('div', { c
 function applyTheme(t) { document.documentElement.setAttribute('data-theme', t); const b = $('#themebtn'); if (b) { b.textContent = t === 'light' ? '☀️' : '🌙'; b.title = (t === 'light' ? '다크' : '라이트') + ' 테마로 전환'; } }
 applyTheme(localStorage.getItem('rdash-theme') || (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'));
 $('#themebtn').onclick = () => { const next = document.documentElement.getAttribute('data-theme') === 'light' ? 'dark' : 'light'; localStorage.setItem('rdash-theme', next); applyTheme(next); };
+$('#wsbtn').onclick = () => { if (window.RDWorkspace) window.RDWorkspace.open(); };
 
 let items = [], ver = '?', sel = null, selItem = null, marked = new Set();
 api('/api/ver').then((o) => { ver = o.ver; $('#verlbl').textContent = 'ROS' + ver + ' · localhost'; });
