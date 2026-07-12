@@ -314,7 +314,8 @@ function inv16(m) { const o = new Array(16);
   let det = m[0] * o[0] + m[1] * o[4] + m[2] * o[8] + m[3] * o[12]; if (!det) return null; det = 1 / det;
   for (let i = 0; i < 16; i++) o[i] *= det; return o; }
 function mkScene(cv, labelDiv, info) {
-  const gl = cv.getContext('webgl', { antialias: true, alpha: false, preserveDrawingBuffer: SNAP }) || cv.getContext('experimental-webgl');
+  // preserveDrawingBuffer: 온디맨드 렌더(정지 시 draw 스킵)에서 프레임을 건너뛰어도 캔버스가 지워지지 않도록 유지.
+  const gl = cv.getContext('webgl', { antialias: true, alpha: false, preserveDrawingBuffer: true }) || cv.getContext('experimental-webgl');
   if (!gl) { info.textContent = 'WebGL 미지원 브라우저'; return { setCloud() {}, setMarkers() {}, setCloudById() {}, setMarkersById() {}, setVisible() {}, removeDisplay() {}, setTF() {}, opts() {}, view() {}, setPointSize() {}, setPickHandler() {}, setCamImage() {}, setCamOpts() {}, clearCamera() {}, setInteractiveMarkers() {}, setImHandler() {}, getStats() { return { fps: 0, points: 0, drawn: 0 }; }, dispose() {} }; }
   const VS = 'attribute vec3 p; attribute vec4 col; uniform mat4 mvp; uniform float psize; varying vec4 vc; void main(){ gl_Position = mvp*vec4(p,1.0); gl_PointSize = psize; vc = col; }';
   const FS = 'precision mediump float; varying vec4 vc; uniform float round; void main(){ if(round>0.5){ vec2 d=gl_PointCoord-0.5; if(dot(d,d)>0.25) discard; } gl_FragColor = vc; }';
@@ -370,6 +371,9 @@ function mkScene(cv, labelDiv, info) {
   const ims = new Map();         // 인터랙티브 마커 name → {frame_id, pose, scale, visual[], handles[], visible}
   let imDrag = null, imHandler = null, imFeedT = 0;   // 6-DOF 드래그 상태 · 피드백 콜백 · 스로틀
   let fps = 0, lastDrawn = 0, frameN = 0, fpsClock = (typeof performance !== 'undefined' ? performance.now() : 0);
+  // 온디맨드 렌더 — 씬이 정지 상태(클라우드 스트리밍/드래그/추종 없음)면 draw 를 건너뛴다(브라우저 GPU 절약).
+  let dirty = true; let worldF = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
+  const invalidate = () => { dirty = true; };
   const gcd = (a, b) => { while (b) { const t = b; b = a % b; a = t; } return a; };
   // prefix 가 공간적으로 대표성 있도록 큰 서로소 곱 순열(거리 LOD 로 앞쪽 N개만 그려도 골고루).
   const stridePermute = (n) => { const idx = new Uint32Array(n); if (!n) return idx; let step = (Math.floor(n * 0.6180339887) | 1); while (gcd(step, n) !== 1) step++; for (let k = 0, j = 0; k < n; k++, j = (j + step) % n) idx[k] = j; return idx; };
@@ -401,6 +405,21 @@ function mkScene(cv, labelDiv, info) {
     for (let i = 0; i < seg; i++) { const a0 = i / seg * 2 * Math.PI, a1 = (i + 1) / seg * 2 * Math.PI; tri(A, po, C(a0, -hz), C(a1, -hz), C(a1, hz), col); tri(A, po, C(a0, -hz), C(a1, hz), C(a0, hz), col); tri(A, po, [0, 0, hz], C(a0, hz), C(a1, hz), col); tri(A, po, [0, 0, -hz], C(a1, -hz), C(a0, -hz), col); } }
   function arrow(A, po, s, col, seg) { seg = seg || 12; const L = s[0] || 1, rs = (s[1] || 0.1) / 2, rh = (s[2] || 0.2) / 2, sl = L * 0.72; const C = (a, x, r) => [x, r * Math.cos(a), r * Math.sin(a)];
     for (let i = 0; i < seg; i++) { const a0 = i / seg * 2 * Math.PI, a1 = (i + 1) / seg * 2 * Math.PI; tri(A, po, C(a0, 0, rs), C(a1, 0, rs), C(a1, sl, rs), col); tri(A, po, C(a0, 0, rs), C(a1, sl, rs), C(a0, sl, rs), col); tri(A, po, [L, 0, 0], C(a0, sl, rh), C(a1, sl, rh), col); } }
+  // 마커 1개 → 지오메트리 버퍼(L=선, T=불투명 삼각형, TA=반투명, Pc=점, labels=텍스트). 마커셋·인터랙티브 마커 공용.
+  function emitMarker(m, po, L, T, TA, Pc, labels) {
+    const col = m.color && m.color.length === 4 ? m.color : [0.6, 0.8, 0.9, 1]; const A = col[3] < 0.99 ? TA : T; const s = m.scale || [1, 1, 1], pts = m.points || [], cols = m.colors || [];
+    if (m.type === 1) box(A, po, s, col);
+    else if (m.type === 2) sphere(A, po, s, col);
+    else if (m.type === 3) cyl(A, po, s, col);
+    else if (m.type === 0) arrow(A, po, s, col);
+    else if (m.type === 6) pts.forEach((q, i) => box(A, { q: po.q, p: xf(po, q) }, s, cols[i] || col));
+    else if (m.type === 7) pts.forEach((q, i) => sphere(A, { q: po.q, p: xf(po, q) }, s, cols[i] || col));
+    else if (m.type === 4) { for (let i = 0; i + 1 < pts.length; i++) line(L, po, pts[i], pts[i + 1], col); }
+    else if (m.type === 5) { for (let i = 0; i + 1 < pts.length; i += 2) line(L, po, pts[i], pts[i + 1], col); }
+    else if (m.type === 8) pts.forEach((q, i) => put(Pc, xf(po, q), cols[i] || col));
+    else if (m.type === 11) { for (let i = 0; i + 2 < pts.length; i += 3) tri(A, po, pts[i], pts[i + 1], pts[i + 2], cols[i / 3 | 0] || col); }
+    else if (m.type === 9) labels.push({ p: po.p, t: m.text, c: `rgb(${col[0] * 255 | 0},${col[1] * 255 | 0},${col[2] * 255 | 0})` });
+  }
   // ── 6-DOF 인터랙티브 마커 — 프레임/월드 변환, 화면투영, 레이, 축/링 드래그 수학 ──
   const v3 = { sub: (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]], add: (a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]], dot: (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2],
     scale: (a, s) => [a[0] * s, a[1] * s, a[2] * s], cross: (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]], norm: (a) => { const l = Math.hypot(a[0], a[1], a[2]) || 1; return [a[0] / l, a[1] / l, a[2] / l]; } };
@@ -447,27 +466,10 @@ function mkScene(cv, labelDiv, info) {
       let po = { q: (m.pose && m.pose.q) || [0, 0, 0, 1], p: (m.pose && m.pose.p) || [0, 0, 0] };
       const fr = m.frame_id && frameMap[m.frame_id]; if (fr) { const wp = qrot(fr.q, po.p); po = { q: qmul(fr.q, po.q), p: [wp[0] + fr.p[0], wp[1] + fr.p[1], wp[2] + fr.p[2]] }; }
       if (g) po = { q: qmul(g.q, po.q), p: applyG(g, po.p) };
-      const col = m.color && m.color.length === 4 ? m.color : [0.6, 0.8, 0.9, 1]; const A = col[3] < 0.99 ? TA : T; const s = m.scale || [1, 1, 1]; const pts = m.points || [];
-      if (m.type === 1) box(A, po, s, col);
-      else if (m.type === 2) sphere(A, po, s, col);
-      else if (m.type === 3) cyl(A, po, s, col);
-      else if (m.type === 0) arrow(A, po, s, col);
-      else if (m.type === 6) pts.forEach((q, i) => box(A, { q: po.q, p: xf(po, q) }, s, (m.colors[i] || col)));
-      else if (m.type === 7) pts.forEach((q, i) => sphere(A, { q: po.q, p: xf(po, q) }, s, (m.colors[i] || col)));
-      else if (m.type === 4) { for (let i = 0; i + 1 < pts.length; i++) line(L, po, pts[i], pts[i + 1], col); }
-      else if (m.type === 5) { for (let i = 0; i + 1 < pts.length; i += 2) line(L, po, pts[i], pts[i + 1], col); }
-      else if (m.type === 8) pts.forEach((q, i) => put(Pc, xf(po, q), (m.colors[i] || col)));
-      else if (m.type === 11) { for (let i = 0; i + 2 < pts.length; i += 3) tri(A, po, pts[i], pts[i + 1], pts[i + 2], (m.colors[i / 3 | 0] || col)); }
-      else if (m.type === 9) labels.push({ p: po.p, t: m.text, c: `rgb(${col[0] * 255 | 0},${col[1] * 255 | 0},${col[2] * 255 | 0})` }); } }
+      emitMarker(m, po, L, T, TA, Pc, labels); } }
     // ── 인터랙티브 마커 — 비주얼 지오메트리 + 6-DOF 기즈모(이동 화살표선 · 회전 링) ──
     for (const im of ims.values()) { if (!im.visible) continue; const w = imWorld(im), base = { q: w.q, p: w.p }, O0 = { q: [0, 0, 0, 1], p: [0, 0, 0] };
-      for (const m of (im.visual || [])) { const po = { q: qmul(w.q, (m.pose && m.pose.q) || [0, 0, 0, 1]), p: xf(base, (m.pose && m.pose.p) || [0, 0, 0]) };
-        const col = m.color && m.color.length === 4 ? m.color : [0.5, 0.7, 0.9, 1]; const A = col[3] < 0.99 ? TA : T; const s = m.scale || [1, 1, 1], pts = m.points || [];
-        if (m.type === 1) box(A, po, s, col); else if (m.type === 2) sphere(A, po, s, col); else if (m.type === 3) cyl(A, po, s, col); else if (m.type === 0) arrow(A, po, s, col);
-        else if (m.type === 4) { for (let i = 0; i + 1 < pts.length; i++) line(L, po, pts[i], pts[i + 1], col); }
-        else if (m.type === 5) { for (let i = 0; i + 1 < pts.length; i += 2) line(L, po, pts[i], pts[i + 1], col); }
-        else if (m.type === 11) { for (let i = 0; i + 2 < pts.length; i += 3) tri(A, po, pts[i], pts[i + 1], pts[i + 2], col); }
-        else if (m.type === 8) pts.forEach((qp) => put(Pc, xf(po, qp), col)); }
+      for (const m of (im.visual || [])) { const po = { q: qmul(w.q, (m.pose && m.pose.q) || [0, 0, 0, 1]), p: xf(base, (m.pose && m.pose.p) || [0, 0, 0]) }; emitMarker(m, po, L, T, TA, Pc, labels); }
       const s = (im.scale || 1) * 0.9;
       for (const h of (im.handles || [])) { const ax = v3.norm(qrot(w.q, h.axis)); const hot = imDrag && imDrag.im === im && imDrag.h === h; const c = hot ? [1, 0.9, 0.3, 1] : axisColor(h.axis);
         if (h.mode === 'move') { line(L, O0, v3.add(w.p, v3.scale(ax, s)), v3.sub(w.p, v3.scale(ax, s)), c); box(T, { q: w.q, p: v3.add(w.p, v3.scale(ax, s)) }, [s * 0.09, s * 0.09, s * 0.09], c); }
@@ -475,6 +477,8 @@ function mkScene(cv, labelDiv, info) {
       labels.push({ p: [w.p[0], w.p[1], w.p[2] + s * 1.15], t: im.name, c: '#c8d2df' }); }
     upload('line', new Float32Array(L)); upload('tri', new Float32Array(T)); upload('triA', new Float32Array(TA));
     upload('pts', new Float32Array(Pc));   // 마커 POINTS(항상 그림, 소량)
+    worldF = new Float32Array(gMat4());   // 클라우드 고정프레임 행렬 캐시(프레임당 재계산 제거) — g 는 여기서만 바뀜
+    invalidate();
   }
   // 클라우드만 업로드 — 점당 (x,y,z,c) stride4. 보이는 디스플레이 병합(단일이면 복사 없음) → xyzc 버퍼. 색은 GPU.
   function uploadCloud() {
@@ -486,7 +490,7 @@ function mkScene(cv, labelDiv, info) {
     // 거리 LOD 는 셰이더가 처리 → 보통은 무복사 업로드. 하드 상한(maxPoints)이 걸릴 때만 대표성 순열로 프리픽스 샘플.
     if (opt.maxPoints > 0 && opt.maxPoints < total) { if (permCache.n !== total) { permCache.perm = stridePermute(total); permCache.n = total; } const perm = permCache.perm; out = new Float32Array(total * 4); for (let k = 0; k < total; k++) { const i = perm[k]; out[k * 4] = src[i * 4]; out[k * 4 + 1] = src[i * 4 + 1]; out[k * 4 + 2] = src[i * 4 + 2]; out[k * 4 + 3] = src[i * 4 + 3]; } }
     else out = src;
-    gl.bindBuffer(gl.ARRAY_BUFFER, cloudBuf); gl.bufferData(gl.ARRAY_BUFFER, out, gl.DYNAMIC_DRAW);
+    gl.bindBuffer(gl.ARRAY_BUFFER, cloudBuf); gl.bufferData(gl.ARRAY_BUFFER, out, gl.DYNAMIC_DRAW); invalidate();
   }
   function bind(k) { gl.bindBuffer(gl.ARRAY_BUFFER, bufs[k]); gl.vertexAttribPointer(aP, 3, gl.FLOAT, false, 28, 0); gl.vertexAttribPointer(aC, 4, gl.FLOAT, false, 28, 12); }
   function projectLabels(mvp) { if (!labelDiv) return; const W = cv.clientWidth, H = cv.clientHeight; let u = 0;
@@ -503,7 +507,7 @@ function mkScene(cv, labelDiv, info) {
     if (nV.line) { bind('line'); gl.drawArrays(gl.LINES, 0, nV.line); }
     if (nV.pts) { gl.uniform1f(uPS, psize); gl.uniform1f(uRound, 1); bind('pts'); gl.drawArrays(gl.POINTS, 0, nV.pts); gl.uniform1f(uRound, 0); }
     // 클라우드 — 전용 셰이더(GPU 높이색) + 거리 LOD(멀수록 앞쪽 일부만, 순열로 대표성 유지).
-    if (cloudN) { gl.useProgram(cprog); gl.uniformMatrix4fv(cuMVP, false, mvpF); gl.uniformMatrix4fv(cuWorld, false, new Float32Array(gMat4())); gl.uniform1f(cuPS, psize); gl.uniform1f(cuZmin, zmin); gl.uniform1f(cuZmax, zmax);
+    if (cloudN) { gl.useProgram(cprog); gl.uniformMatrix4fv(cuMVP, false, mvpF); gl.uniformMatrix4fv(cuWorld, false, worldF); gl.uniform1f(cuPS, psize); gl.uniform1f(cuZmin, zmin); gl.uniform1f(cuZmax, zmax);
       gl.uniform1f(cuLod, opt.lodMode === 'off' ? 0 : opt.lodDist); gl.uniform1f(cuRound, opt.round ? 1 : 0); gl.uniform1f(cuCM, opt.colorMode); gl.uniform1f(cuCmin, cmin); gl.uniform1f(cuCmax, cmax);
       gl.bindBuffer(gl.ARRAY_BUFFER, cloudBuf); gl.vertexAttribPointer(caP, 3, gl.FLOAT, false, 16, 0); gl.vertexAttribPointer(caC, 1, gl.FLOAT, false, 16, 12);
       const dc = opt.maxPoints > 0 ? Math.min(cloudN, opt.maxPoints) : cloudN; lastDrawn = dc;   // 셰이더가 거리 LOD 로 추가 컬링
@@ -527,11 +531,16 @@ function mkScene(cv, labelDiv, info) {
     if (e.button === 0 && ims.size) { const rect = cv.getBoundingClientRect(); const hit = pickIm(e.clientX - rect.left, e.clientY - rect.top); if (hit) { imDrag = startImDrag(hit, e); rebuildScene(); cv.style.cursor = 'grabbing'; e.preventDefault(); return; } }
     drag = { x: e.clientX, y: e.clientY }; btn = e.button; cv.style.cursor = 'grabbing'; e.preventDefault(); });
   window.addEventListener('mouseup', () => { if (imDrag) { finishImDrag(); imDrag = null; rebuildScene(); } drag = null; cv.style.cursor = 'grab'; });
-  cv.addEventListener('mousemove', (e) => { if (imDrag) { updateImDrag(e); return; } if (!drag) return; const dx = e.clientX - drag.x, dy = e.clientY - drag.y; drag = { x: e.clientX, y: e.clientY }; if (btn === 2) { pan[0] += dx * dist * 0.002; pan[1] -= dy * dist * 0.002; } else { yaw += dx * 0.01; pitch = Math.max(-1.55, Math.min(1.55, pitch + dy * 0.01)); } });
-  cv.addEventListener('wheel', (e) => { e.preventDefault(); dist *= e.deltaY < 0 ? 0.9 : 1.1; }, { passive: false });
+  cv.addEventListener('mousemove', (e) => { if (imDrag) { updateImDrag(e); return; } if (!drag) return; const dx = e.clientX - drag.x, dy = e.clientY - drag.y; drag = { x: e.clientX, y: e.clientY }; if (btn === 2) { pan[0] += dx * dist * 0.002; pan[1] -= dy * dist * 0.002; } else { yaw += dx * 0.01; pitch = Math.max(-1.55, Math.min(1.55, pitch + dy * 0.01)); } invalidate(); });
+  cv.addEventListener('wheel', (e) => { e.preventDefault(); dist *= e.deltaY < 0 ? 0.9 : 1.1; invalidate(); }, { passive: false });
   cv.addEventListener('contextmenu', (e) => e.preventDefault());
   rebuildScene();   // 그리드·좌표축을 데이터 도착 전에도 표시
-  function loop() { if (!alive) return; draw(); if (!(SNAP && ++loop.n > 300)) raf = requestAnimationFrame(loop); }
+  // 렌더 루프 — 클라우드 스트리밍(FPS/적응형 LOD 유효), 드래그·추종, 또는 dirty(데이터/카메라 변경) 시에만 draw.
+  // 그 외 정지 상태에선 GL 작업을 건너뛰어 브라우저 GPU 부하 제거(preserveDrawingBuffer 아니어도 화면 유지).
+  function loop() { if (!alive) return;
+    const W = cv.clientWidth || 900, H = cv.clientHeight || 520; if (cv.width !== W || cv.height !== H) dirty = true;   // 리사이즈 감지
+    if (dirty || cloudN || opt.follow || imDrag || drag) { dirty = false; draw(); }
+    if (!(SNAP && ++loop.n > 300)) raf = requestAnimationFrame(loop); }
   loop.n = 0; loop();
   return {
     // 기본(단일) 디스플레이 — 하위호환. id 판(setCloudById/…)은 RViz 식 다중 디스플레이용.
@@ -544,16 +553,16 @@ function mkScene(cv, labelDiv, info) {
     removeDisplay(kind, id) { (kind === 'cloud' ? clouds : markerSets).delete(id); kind === 'cloud' ? uploadCloud() : rebuildScene(); },
     setTF(f) { frames = f || []; rebuildScene(); },
     opts(o) { Object.assign(opt, o); rebuildScene(); },
-    view(p) { pan = [0, 0]; if (p === 'top') { yaw = 0; pitch = -1.554; } else if (p === 'front') { yaw = 0; pitch = 0; } else if (p === 'side') { yaw = Math.PI / 2; pitch = 0; } else if (p === 'back') { yaw = Math.PI; pitch = 0; } else { yaw = 0.7; pitch = -0.6; dist = 12; center = [0, 0, 0.5]; } },
-    setPointSize(s) { psize = s; },
+    view(p) { pan = [0, 0]; if (p === 'top') { yaw = 0; pitch = -1.554; } else if (p === 'front') { yaw = 0; pitch = 0; } else if (p === 'side') { yaw = Math.PI / 2; pitch = 0; } else if (p === 'back') { yaw = Math.PI; pitch = 0; } else { yaw = 0.7; pitch = -0.6; dist = 12; center = [0, 0, 0.5]; } invalidate(); },
+    setPointSize(s) { psize = s; invalidate(); },
     setPickHandler(fn) { pickHandler = fn; cv.style.cursor = fn ? 'crosshair' : 'grab'; },
     setCamImage(imgEl, cam, frame) { if (!imgEl || !cam || !cam.K) return; camState.W = cam.width || imgEl.naturalWidth || 640; camState.H = cam.height || imgEl.naturalHeight || 480; camState.fx = cam.K[0] || 500; camState.fy = cam.K[4] || 500; camState.frame = frame || cam.frame_id || ''; camState.on = true;
-      gl.bindTexture(gl.TEXTURE_2D, camTex); try { gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, imgEl); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE); camState.ready = true; } catch (_) { /* */ } },
-    setCamOpts(o) { Object.assign(camState, o); },
-    clearCamera() { camState.on = false; camState.ready = false; },
+      gl.bindTexture(gl.TEXTURE_2D, camTex); try { gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, imgEl); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE); camState.ready = true; } catch (_) { /* */ } invalidate(); },
+    setCamOpts(o) { Object.assign(camState, o); invalidate(); },
+    clearCamera() { camState.on = false; camState.ready = false; invalidate(); },
     setInteractiveMarkers(list) { ims.clear(); for (const im of (list || [])) if (im && im.name) ims.set(im.name, { ...im, visible: true }); rebuildScene(); },
     setImHandler(fn) { imHandler = fn; },
-    getStats() { return { fps, points: cloudN, drawn: lastDrawn, lodDist: opt.lodDist, lodMode: opt.lodMode }; },
+    getStats() { return { fps, points: cloudN, drawn: cloudN ? lastDrawn : 0, lodDist: opt.lodDist, lodMode: opt.lodMode, active: !!(cloudN || imDrag || drag || opt.follow) }; },
     dispose() { alive = false; cancelAnimationFrame(raf); if (labelDiv) labelDiv.innerHTML = ''; try { for (const k in bufs) gl.deleteBuffer(bufs[k]); gl.deleteBuffer(cloudBuf); gl.deleteProgram(prog); gl.deleteProgram(cprog); } catch (_) { /* */ } },
   };
 }
@@ -794,7 +803,8 @@ const Views = {
     else if (it && cloudTopics().includes(it.name)) addDisplay('cloud', it.name);
     else { if (cloudTopics()[0]) addDisplay('cloud', cloudTopics()[0]); if (markerTopics()[0]) addDisplay('marker', markerTopics()[0]); }
     const statIv = setInterval(() => { if (!$('#modal').classList.contains('on')) { clearInterval(statIv); return; }
-      const s = scene.getStats(); fpsOv.textContent = `${s.fps} FPS · ${s.drawn.toLocaleString()} / ${s.points.toLocaleString()} pts${s.lodMode !== 'off' ? ` · LOD ${Math.round(s.lodDist)}m` : ''}`;
+      const s = scene.getStats(); const head = s.active ? `${s.fps} FPS` : '정지 (온디맨드)';   // 정지 씬은 렌더 스킵 → FPS 대신 상태 표시
+      fpsOv.textContent = `${head} · ${s.drawn.toLocaleString()} / ${s.points.toLocaleString()} pts${s.lodMode !== 'off' && s.points ? ` · LOD ${Math.round(s.lodDist)}m` : ''}`;
       const wall = new Date().toLocaleTimeString(); const sim = Clock.sim != null ? Clock.sim.toFixed(2) + 's' : '—';
       timeBar.textContent = `🕒 wall ${wall} · sim ${sim}${Clock.sim == null ? ' (no /clock)' : Clock.stale() ? ' (paused)' : ''}`; }, 500);
     modalSub = { close: () => { clearInterval(statIv); for (const d of displays.values()) if (d.es) d.es.close(); if (tfES) tfES.close(); if (urdfES) urdfES.close(); if (camImgES) camImgES.close(); if (camInfES) camInfES.close(); scene.dispose(); } };
