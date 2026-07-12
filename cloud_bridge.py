@@ -5,7 +5,7 @@
 import sys
 import base64
 
-MAXN = 4000   # 프레임당 최대 점(브라우저 렌더 부담 제한)
+MAXN = 30000   # 프레임당 최대 점(WebGL 이 넉넉히 소화)
 
 
 def main():

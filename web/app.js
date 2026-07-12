@@ -196,6 +196,63 @@ function trigArm(cond) { trigDisarm(); Trigger.armed = true; Trigger.cond = cond
   trigBadge();
 }
 
+// ── WebGL 포인트클라우드 렌더러 — 의존성 없는 raw WebGL. 대량 포인트·부드러운 회전/줌/이동 ──
+function mkCloudGL(cv, info) {
+  const gl = cv.getContext('webgl', { antialias: true, alpha: false, preserveDrawingBuffer: SNAP }) || cv.getContext('experimental-webgl');
+  if (!gl) { info.textContent = 'WebGL 미지원 브라우저'; return { setPoints() {}, setPointSize() {}, dispose() {} }; }
+  const VS = 'attribute vec3 p; uniform mat4 mvp; uniform vec2 zr; uniform float psize; varying float h;'
+    + 'void main(){ gl_Position = mvp*vec4(p,1.0); gl_PointSize = psize; h = clamp((p.z-zr.x)/max(zr.y-zr.x,0.001),0.0,1.0); }';
+  const FS = 'precision mediump float; varying float h;'
+    + 'void main(){ vec2 d=gl_PointCoord-0.5; if(dot(d,d)>0.25) discard;'
+    + ' vec3 lo=vec3(0.20,0.66,0.87), mid=vec3(0.44,0.82,0.55), hi=vec3(0.90,0.80,0.32);'
+    + ' vec3 c = h<0.5 ? mix(lo,mid,h*2.0) : mix(mid,hi,(h-0.5)*2.0); gl_FragColor=vec4(c,1.0); }';
+  const sh = (type, src) => { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s); if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) console.warn(gl.getShaderInfoLog(s)); return s; };
+  const prog = gl.createProgram(); gl.attachShader(prog, sh(gl.VERTEX_SHADER, VS)); gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, FS)); gl.linkProgram(prog); gl.useProgram(prog);
+  const aP = gl.getAttribLocation(prog, 'p'), uMVP = gl.getUniformLocation(prog, 'mvp'), uZR = gl.getUniformLocation(prog, 'zr'), uPS = gl.getUniformLocation(prog, 'psize');
+  const buf = gl.createBuffer(); gl.enableVertexAttribArray(aP);
+  gl.clearColor(0.043, 0.055, 0.071, 1); gl.enable(gl.DEPTH_TEST);
+  let N = 0, yaw = 0.6, pitch = -0.5, dist = 6, center = [0, 0, 0], zr = [0, 1], psize = 2.4, pan = [0, 0], raf = 0, alive = true, fitted = false;
+  const perspective = (fov, asp, near, far) => { const f = 1 / Math.tan(fov / 2), nf = 1 / (near - far); return [f / asp, 0, 0, 0, 0, f, 0, 0, 0, 0, (far + near) * nf, -1, 0, 0, 2 * far * near * nf, 0]; };
+  const mul = (a, b) => { const o = new Array(16); for (let r = 0; r < 4; r++) for (let c = 0; c < 4; c++) { let s = 0; for (let k = 0; k < 4; k++) s += a[k * 4 + r] * b[c * 4 + k]; o[c * 4 + r] = s; } return o; };
+  function mvpMat() {
+    const asp = (cv.clientWidth || 900) / (cv.clientHeight || 520);
+    const P = perspective(45 * Math.PI / 180, asp, 0.05, 5000);
+    const cy = Math.cos(yaw), sy = Math.sin(yaw), cp = Math.cos(pitch), sp = Math.sin(pitch);
+    const Ryaw = [cy, sy, 0, 0, -sy, cy, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
+    const Rpit = [1, 0, 0, 0, 0, cp, sp, 0, 0, -sp, cp, 0, 0, 0, 0, 1];
+    const T = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, -center[0] + pan[0], -center[1], -center[2] + pan[1], 1];
+    const V = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, -dist, 1];
+    return mul(P, mul(V, mul(Rpit, mul(Ryaw, T))));
+  }
+  function draw() {
+    const W = cv.clientWidth || 900, H = cv.clientHeight || 520; if (cv.width !== W) cv.width = W; if (cv.height !== H) cv.height = H;
+    gl.viewport(0, 0, cv.width, cv.height); gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    if (!N) return;
+    gl.useProgram(prog); gl.bindBuffer(gl.ARRAY_BUFFER, buf); gl.vertexAttribPointer(aP, 3, gl.FLOAT, false, 0, 0);
+    gl.uniformMatrix4fv(uMVP, false, new Float32Array(mvpMat())); gl.uniform2f(uZR, zr[0], zr[1]); gl.uniform1f(uPS, psize);
+    gl.drawArrays(gl.POINTS, 0, N);
+  }
+  let drag = null, btn = 0;
+  cv.addEventListener('mousedown', (e) => { drag = { x: e.clientX, y: e.clientY }; btn = e.button; cv.style.cursor = 'grabbing'; e.preventDefault(); });
+  window.addEventListener('mouseup', () => { drag = null; cv.style.cursor = 'grab'; });
+  cv.addEventListener('mousemove', (e) => { if (!drag) return; const dx = e.clientX - drag.x, dy = e.clientY - drag.y; drag = { x: e.clientX, y: e.clientY }; if (btn === 2) { pan[0] += dx * dist * 0.002; pan[1] -= dy * dist * 0.002; } else { yaw += dx * 0.01; pitch = Math.max(-1.55, Math.min(1.55, pitch + dy * 0.01)); } });
+  cv.addEventListener('wheel', (e) => { e.preventDefault(); dist *= e.deltaY < 0 ? 0.9 : 1.1; }, { passive: false });
+  cv.addEventListener('contextmenu', (e) => e.preventDefault());
+  function loop() { if (!alive) return; draw(); if (!(SNAP && ++loop.n > 240)) raf = requestAnimationFrame(loop); }
+  loop.n = 0; loop();
+  return {
+    setPoints(pts) { N = pts.length / 3 | 0; if (!N) return; let cx = 0, cy = 0, cz = 0, mnz = Infinity, mxz = -Infinity, mr = 0;
+      for (let i = 0; i < N; i++) { cx += pts[i * 3]; cy += pts[i * 3 + 1]; cz += pts[i * 3 + 2]; } cx /= N; cy /= N; cz /= N;
+      for (let i = 0; i < N; i++) { const z = pts[i * 3 + 2]; if (z < mnz) mnz = z; if (z > mxz) mxz = z; const r = Math.hypot(pts[i * 3] - cx, pts[i * 3 + 1] - cy, z - cz); if (r > mr) mr = r; }
+      center = [cx, cy, cz]; zr = [mnz, mxz]; if (!fitted) { dist = (mr * 2.6) || 6; fitted = true; }
+      gl.bindBuffer(gl.ARRAY_BUFFER, buf); gl.bufferData(gl.ARRAY_BUFFER, pts, gl.DYNAMIC_DRAW);
+      info.textContent = `${N} 점 · WebGL · 드래그 회전 · 휠 줌 · 우클릭 이동`;
+    },
+    setPointSize(s) { psize = s; },
+    dispose() { alive = false; cancelAnimationFrame(raf); try { gl.deleteBuffer(buf); gl.deleteProgram(prog); } catch (_) { /* */ } },
+  };
+}
+
 // ── 모달 ───────────────────────────────────────────────────────────────────
 let activeModal = null;
 function openModal(title, node, refresh) { $('#mtitle').textContent = title; const b = $('#mbody'); b.innerHTML = ''; b.append(node); $('#modal').classList.add('on'); activeModal = { refresh, close: () => {} }; }
@@ -278,42 +335,19 @@ const Views = {
     const iv = setInterval(() => { if (!$('#modal').classList.contains('on')) { clearInterval(iv); return; } draw(); }, 2000);
   },
   cloud(it) {
-    // 🧊 3D 포인트클라우드 — float32 xyz SSE 를 canvas 2D 투영으로 렌더(WebGL 불필요). 드래그=회전, 휠=줌.
+    // 🧊 3D 포인트클라우드 — float32 xyz SSE 를 WebGL 로 렌더(대량 포인트·부드러운 회전, 의존성 없음).
     const topic = it ? it.name : (items.find((i) => (i.ty || '').includes('PointCloud2')) || {}).name;
     if (!topic) { openModal('🧊 3D 포인트클라우드', el('p', { class: 'hint' }, 'PointCloud2 토픽이 없습니다.')); return; }
-    const cv = el('canvas', { width: 900, height: 500, style: 'width:100%;height:500px;background:#0d1116;border:1px solid var(--line);border-radius:6px;cursor:grab' });
+    const cv = el('canvas', { width: 900, height: 520, style: 'width:100%;height:520px;background:#0b0e12;border:1px solid var(--line);border-radius:6px;cursor:grab;display:block' });
     const info = el('div', { class: 'hint', style: 'margin-top:6px' }, '연결 중…');
-    openModal('🧊 3D — ' + topic, el('div', {}, el('div', { class: 'hint', style: 'margin-bottom:6px' }, '드래그=회전 · 휠=줌 · 높이(z)로 색상 (canvas 2D 투영, WebGL 불필요)'), cv, info));
-    let pts = new Float32Array(0), yaw = 0.6, pitch = -0.5, zoom = 1, drag = null;
-    cv.onmousedown = (e) => { drag = { x: e.clientX, y: e.clientY }; cv.style.cursor = 'grabbing'; };
-    window.addEventListener('mouseup', () => { drag = null; cv.style.cursor = 'grab'; });
-    cv.onmousemove = (e) => { if (!drag) return; yaw += (e.clientX - drag.x) * 0.01; pitch += (e.clientY - drag.y) * 0.01; drag = { x: e.clientX, y: e.clientY }; draw(); };
-    cv.onwheel = (e) => { e.preventDefault(); zoom *= e.deltaY < 0 ? 1.1 : 0.9; draw(); };
-    const es = new EventSource('/cloudstream?topic=' + encodeURIComponent(topic)); modalSub = es;
-    es.onmessage = (e) => { if (!e.data) return; const bin = atob(e.data); const u8 = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i); pts = new Float32Array(u8.buffer); info.textContent = `${pts.length / 3 | 0} 점 · 드래그로 회전`; draw(); };
+    const ptSize = el('input', { type: 'range', min: '1', max: '6', value: '2.4', step: '0.2', style: 'vertical-align:middle' });
+    openModal('🧊 3D — ' + topic, el('div', {}, el('div', { class: 'hint', style: 'margin-bottom:6px' }, '드래그=회전 · 휠=줌 · 우클릭드래그=이동 · 높이(z) 색상 · WebGL · 점크기 ', ptSize), cv, info));
+    const cloud3d = mkCloudGL(cv, info);
+    ptSize.oninput = () => cloud3d.setPointSize(+ptSize.value);
+    const es = new EventSource('/cloudstream?topic=' + encodeURIComponent(topic));
+    es.onmessage = (e) => { if (!e.data) return; const bin = atob(e.data); const u8 = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i); cloud3d.setPoints(new Float32Array(u8.buffer)); };
     es.onerror = () => { info.textContent = '스트림 오류 — PointCloud2 토픽 확인'; };
-    function draw() {
-      const ctx = cv.getContext('2d'); const W = cv.width = cv.clientWidth, H = cv.height; ctx.clearRect(0, 0, W, H);
-      const N = pts.length / 3 | 0; if (!N) return;
-      // 중심/스케일 산출
-      let cx = 0, cy = 0, cz = 0, mnz = Infinity, mxz = -Infinity, mr = 0;
-      for (let i = 0; i < N; i++) { cx += pts[i * 3]; cy += pts[i * 3 + 1]; cz += pts[i * 3 + 2]; }
-      cx /= N; cy /= N; cz /= N;
-      for (let i = 0; i < N; i++) { const z = pts[i * 3 + 2]; if (z < mnz) mnz = z; if (z > mxz) mxz = z; const dx = pts[i * 3] - cx, dy = pts[i * 3 + 1] - cy, dz = z - cz; mr = Math.max(mr, Math.hypot(dx, dy, dz)); }
-      const scale = (Math.min(W, H) * 0.42 / (mr || 1)) * zoom;
-      const cyaw = Math.cos(yaw), syaw = Math.sin(yaw), cpit = Math.cos(pitch), spit = Math.sin(pitch);
-      for (let i = 0; i < N; i++) {
-        let X = pts[i * 3] - cx, Y = pts[i * 3 + 1] - cy, Z = pts[i * 3 + 2] - cz;
-        let x1 = X * cyaw - Y * syaw, y1 = X * syaw + Y * cyaw;   // yaw around z
-        let y2 = y1 * cpit - Z * spit, z2 = y1 * spit + Z * cpit; // pitch around x
-        const sx = W / 2 + x1 * scale, sy = H / 2 - z2 * scale;
-        const h = (pts[i * 3 + 2] - mnz) / ((mxz - mnz) || 1);
-        const r = Math.round(60 + h * 120), g = Math.round(180 + h * 40), b = Math.round(230 - h * 120);
-        ctx.fillStyle = `rgba(${r},${g},${b},0.85)`; ctx.fillRect(sx, sy, 1.6, 1.6);
-      }
-      // 축 표시
-      ctx.strokeStyle = '#3a4658'; ctx.beginPath(); ctx.moveTo(W / 2, H / 2); ctx.lineTo(W / 2 + 30 * cyaw * zoom, H / 2 - 30 * spit * 0 + 0); ctx.stroke();
-    }
+    modalSub = { close: () => { es.close(); cloud3d.dispose(); } };
   },
   image(it) {
     // 🖼 카메라 — CompressedImage/Image 프레임을 base64 JPEG SSE 로 받아 표시.
