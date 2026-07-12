@@ -279,6 +279,7 @@ function trigArm(cond) { trigDisarm(); Trigger.armed = true; Trigger.cond = cond
 // ── WebGL 3D 씬 렌더러 — 그리드·좌표축·TF 프레임·Marker(큐브/구/실린더/화살표/라인/텍스트)·포인트클라우드 + 투명도 ──
 // 점/선/삼각형을 pos(vec3)+col(vec4) 한 셰이더로 그린다. 불투명→선→점→반투명(깊이쓰기 off) 순서로 블렌딩.
 const qrot = (q, v) => { const x = q[0], y = q[1], z = q[2], w = q[3], a = v[0], b = v[1], c = v[2]; const tx = 2 * (y * c - z * b), ty = 2 * (z * a - x * c), tz = 2 * (x * b - y * a); return [a + w * tx + (y * tz - z * ty), b + w * ty + (z * tx - x * tz), c + w * tz + (x * ty - y * tx)]; };
+const qmul = (a, b) => [a[3] * b[0] + a[0] * b[3] + a[1] * b[2] - a[2] * b[1], a[3] * b[1] - a[0] * b[2] + a[1] * b[3] + a[2] * b[0], a[3] * b[2] + a[0] * b[1] - a[1] * b[0] + a[2] * b[3], a[3] * b[3] - a[0] * b[0] - a[1] * b[1] - a[2] * b[2]];
 function mkScene(cv, labelDiv, info) {
   const gl = cv.getContext('webgl', { antialias: true, alpha: false, preserveDrawingBuffer: SNAP }) || cv.getContext('experimental-webgl');
   if (!gl) { info.textContent = 'WebGL 미지원 브라우저'; return { setCloud() {}, setMarkers() {}, setCloudById() {}, setMarkersById() {}, setVisible() {}, removeDisplay() {}, setTF() {}, opts() {}, view() {}, setPointSize() {}, getStats() { return { fps: 0, points: 0, drawn: 0 }; }, dispose() {} }; }
@@ -353,7 +354,12 @@ function mkScene(cv, labelDiv, info) {
     if (opt.grid) { const g = 8; for (let i = -g; i <= g; i++) { const c = [0.22, 0.27, 0.34, 1]; put(L, [i, -g, 0], c); put(L, [i, g, 0], c); put(L, [-g, i, 0], c); put(L, [g, i, 0], c); } }
     if (opt.axes) { const O = { q: [0, 0, 0, 1], p: [0, 0, 0] }; line(L, O, [0, 0, 0], [1.2, 0, 0], [0.9, 0.35, 0.35, 1]); line(L, O, [0, 0, 0], [0, 1.2, 0], [0.44, 0.82, 0.55, 1]); line(L, O, [0, 0, 0], [0, 0, 1.2], [0.4, 0.6, 0.95, 1]); }
     for (const f of frames) { const po = { q: f.q || [0, 0, 0, 1], p: f.p || [0, 0, 0] }; line(L, po, [0, 0, 0], [0.3, 0, 0], [0.9, 0.35, 0.35, 1]); line(L, po, [0, 0, 0], [0, 0.3, 0], [0.44, 0.82, 0.55, 1]); line(L, po, [0, 0, 0], [0, 0, 0.3], [0.4, 0.6, 0.95, 1]); labels.push({ p: po.p, t: f.id, c: '#9aa7b8' }); }
-    for (const set of markerSets.values()) { if (!set.visible) continue; for (const m of set.markers) { if (m.action === 2 || m.action === 3) continue; const po = { q: (m.pose && m.pose.q) || [0, 0, 0, 1], p: (m.pose && m.pose.p) || [0, 0, 0] }; const col = m.color && m.color.length === 4 ? m.color : [0.6, 0.8, 0.9, 1]; const A = col[3] < 0.99 ? TA : T; const s = m.scale || [1, 1, 1]; const pts = m.points || [];
+    // frame_id → 루트 기준 변환(TF). 마커/디스플레이를 해당 프레임에 배치(RViz 식). 없으면 identity.
+    const frameMap = {}; for (const f of frames) frameMap[f.id] = { p: f.p || [0, 0, 0], q: f.q || [0, 0, 0, 1] };
+    for (const set of markerSets.values()) { if (!set.visible) continue; for (const m of set.markers) { if (m.action === 2 || m.action === 3) continue;
+      let po = { q: (m.pose && m.pose.q) || [0, 0, 0, 1], p: (m.pose && m.pose.p) || [0, 0, 0] };
+      const fr = m.frame_id && frameMap[m.frame_id]; if (fr) { const wp = qrot(fr.q, po.p); po = { q: qmul(fr.q, po.q), p: [wp[0] + fr.p[0], wp[1] + fr.p[1], wp[2] + fr.p[2]] }; }
+      const col = m.color && m.color.length === 4 ? m.color : [0.6, 0.8, 0.9, 1]; const A = col[3] < 0.99 ? TA : T; const s = m.scale || [1, 1, 1]; const pts = m.points || [];
       if (m.type === 1) box(A, po, s, col);
       else if (m.type === 2) sphere(A, po, s, col);
       else if (m.type === 3) cyl(A, po, s, col);
@@ -362,7 +368,8 @@ function mkScene(cv, labelDiv, info) {
       else if (m.type === 7) pts.forEach((q, i) => sphere(A, { q: po.q, p: xf(po, q) }, s, (m.colors[i] || col)));
       else if (m.type === 4) { for (let i = 0; i + 1 < pts.length; i++) line(L, po, pts[i], pts[i + 1], col); }
       else if (m.type === 5) { for (let i = 0; i + 1 < pts.length; i += 2) line(L, po, pts[i], pts[i + 1], col); }
-      else if (m.type === 8) pts.forEach((q) => put(Pc, xf(po, q), col));
+      else if (m.type === 8) pts.forEach((q, i) => put(Pc, xf(po, q), (m.colors[i] || col)));
+      else if (m.type === 11) { for (let i = 0; i + 2 < pts.length; i += 3) tri(A, po, pts[i], pts[i + 1], pts[i + 2], (m.colors[i / 3 | 0] || col)); }
       else if (m.type === 9) labels.push({ p: po.p, t: m.text, c: `rgb(${col[0] * 255 | 0},${col[1] * 255 | 0},${col[2] * 255 | 0})` }); } }
     upload('line', new Float32Array(L)); upload('tri', new Float32Array(T)); upload('triA', new Float32Array(TA));
     upload('pts', new Float32Array(Pc));   // 마커 POINTS(항상 그림, 소량)
@@ -540,14 +547,15 @@ const Views = {
     const addDisplay = (kind, topic, ty) => { const id = idOf(kind, topic); if (displays.has(id)) return; const d = { id, kind, topic, ty, on: true }; displays.set(id, d); subscribe(d); renderList(); };
     const toggle = (d) => { d.on = !d.on; if (d.on) subscribe(d); else unsubscribe(d); renderList(); };
     const removeD = (d) => { unsubscribe(d); scene.removeDisplay(d.kind, d.id); displays.delete(d.id); renderList(); };
-    const builtin = { grid: true, axes: true, tf: true }; let tfES = null;
+    const builtin = { grid: true, axes: true, tf: true, robot: false }; let tfES = null, urdfES = null;
     const subTF = (on) => { if (tfES) { tfES.close(); tfES = null; } scene.setTF([]); if (!on) return; tfES = new EventSource('/tfstream'); tfES.onmessage = (e) => { if (!e.data) return; try { const o = JSON.parse(e.data); scene.setTF(o.frames || []); } catch (_) { /* */ } }; };
+    const subRobot = (on) => { if (urdfES) { urdfES.close(); urdfES = null; } scene.setMarkersById('__robot__', []); if (!on) return; urdfES = new EventSource('/urdfstream'); urdfES.onmessage = (e) => { if (!e.data) return; try { const o = JSON.parse(e.data); scene.setMarkersById('__robot__', o.markers || []); } catch (_) { /* */ } }; };
     const listBox = el('div', {});
     const DR = 'display:flex;align-items:center;gap:5px;padding:2px 4px;font-size:11px;cursor:default';
     function renderList() { listBox.innerHTML = '';
       const chk = (label, key, fn) => { const c = el('input', { type: 'checkbox' }); c.checked = builtin[key]; c.onchange = () => { builtin[key] = c.checked; fn(c.checked); }; return el('label', { style: DR }, c, el('span', {}, label)); };
       listBox.append(el('div', { class: 'hint', style: 'margin:4px 0 2px;text-transform:uppercase;letter-spacing:.05em' }, '내장'));
-      listBox.append(chk('Grid', 'grid', (v) => scene.opts({ grid: v })), chk('Axes', 'axes', (v) => scene.opts({ axes: v })), chk('TF', 'tf', (v) => subTF(v)));
+      listBox.append(chk('Grid', 'grid', (v) => scene.opts({ grid: v })), chk('Axes', 'axes', (v) => scene.opts({ axes: v })), chk('TF', 'tf', (v) => subTF(v)), chk('RobotModel (URDF)', 'robot', (v) => subRobot(v)));
       listBox.append(el('div', { class: 'hint', style: 'margin:6px 0 2px;text-transform:uppercase;letter-spacing:.05em' }, '디스플레이'));
       if (!displays.size) listBox.append(el('div', { class: 'hint', style: 'padding:2px 4px' }, '아래에서 토픽 추가'));
       const ICON = { cloud: '🌩 ', marker: '📐 ', geom: '🧭 ' };
@@ -606,7 +614,7 @@ const Views = {
       const s = scene.getStats(); fpsOv.textContent = `${s.fps} FPS · ${s.drawn.toLocaleString()} / ${s.points.toLocaleString()} pts${s.lodMode !== 'off' ? ` · LOD ${Math.round(s.lodDist)}m` : ''}`;
       const wall = new Date().toLocaleTimeString(); const sim = Clock.sim != null ? Clock.sim.toFixed(2) + 's' : '—';
       timeBar.textContent = `🕒 wall ${wall} · sim ${sim}${Clock.sim == null ? ' (no /clock)' : Clock.stale() ? ' (paused)' : ''}`; }, 500);
-    modalSub = { close: () => { clearInterval(statIv); for (const d of displays.values()) if (d.es) d.es.close(); if (tfES) tfES.close(); scene.dispose(); } };
+    modalSub = { close: () => { clearInterval(statIv); for (const d of displays.values()) if (d.es) d.es.close(); if (tfES) tfES.close(); if (urdfES) urdfES.close(); scene.dispose(); } };
   },
   image(it) {
     // 🖼 카메라 — base64 JPEG SSE + 어노테이션(검출 박스/점/원/텍스트) + 보정(CameraInfo 주점·레티클) 오버레이.

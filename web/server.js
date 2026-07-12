@@ -178,6 +178,7 @@ const server = http.createServer(async (req, res) => {
     if (p === '/annstream') { const t = q.get('topic'); if (!t) return json(res, 400, { error: 'topic' }); return streamLines(res, be.imgAnnBridge(t)); }
     if (p === '/caminfostream') { const t = q.get('topic'); if (!t) return json(res, 400, { error: 'topic' }); return streamLines(res, be.camInfoBridge(t)); }
     if (p === '/geomstream') { const t = q.get('topic'); if (!t) return json(res, 400, { error: 'topic' }); return streamLines(res, be.geomBridge(t, q.get('type') || '')); }
+    if (p === '/urdfstream') return streamLines(res, be.urdfBridge());
     if (p === '/rosout') return be.kind === 'rosbridge' ? rbEcho(res, '/rosout') : (be.usesMux ? muxStream(res, '/rosout') : streamBlocks(res, be.rosout()));
     if (p === '/diagnostics') return be.kind === 'rosbridge' ? rbEcho(res, '/diagnostics') : (be.usesMux ? muxStream(res, '/diagnostics') : streamBlocks(res, be.diagnostics()));
 
