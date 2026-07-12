@@ -77,6 +77,17 @@ Then open `http://<host-ip>:8080`. Lock it to loopback with
 
 The web UI has **full parity** with the TUI plus GUI-native views:
 
+- **▦ Docking workspace** — a tiled multi-panel layout (mosaic) for seeing
+  several views at once, in the spirit of Foxglove's panel workspace. Split any
+  panel **right** (⇥) or **down** (⤓), drag the dividers to resize, close (✕) or
+  add (＋) panels. Seven panel types — **Topic graph** (force layout), **Plot**
+  (live, click-toggle legend), **Raw messages**, **Image** (annotation +
+  calibration overlays), **3D scene** (cloud + markers + TF), **Diagnostics**,
+  **Log** — each with its own topic selector; the **layout persists** to
+  localStorage. Opened from the header (▦ 워크스페이스).
+- **Light / dark theme** toggle (🌙/☀️, persisted; follows the system setting by
+  default), plus corner **toasts** (성공/경고/오류) and a live **connection
+  badge** (연결됨 / 재연결 중 / 끊김).
 - **Node graph (rqt_graph-class).** Two modes via a toolbar toggle: **노드**
   (nodes joined by topic edges, labeled with topic count, weighted thickness)
   and **노드+토픽** (bipartite — topics become their own ellipse nodes with
@@ -84,7 +95,8 @@ The web UI has **full parity** with the TUI plus GUI-native views:
   server node, **actions** as purple hexagons (server→action→client, derived
   from `/_action/*`). A filter bar toggles services / actions / tf / debug
   (`/rosout`,`/parameter_events`) / dead-end topics. Collision-free force
-  layout; drag nodes, click to focus, hover an edge for the topic list.
+  layout; **wheel-zoom / drag-pan**, drag nodes, click to focus, hover an edge
+  for the topic list.
 - **PlotLab** (📈) — a **PlotJuggler-class** multi-plot dashboard: multiple
   synchronized plots (세로 / 격자 / 3열, each **drag-resizable** by its ⤡
   corner, or **pop-out** ⧉ into its own window); curves from **any topic/field**
@@ -93,9 +105,10 @@ The web UI has **full parity** with the TUI plus GUI-native views:
   the buffered history; per-curve **transforms** (원값, **n-th** d/dt, **n-th**
   ∫dt, |x|, moving-avg), **FFT** spectrum, **XY** phase plots, **custom
   expression** curves (`c0-c1`, `Math.hypot(c0,c1)`, …), live per-curve
-  statistics, and **rosbag load** (`🗀 bag`) to replay a recorded file on the
-  scrubber. The right-hand quick panel also has a live value view, a small line
-  plot, and a **gauge** (radial dial, auto-ranged).
+  statistics, **CSV/PNG export** (⭳ CSV for all curves, ⭳ per-plot PNG), and
+  **rosbag load** (`🗀 bag`) to replay a recorded file on the scrubber. The
+  right-hand quick panel also has a live value view, a small line plot, and a
+  **gauge** (radial dial, auto-ranged).
 - **RDash-unique diagnostics** (things Foxglove/rviz don't do — RDash already
   has the graph data and shell access):
   - **🩺 Doctor** (`H`) — one-key health scan of the whole graph: QoS
@@ -111,9 +124,17 @@ The web UI has **full parity** with the TUI plus GUI-native views:
 - **🎮 Teleop** — a `geometry_msgs/Twist` D-pad + WASD/arrow keys with
   adjustable linear/angular speed (a persistent `-r 10 Hz` publisher).
 - **Sensor views** (all rendered locally — no external tiles, no WebGL libs):
-  **🗺 Map** (NavSatFix lat/lon track), **🖼 Image** (Compressed/Image camera
-  stream), **🧊 3D** (PointCloud2 in a raw-**WebGL** viewer — orbit / zoom / pan,
-  height-colored, adjustable point size).
+  - **🗺 Map** — NavSatFix lat/lon track.
+  - **🖼 Image** — Compressed/Image camera stream with **annotation overlays**
+    (`vision_msgs/Detection2D(Array)` boxes + labels/score, `foxglove_msgs/
+    ImageAnnotations` points/circles/texts) and **calibration overlays**
+    (`sensor_msgs/CameraInfo` principal-point reticle + `K`/`D` readout).
+    **Wheel-zoom / drag-pan** with a **pixel (x,y)+rgb** readout.
+  - **🧊 3D scene** — a full raw-**WebGL** scene (no three.js): **PointCloud2**
+    (height-colored), **`visualization_msgs/Marker(Array)`** (cube / sphere /
+    cylinder / arrow / line / points / text, with transparency), and **TF
+    frames** (`/tf` → RGB axes + labels). Orbit / zoom / pan, **camera presets**
+    (Top / Front / Side / Iso), grid & axes toggles, adjustable point size.
 - **State Transitions** — a topic field's value changes as a colored timeline
   (enums / booleans / modes). Plus the full TUI toolset: publish form (skeleton
   prefill), service call, QoS, msg def, connections, TF tree, param table,
@@ -133,7 +154,8 @@ the same UI runs against different data sources:
 
 Runs in a ROS-sourced shell like the TUI; `RDASH_TELEM=<file>` overrides the
 telemetry source. Sensor streams use small path-configurable bridges
-(`img_bridge.py`, `cloud_bridge.py`, `bag_dump.py`, `ros_echo_mux.py`).
+(`img_bridge.py`, `cloud_bridge.py`, `bag_dump.py`, `ros_echo_mux.py`,
+`marker_bridge.py`, `tf_dump.py`, `img_ann_bridge.py`, `caminfo_bridge.py`).
 
 ## Requirements
 - **Node.js ≥ 18**
@@ -209,7 +231,7 @@ node index.js             # TUI only (npm start also launches the web server)
 | `RDASH_NO_WEB` | `0` | set `1` so `npm start` launches the TUI **without** the companion web server |
 | `RDASH_BACKEND` | `cli` | web data source: `cli` / `rcl` (single rclpy echo mux) / `rosbridge` (remote websocket) |
 | `RDASH_ROSBRIDGE_URL` | `ws://localhost:9090` | rosbridge endpoint when `RDASH_BACKEND=rosbridge` |
-| `RDASH_TELEM` | — | override the telemetry script (web); `RDASH_IMG_BRIDGE`/`RDASH_CLOUD_BRIDGE`/`RDASH_BAG_DUMP`/`RDASH_ECHO_MUX` override the sensor/echo bridges |
+| `RDASH_TELEM` | — | override the telemetry script (web); `RDASH_IMG_BRIDGE`/`RDASH_CLOUD_BRIDGE`/`RDASH_BAG_DUMP`/`RDASH_ECHO_MUX`/`RDASH_MARKER_BRIDGE`/`RDASH_TF_DUMP`/`RDASH_IMG_ANN_BRIDGE`/`RDASH_CAMINFO_BRIDGE` override the sensor/echo bridges |
 
 ### Files
 - `requirements.txt` — Python plot deps (auto-installed on first run).
