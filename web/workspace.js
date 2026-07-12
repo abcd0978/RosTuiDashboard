@@ -181,6 +181,7 @@
     topicSelect(ctx, cfg, isCloud, '클라우드', 'topic', subCloud);
     topicSelect(ctx, cfg, isMarker, '마커', 'marker', subMarker);
     const tf = el('label', { class: 'wschk' }, (() => { const c = el('input', { type: 'checkbox' }); c.checked = cfg.tf !== false; c.onchange = () => { cfg.tf = c.checked; ctx.save(); subTF(c.checked); }; return c; })(), 'TF'); ctx.cfgSlot.append(tf);
+    [['T', 'top'], ['F', 'front'], ['S', 'side'], ['◆', 'iso']].forEach(([t, p]) => ctx.cfgSlot.append(el('button', { class: 'wsib', title: '뷰: ' + p, onclick: () => scene.view(p) }, t)));
     subCloud(cfg.topic); subMarker(cfg.marker); subTF(cfg.tf !== false);
     return { dispose() { if (cloudES) cloudES.close(); if (markerES) markerES.close(); if (tfES) tfES.close(); scene.dispose(); } };
   }

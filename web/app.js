@@ -347,6 +347,7 @@ function mkScene(cv, labelDiv, info) {
     setMarkers(m) { markers = m || []; rebuild(); },
     setTF(f) { frames = f || []; rebuild(); },
     opts(o) { Object.assign(opt, o); rebuild(); },
+    view(p) { pan = [0, 0]; if (p === 'top') { yaw = 0; pitch = -1.554; } else if (p === 'front') { yaw = 0; pitch = 0; } else if (p === 'side') { yaw = Math.PI / 2; pitch = 0; } else if (p === 'back') { yaw = Math.PI; pitch = 0; } else { yaw = 0.7; pitch = -0.6; dist = 12; center = [0, 0, 0.5]; } },
     setPointSize(s) { psize = s; },
     dispose() { alive = false; cancelAnimationFrame(raf); if (labelDiv) labelDiv.innerHTML = ''; try { for (const k in bufs) gl.deleteBuffer(bufs[k]); gl.deleteProgram(prog); } catch (_) { /* */ } },
   };
@@ -474,8 +475,10 @@ const Views = {
     const ptSize = el('input', { type: 'range', min: '1', max: '6', value: '2.4', step: '0.2', style: 'vertical-align:middle' });
     ptSize.oninput = () => scene.setPointSize(+ptSize.value);
     const lbl = (t, node) => el('label', { style: 'display:inline-flex;align-items:center;gap:3px;margin-right:10px' }, node, el('span', { class: 'hint' }, t));
-    const ctrl = el('div', { style: 'display:flex;flex-wrap:wrap;gap:2px 0;margin-bottom:6px' },
-      lbl('클라우드', cloudSel), lbl('마커', markerSel), lbl('TF', tfChk), lbl('그리드', gridChk), lbl('축', axesChk), lbl('점크기', ptSize));
+    const vbtn = (t, p) => el('button', { class: 'act', style: 'padding:2px 7px', onclick: () => scene.view(p) }, t);
+    const views = el('span', { style: 'display:inline-flex;gap:3px;margin-right:10px' }, vbtn('Top', 'top'), vbtn('Front', 'front'), vbtn('Side', 'side'), vbtn('Iso', 'iso'));
+    const ctrl = el('div', { style: 'display:flex;flex-wrap:wrap;gap:2px 0;margin-bottom:6px;align-items:center' },
+      lbl('클라우드', cloudSel), lbl('마커', markerSel), lbl('TF', tfChk), lbl('그리드', gridChk), lbl('축', axesChk), lbl('점크기', ptSize), views);
     openModal('🧊 3D 씬', el('div', {}, ctrl, stage, info));
     // 초기 소스 자동 선택: it 이 주어지면 그 토픽, 아니면 첫 클라우드/마커, TF 는 항상 켜기.
     if (it && markerTopics.includes(it.name)) { markerSel.value = it.name; subMarker(it.name); }
@@ -601,12 +604,16 @@ const Views = {
     const foll = el('button', { class: 'act', onclick: () => { view.follow = !view.follow; foll.textContent = view.follow ? '▶ follow' : '⏸ frozen'; } }, '▶ follow');
     let layoutW = '100%';
     const setLayout = (w) => { layoutW = w; plots.forEach((p) => { p.cell.style.width = w; p.cell.style.height = '230px'; }); };
+    const dl = (name, u) => { const a = el('a', { href: u, download: name }); document.body.append(a); a.click(); a.remove(); };
+    const exportCSV = () => { const rows = ['plot,curve,transform,t,value']; plots.forEach((p, pi) => p.curves.forEach((c) => { if (c.custom) return; const data = applyT(S.series[c.key], c.tf); if (!data) return; for (const [t, v] of data) rows.push(`${pi},${c.topic}/${c.field},${c.tf},${(+t).toFixed(4)},${v}`); }));
+      if (rows.length <= 1) { toast('내보낼 데이터가 없습니다', 'warn'); return; } dl('rdash_plots.csv', 'data:text/csv;charset=utf-8,' + encodeURIComponent(rows.join('\n'))); toast(`CSV 내보냄 (${rows.length - 1}행)`, 'ok'); };
     const bar = el('div', { class: 'pl-bar' },
       el('button', { class: 'act', onclick: () => addPlot() }, '+ 플롯'),
       el('button', { class: 'act', onclick: () => setLayout('100%') }, '≡ 세로'),
       el('button', { class: 'act', onclick: () => setLayout('calc(50% - 5px)') }, '⊞ 격자'),
       el('button', { class: 'act', onclick: () => setLayout('calc(33.33% - 6px)') }, '⊟ 3열'),
       el('span', { class: 'hint' }, '창'), ...[5, 10, 30].map((w) => el('button', { class: 'act', onclick: () => { view.W = w; } }, w + 's')),
+      el('button', { class: 'act', title: '모든 플롯 데이터를 CSV 로', onclick: exportCSV }, '⭳ CSV'),
       foll, win);
     const pb = { playing: false, speed: 1, last: 0 };
     const scrub = el('input', { type: 'range', min: '0', max: '100', value: '0', step: '0.01', class: 'pl-scrub' });
@@ -666,6 +673,7 @@ const Views = {
       cell.ondrop = (e) => { e.preventDefault(); cell.classList.remove('drop'); addCurve(plot, e.dataTransfer.getData('text/plain')); };
       cell.style.width = layoutW;
       cell.append(canvas, legend,
+        el('button', { class: 'pl-x', style: 'right:46px', title: 'PNG 이미지 저장', onclick: () => { const c = el('canvas', { width: canvas.width, height: canvas.height }); const cx = c.getContext('2d'); cx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--bg2') || '#0d1116'; cx.fillRect(0, 0, c.width, c.height); cx.drawImage(canvas, 0, 0); dl('rdash_plot.png', c.toDataURL('image/png')); toast('PNG 저장됨', 'ok'); } }, '⭳'),
         el('button', { class: 'pl-x', style: 'right:26px', title: '새창에서 보기', onclick: () => popOut(plot) }, '⧉'),
         el('button', { class: 'pl-x', onclick: () => { const i = plots.indexOf(plot); if (i >= 0) plots.splice(i, 1); cell.remove(); } }, '✕'));
       plots.push(plot); grid.append(cell);
