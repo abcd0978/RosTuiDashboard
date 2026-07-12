@@ -3,7 +3,7 @@
 //       UI 를 안 고치고 데이터 소스를 바꿀 수 있다. (리뷰 제안: UI ↓ RosBackend ├CliBackend ├RclNode ├Rosbridge)
 // 현행 CliBackend 는 기존 commands.js/ros.js 빌더를 감싸는 파사드 — 셸 명령 문자열을 만든다(spawn 은 호출측).
 import { echoFullCmd, actionFor, restartFor, protoCmd } from './ros.js';
-import { TELEM, TELEM2, IMG_BRIDGE, CLOUD_BRIDGE, BAG_DUMP } from './paths.js';
+import { TELEM, TELEM2, IMG_BRIDGE, CLOUD_BRIDGE, BAG_DUMP, ECHO_MUX } from './paths.js';
 import {
   connectionsCmd, resourceCmd, tfTreeCmd, tfEchoCmd, bagRecordCmd, bagPlayCmd, bagCompareCmd,
   msgDefCmd, paramListCmd, paramGetCmd, paramSetCmd,
@@ -56,18 +56,26 @@ export class CliBackend extends RosBackend {
   imgBridge(topic) { return `python3 ${shq(process.env.RDASH_IMG_BRIDGE || IMG_BRIDGE)} ${shq(topic)} 2>/dev/null`; }
   cloudBridge(topic) { return `python3 ${shq(process.env.RDASH_CLOUD_BRIDGE || CLOUD_BRIDGE)} ${shq(topic)} 2>/dev/null`; }
   bagDump(path, topics) { return `python3 ${shq(process.env.RDASH_BAG_DUMP || BAG_DUMP)} ${shq(path)} ${shq(topics || '')} 2>/dev/null`; }
+  // echo 멀티플렉서 명령. CLI 백엔드는 기본적으로 안 씀(usesMux=false)지만, RDASH_ECHO_MUX 로 켜서 테스트 가능.
+  get usesMux() { return !!process.env.RDASH_ECHO_MUX; }
+  echoMux() { return `python3 ${shq(process.env.RDASH_ECHO_MUX || ECHO_MUX)} ${this.ver}`; }
 }
 
-// 확장 지점(미래 구현) — 같은 인터페이스를 구현하면 UI 변경 없이 교체된다.
-//  · RclNodeBackend: rclnodejs 단일 노드로 구독/발행 → `ros2 topic echo` 프로세스 폭증 해결(대규모 그래프 성능).
-//  · RosbridgeBackend: ws://host:9090 rosbridge_suite 로 원격 브라우저 연결.
-export class RclNodeBackend extends RosBackend { /* TODO: rclnodejs 도입 시 */ }
-export class RosbridgeBackend extends RosBackend { /* TODO: rosbridge websocket */ }
+// RclNodeBackend — 단일 rclpy 노드 전략. 액션(publish/service/param 등)은 CliBackend 를 그대로 상속하지만,
+// 고빈도 스트림(echo/rosout/diagnostics)은 프로세스 1개짜리 멀티플렉서(ros_echo_mux.py)로 팬아웃한다.
+// → 토픽마다 `ros2 topic echo` 를 띄우던 프로세스 폭증을 없앤다. (텔레메트리는 telemetry_ros2.py 가 이미 단일 노드)
+// 참고: 원 제안의 rclnodejs 대신 rclpy 를 쓴다 — 네이티브 npm 빌드 의존성이 없고, 코드베이스(telemetry)와 일관되며,
+//       서버측 멀티플렉싱을 mock 으로 검증 가능하기 때문. rosbridge 연결은 향후 RosbridgeBackend 로.
+export class RclNodeBackend extends CliBackend {
+  get usesMux() { return true; }
+}
+export class RosbridgeBackend extends RosBackend { /* TODO: ws://host:9090 rosbridge_suite */ }
 
-// 팩토리 — RDASH_BACKEND(cli|rcl|rosbridge) 로 선택. 현재는 cli 만 완성.
+// 팩토리 — RDASH_BACKEND(cli|rcl) 로 선택.
 export function makeBackend(ver, kind = process.env.RDASH_BACKEND || 'cli') {
   switch (kind) {
+    case 'rcl': return new RclNodeBackend(ver);
     case 'cli': return new CliBackend(ver);
-    default: return new CliBackend(ver);   // rcl/rosbridge 미완 → cli 로 폴백
+    default: return new CliBackend(ver);
   }
 }

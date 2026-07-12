@@ -31,11 +31,39 @@ def main():
     from rosbag2_py import SequentialReader, StorageOptions, ConverterOptions
     from rclpy.serialization import deserialize_message
     from rosidl_runtime_py.utilities import get_message
+    import os
+
+    def detect_storage():
+        # metadata.yaml 의 storage_identifier 우선, 없으면 파일 확장자로(sqlite3=.db3 / mcap=.mcap).
+        meta = os.path.join(path, 'metadata.yaml')
+        try:
+            import yaml
+            with open(meta) as f:
+                sid = yaml.safe_load(f).get('rosbag2_bagfile_information', {}).get('storage_identifier')
+                if sid:
+                    return sid
+        except Exception:
+            pass
+        try:
+            files = os.listdir(path) if os.path.isdir(path) else [path]
+        except Exception:
+            files = []
+        if any(fn.endswith('.mcap') for fn in files):
+            return 'mcap'
+        return 'sqlite3'
+
     reader = SequentialReader()
-    try:
-        reader.open(StorageOptions(uri=path, storage_id='sqlite3'), ConverterOptions('cdr', 'cdr'))
-    except Exception:
-        reader.open(StorageOptions(uri=path), ConverterOptions('', ''))
+    opened = False
+    for sid in (detect_storage(), 'sqlite3', 'mcap', ''):
+        try:
+            reader.open(StorageOptions(uri=path, storage_id=sid), ConverterOptions('cdr', 'cdr'))
+            opened = True
+            break
+        except Exception:
+            reader = SequentialReader()
+    if not opened:
+        print(json.dumps({"series": {}, "error": "bag open 실패(경로/스토리지 플러그인 확인)"}))
+        return
     types = {t.name: t.type for t in reader.get_all_topics_and_types()}
     series, t0, t1 = {}, None, None
     while reader.has_next():

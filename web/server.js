@@ -65,6 +65,25 @@ function streamBlocks(res, cmd) {   // '---' 구분 블록(echo/diagnostics)
   res.on('close', () => { try { child.kill(); } catch { /* */ } });
 }
 
+// ── echo 멀티플렉서 — usesMux 백엔드(RDASH_BACKEND=rcl)에서 토픽별 echo 를 프로세스 1개로 팬아웃(폭증 해결) ──
+let muxChild = null; const muxSubs = new Map();   // topic → Set(send)
+function muxEnsure() {
+  if (muxChild) return muxChild;
+  muxChild = rosSpawn(be.echoMux());
+  let buf = '';
+  muxChild.stdout.on('data', (d) => { buf += d.toString(); let i; while ((i = buf.indexOf('\n')) >= 0) { const line = buf.slice(0, i); buf = buf.slice(i + 1); if (!line.trim()) continue; let o; try { o = JSON.parse(line); } catch { continue; } const set = muxSubs.get(o.t); if (set) for (const send of set) send(JSON.stringify(o.b)); } });
+  if (muxChild.stderr) muxChild.stderr.on('data', () => {});
+  muxChild.on('close', () => { muxChild = null; });   // 죽으면 다음 요청에 재기동
+  return muxChild;
+}
+function muxStream(res, topic) {
+  const send = sse(res); muxEnsure();
+  if (!muxSubs.has(topic)) { muxSubs.set(topic, new Set()); try { muxChild.stdin.write('+' + topic + '\n'); } catch { /* */ } }
+  muxSubs.get(topic).add(send);
+  res.on('close', () => { const s = muxSubs.get(topic); if (s) { s.delete(send); if (!s.size) { muxSubs.delete(topic); try { muxChild && muxChild.stdin.write('-' + topic + '\n'); } catch { /* */ } } } });
+}
+const echoStream = (res, topic) => (be.usesMux ? muxStream(res, topic) : streamBlocks(res, be.echo(topic)));
+
 // ── 잡(Jobs) 레지스트리 — 웹에서 띄운 프로세스(북마크·rosbag·액션) 추적 ──
 let jobSeq = 0;
 const jobs = new Map();   // id → {id,label,pid,status,log[]}
@@ -113,11 +132,11 @@ const server = http.createServer(async (req, res) => {
 
     // 스트림
     if (p === '/events') return streamLines(res, 'python3 -', telemScript());
-    if (p === '/echo') return q.get('topic') ? streamBlocks(res, be.echo(q.get('topic'))) : json(res, 400, { error: 'topic' });
+    if (p === '/echo') return q.get('topic') ? echoStream(res, q.get('topic')) : json(res, 400, { error: 'topic' });
     if (p === '/imgstream') { const t = q.get('topic'); if (!t) return json(res, 400, { error: 'topic' }); return streamLines(res, be.imgBridge(t)); }
     if (p === '/cloudstream') { const t = q.get('topic'); if (!t) return json(res, 400, { error: 'topic' }); return streamLines(res, be.cloudBridge(t)); }
-    if (p === '/rosout') return streamBlocks(res, be.rosout());
-    if (p === '/diagnostics') return streamBlocks(res, be.diagnostics());
+    if (p === '/rosout') return be.usesMux ? muxStream(res, '/rosout') : streamBlocks(res, be.rosout());
+    if (p === '/diagnostics') return be.usesMux ? muxStream(res, '/diagnostics') : streamBlocks(res, be.diagnostics());
 
     // 조회(one-shot)
     if (p === '/api/msgdef') return json(res, 200, { out: await runOnce(be.msgDef(q.get('type'))) });
@@ -167,7 +186,7 @@ const server = http.createServer(async (req, res) => {
 });
 
 // 종료 시 잡 정리
-function cleanup() { for (const r of jobs.values()) { try { process.kill(-r.child.pid, 'SIGTERM'); } catch { /* */ } } }
+function cleanup() { for (const r of jobs.values()) { try { process.kill(-r.child.pid, 'SIGTERM'); } catch { /* */ } } try { muxChild && muxChild.kill(); } catch { /* */ } }
 process.on('exit', cleanup); process.on('SIGINT', () => { cleanup(); process.exit(0); });
 
 server.listen(PORT, () => { console.log(`RDash web (ROS${VER}) → http://localhost:${PORT}`); });
