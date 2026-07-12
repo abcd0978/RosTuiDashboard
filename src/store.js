@@ -16,7 +16,10 @@ import { PLOT_PY } from './lib/paths.js';
 import { rosEnv } from './lib/env.js';
 import { loadBookmarks, saveBookmarks, activePreset, presetNames, savePreset } from './lib/bookmarks.js';
 import { loadPreflight } from './lib/preflight.js';
-import { connectionsCmd, resourceCmd, tfTreeCmd, tfEchoCmd, bagRecordCmd, bagPlayCmd, bagCompareCmd } from './lib/commands.js';
+import { loadSession, saveSession, loadHistory, pushHistory } from './lib/session.js';
+import { loadBaseline, saveBaseline, snapshot as snapProfile } from './lib/baseline.js';
+import { diagnose } from './lib/doctor.js';
+import { makeBackend } from './lib/backend.js';
 import { useRosVersion } from './hooks/useRosVersion.js';
 import { useTopics } from './hooks/useTopics.js';
 import { useTermSize } from './hooks/useTermSize.js';
@@ -31,9 +34,12 @@ export const useDashboard = () => useContext(DashboardContext);
 export function StoreProvider({ children }) {
   const { exit } = useApp();
   const ver = useRosVersion();
+  const be = makeBackend(ver);   // ROS 명령은 백엔드 인터페이스로 통일(웹과 동일한 CliBackend)
+  const sessRef = useRef(loadSession());                // 이전 세션(펼침/워치/모드/마지막 선택)
+  const sess = sessRef.current;
   const [domain, setDomain] = useState(process.env.ROS_DOMAIN_ID ?? null);   // 컨테이너/도메인 전환
   const [domainEdit, setDomainEdit] = useState(null);   // 도메인 입력창 {value} 또는 null
-  const [hzMode, setHzMode] = useState('all');          // Hz 측정 정책 all|selected|off
+  const [hzMode, setHzMode] = useState(sess.hzMode || 'all');          // Hz 측정 정책 all|selected|off
   const [bookmarks, setBookmarks] = useState(() => loadBookmarks());   // 명령 북마크 리스트
   const [preset, setPreset] = useState(() => activePreset());   // 활성 북마크 프리셋(px4/turtlesim…) 또는 null
   const [bmOpen, setBmOpen] = useState(null);           // 북마크 오버레이 {idx} 또는 null
@@ -44,11 +50,25 @@ export function StoreProvider({ children }) {
   const [tfEcho, setTfEcho] = useState(null);           // tf echo 프레임 입력 {step,src,tgt} 또는 null
   const [bagCmp, setBagCmp] = useState(null);           // A/B bag 비교 경로 입력 {step,a,b} 또는 null
   const [pubForm, setPubForm] = useState(null);         // 토픽 발행 폼 {name,type,fields,idx} 또는 null
+  const [graphOpen, setGraphOpen] = useState(null);     // 노드 그래프 오버레이 {focus,top} 또는 null
+  const [qosOpen, setQosOpen] = useState(null);         // QoS 오버레이 {name} 또는 null
+  const [logOpen, setLogOpen] = useState(null);         // 로그 뷰어 {min,top,text,typing} 또는 null
+  const [paramPanel, setParamPanel] = useState(null);   // 파라미터 튜닝 {node,rows,idx,edit} 또는 null
+  const [overviewOpen, setOverviewOpen] = useState(null);   // 시스템 개요 오버레이 또는 null
+  const [diagOpen, setDiagOpen] = useState(null);       // 진단 뷰어 또는 null
+  const [lifeOpen, setLifeOpen] = useState(null);       // 라이프사이클 전환 {node,idx} 또는 null
+  const [teleopOpen, setTeleopOpen] = useState(null);   // Teleop 오버레이 {topic,lin,ang,dir} 또는 null
+  const [doctorOpen, setDoctorOpen] = useState(null);   // 🩺 Doctor(헬스 스캔) 오버레이 {idx} 또는 null
+  const [baselineOpen, setBaselineOpen] = useState(null);   // 📌 Baseline/회귀 오버레이 {idx} 또는 null
+  const [baseline, setBaseline] = useState(() => loadBaseline());   // 저장된 기준선 프로파일
+  const [triggerArmed, setTriggerArmed] = useState(false);   // 🔴 트리거 녹화 무장 여부(그래프 ERROR 시 자동 스냅샷)
+  const [marked, setMarked] = useState(() => new Set());   // 표시된 토픽(멀티선택 녹화/스냅샷)
+  const [pkgNames, setPkgNames] = useState([]);         // 패키지 이름(자동완성용) — ros2 pkg list / rospack
   const [jobs, setJobs] = useState([]);                 // 실행 중/종료 작업(북마크·rosbag·플롯…)
   const [jobsOpen, setJobsOpen] = useState(null);       // Jobs 오버레이 {idx} 또는 null
-  const [treeHidden, setTreeHidden] = useState(false);  // 트리 숨김(값 패널 전체폭) — Tab 토글
+  const [treeHidden, setTreeHidden] = useState(!!sess.treeHidden);  // 트리 숨김(값 패널 전체폭) — Tab 토글
   const [help, setHelp] = useState(false);              // 도움말 오버레이(?)
-  const [watches, setWatches] = useState([]);           // 워치리스트 [{topic, field}]
+  const [watches, setWatches] = useState(() => (Array.isArray(sess.watches) ? sess.watches : []));  // 워치리스트 [{topic, field}]
   const [watchOpen, setWatchOpen] = useState(false);    // 워치 오버레이
   const [preflight] = useState(() => loadPreflight());  // 프리플라이트 체크 정의
   const [preflightOpen, setPreflightOpen] = useState(false);
@@ -63,7 +83,8 @@ export function StoreProvider({ children }) {
 
   const [sel, setSel] = useState(0);
   const [top, setTop] = useState(0);
-  const [expanded, setExpanded] = useState(() => new Set());
+  const [hoverIdx, setHoverIdx] = useState(-1);   // 마우스가 얹힌 트리 행(호버 하이라이트). 바뀔 때만 갱신.
+  const [expanded, setExpanded] = useState(() => new Set(Array.isArray(sess.expanded) ? sess.expanded : []));
   const [active, setActive] = useState(null);   // 오른쪽에 볼 항목(item 객체)
   const [valTop, setValTop] = useState(0);       // 값 패널 세로 스크롤 오프셋
   const [edit, setEdit] = useState(null);        // 파라미터 입력창 {name,value} 또는 null
@@ -98,9 +119,43 @@ export function StoreProvider({ children }) {
     }
   }, [topics]);
 
+  // 패키지 이름 목록(북마크 자동완성용) — 버전 감지 후 1회, 백그라운드로.
+  useEffect(() => {
+    if (!ver) return undefined;
+    const p = rosSpawn(ver === '2' ? 'ros2 pkg list' : 'rospack list-names');
+    let out = '';
+    if (p.stderr) p.stderr.on('data', () => {});
+    p.stdout.on('data', (dd) => { out += dd.toString(); });
+    p.on('close', () => setPkgNames(out.trim() ? out.trim().split(/\s+/) : []));
+    p.on('error', () => {});
+    return () => { try { p.kill(); } catch { /* */ } };
+  }, [ver]);
+
+  // 마지막 선택 복원 — 토픽이 처음 도착했을 때 한 번(경로 일치 시).
+  const restoredRef = useRef(false);
+  useEffect(() => {
+    if (restoredRef.current || !topics || !sess.activePath) return;
+    const it = topics.find((i) => i.p === sess.activePath);
+    if (it) { restoredRef.current = true; setActive(it); }
+  }, [topics]);
+
   const fullList = topics || [];
+  // ROS2 액션 파생 — 숨은 /_action/ 토픽·서비스에서 액션 이름/타입 추출(트리에 actions/ 로 노출).
+  const actionMap = new Map();
+  for (const it of fullList) {
+    const m = /^(.*)\/_action\//.exec(it.name);
+    if (!m) continue;
+    const an = m[1];
+    if (!actionMap.has(an)) actionMap.set(an, { p: 'actions' + an, kind: 'action', name: an });
+    if (it.kind === 'topic' && it.name.endsWith('/_action/feedback') && it.ty) {
+      actionMap.get(an).ty = it.ty.replace(/_FeedbackMessage$/, '').replace('/msg/', '/action/');
+    }
+  }
+  const actionItems = [...actionMap.values()];
+  const visibleList = fullList.filter((it) => !it.name.includes('/_action/'));   // 숨은 _action/ 항목은 트리에서 감춤
+  const treeItems = actionItems.length ? [...visibleList, ...actionItems] : visibleList;
   const filt = filter.trim().toLowerCase();
-  const list = filt ? fullList.filter((it) => fuzzy(filt, it.name.toLowerCase())) : fullList;
+  const list = filt ? treeItems.filter((it) => fuzzy(filt, it.name.toLowerCase())) : treeItems;
   const flat = flattenTree(buildTree(list), expanded, 0, [], !!filt);
   const n = flat.length;
   useEffect(() => { setSel(0); setTop(0); }, [filt]);   // 필터 바뀌면 선택 맨 위로
@@ -146,7 +201,8 @@ export function StoreProvider({ children }) {
 
   // 마지막으로 실행한 셸 명령 기억 → 북마크 추가 시 자동 채움(명령 안 외워도 됨)
   const lastCmdRef = useRef('');
-  const run = (cmd, onDone) => { lastCmdRef.current = cmd; runAction(cmd, onDone); };
+  const historyRef = useRef(loadHistory());   // 명령 히스토리(북마크 에디터 Ctrl+P/N)
+  const run = (cmd, onDone) => { lastCmdRef.current = cmd; historyRef.current = pushHistory(cmd); runAction(cmd, onDone); };
 
   // 토픽 발행 폼 — 타입에서 필드를 뽑아 값만 채우게 한다(구조를 손으로 안 침).
   const openPublishForm = () => {
@@ -178,6 +234,7 @@ export function StoreProvider({ children }) {
   const doAction = () => {
     if (!active) { setStatus('선택된 항목 없음 (Enter 로 선택)'); return; }
     if (active.kind === 'topic') { openPublishForm(); return; }   // 발행은 폼으로
+    if (active.kind === 'action') { setEdit({ name: active.name, value: '{}', kind: 'action' }); return; }   // 액션 goal 입력
     const act = actionFor(ver, active.kind, active.name);
     if (!act) { setStatus(`(${active.kind}) 액션 없음`); return; }
     if (act.needsInput) { setEdit({ name: active.name, value: act.defaultVal || '', kind: active.kind }); return; }
@@ -204,10 +261,19 @@ export function StoreProvider({ children }) {
     const act = actionFor(ver, 'topic', name, msg);
     if (act && act.cmd) { setStatus(`pub ${name} …`); run(act.cmd, (o) => setStatus(`${name}: ${o}`)); }
   };
+  // 액션 goal 전송 — 피드백/결과는 Job 로그로 스트리밍.
+  const submitActionGoal = (name, goal) => {
+    const it = actionItems.find((a) => a.name === name);
+    const ty = it && it.ty;
+    if (!ty) { setStatus(`${name}: 액션 타입 미상`); return; }
+    spawnJob(`action ${name}`, `ros2 action send_goal ${shq(name)} ${shq(ty)} ${shq(goal)} --feedback 2>&1`);
+    setStatus(`▶ action goal → ${name} (J 에서 피드백)`);
+  };
   const submitEdit = (kind, name, value) => (
     kind === 'service' ? submitServiceCall(name, value)
       : kind === 'topic' ? submitPublish(name, value)
-        : submitSet(name, value));
+        : kind === 'action' ? submitActionGoal(name, value)
+          : submitSet(name, value));
   // 필드 선택 오버레이 — target 'plot'(matplotlib) 또는 'watch'(워치리스트 핀)
   const openFieldPicker = (target) => {
     if (!active || active.kind !== 'topic') { setStatus('토픽을 선택하세요'); return; }
@@ -248,6 +314,7 @@ export function StoreProvider({ children }) {
   // ── 작업(Jobs) 레지스트리 — RDash 가 띄운 프로세스를 추적/조회/종료 ──────────────
   const spawnJob = (label, cmd) => {
     lastCmdRef.current = cmd;               // 북마크 자동채움용
+    historyRef.current = pushHistory(cmd);  // 히스토리 누적
     const id = ++jobSeqRef.current;
     const child = rosSpawn(cmd, undefined, true);   // detached=새 그룹 → 파이프라인째 종료 가능
     const lines = []; jobLogsRef.current.set(id, lines);
@@ -338,35 +405,125 @@ export function StoreProvider({ children }) {
   const closeInfo = () => { infoRef.current.alive = false; clearTimeout(infoRef.current.timer); setInfoView(null); };
   const openConnections = () => {
     if (!active) { setStatus('선택 항목 없음 (Enter 로 선택)'); return; }
-    openInfo(`🔗 ${active.name} [${active.kind}]`, connectionsCmd(ver, active.kind, active.name));
+    openInfo(`🔗 ${active.name} [${active.kind}]`, be.connections(active.kind, active.name));
   };
   const openResource = () => {
     const nodes = fullList.filter((i) => i.kind === 'node').map((i) => i.name);
     if (!nodes.length) { setStatus('노드 없음'); return; }
-    openInfo('📊 node resources (CPU%/RSS)', resourceCmd(nodes), 2000);   // 2초마다 갱신
+    openInfo('📊 node resources (CPU%/RSS)', be.resource(nodes), 2000);   // 2초마다 갱신
   };
-  const openTf = () => openInfo('🌳 TF tree (/tf 수집 중, ~3s)', tfTreeCmd(ver));
+  const openTf = () => openInfo('🌳 TF tree (/tf 수집 중, ~3s)', be.tfTree());
+  // 노드 그래프 — 선택이 노드면 그 노드 중심, 아니면 전체 엣지.
+  const graphFocusName = active && active.kind === 'node' ? active.name : null;
+  const openGraph = () => setGraphOpen({ focus: graphFocusName, top: 0 });
+  // 메시지 정의(타입 구조) — 선택 토픽/서비스의 필드.
+  const openMsgDef = () => {
+    if (!active || !active.ty) { setStatus('타입 있는 토픽을 선택하세요'); return; }
+    openInfo(`📄 ${active.ty}`, be.msgDef(active.ty));
+  };
+  // QoS 뷰 — 선택 토픽만. 엣지(pubs/subs 의 reliability/durability)에서 계산.
+  const openLog = () => setLogOpen({ min: 20, top: null, text: '', typing: false });
+  const openOverview = () => setOverviewOpen({});
+  const openDiag = () => setDiagOpen({});
+  // 파라미터 튜닝 패널 — ROS2 노드별. 라이브로 값 조회/설정.
+  const openParamPanel = () => {
+    if (ver !== '2') { setStatus('파라미터 패널은 ROS2 노드 전용 (ROS1은 트리 params/ 에서 x)'); return; }
+    if (!active || active.kind !== 'node') { setStatus('노드를 선택하세요'); return; }
+    const node = active.name;
+    setParamPanel({ node, rows: null, idx: 0, edit: null });
+    setStatus(`⚙ ${node} 파라미터 조회 중…`);
+    runText(be.paramList(node), (out) => {
+      const rows = out.split('\n').filter(Boolean).map((l) => { const i = l.indexOf('\t'); return { name: i < 0 ? l : l.slice(0, i), value: (i < 0 ? '' : l.slice(i + 1)).trim() }; });
+      setParamPanel((p) => (p && p.node === node ? { ...p, rows } : p));
+    });
+  };
+  const refreshParam = (node, name) => runText(be.paramGet(node, name), (nv) =>
+    setParamPanel((p) => (p && p.node === node ? { ...p, rows: (p.rows || []).map((r) => (r.name === name ? { ...r, value: nv.trim() } : r)) } : p)));
+  const setParam = (node, name, val) => {
+    setStatus(`set ${name} = ${val} …`);
+    run(be.paramSet(node, name, val), (o) => { setStatus(`${name} = ${val}  (${o})`); refreshParam(node, name); });
+  };
+  const openQos = () => {
+    if (!active || active.kind !== 'topic') { setStatus('토픽을 선택하세요'); return; }
+    setQosOpen({ name: active.name });
+  };
+  // 현재 선택 항목 이름을 터미널 클립보드로(OSC52 — SSH 로도 동작).
+  const copySelection = () => {
+    const r = R.current.flat[dsel];
+    const name = r && (r.node.item ? r.node.item.name : r.node.name);
+    if (!name) { setStatus('복사할 항목 없음'); return; }
+    try { process.stdout.write(`\x1b]52;c;${Buffer.from(name).toString('base64')}\x07`); setStatus(`📋 복사: ${name}`); }
+    catch { setStatus('클립보드 복사 실패'); }
+  };
   const submitTfEcho = (src, tgt) => {
     if (!src.trim() || !tgt.trim()) { setStatus('두 프레임 필요'); return; }
-    openInfo(`🧭 tf ${src} → ${tgt}`, tfEchoCmd(ver, src.trim(), tgt.trim()), 1500);   // 1.5s 주기 갱신
+    openInfo(`🧭 tf ${src} → ${tgt}`, be.tfEcho(src.trim(), tgt.trim()), 1500);   // 1.5s 주기 갱신
   };
   const submitBagCompare = (a, b) => {
     if (!a.trim() || !b.trim()) { setStatus('두 bag 경로 필요'); return; }
-    openInfo(`🔀 bag A/B  ${a} ↔ ${b}`, bagCompareCmd(ver, a.trim(), b.trim()));
+    openInfo(`🔀 bag A/B  ${a} ↔ ${b}`, be.bagCompare(a.trim(), b.trim()));
   };
   // ── rosbag 녹화/재생 ───────────────────────────────────────────────────────
   const toggleRec = () => {
     if (rec) { killJob(rec.id, 'SIGINT'); setRec(null); setStatus('■ 녹화 정지'); return; }
-    const recTopics = filt ? list.filter((i) => i.kind === 'topic').map((i) => i.name) : null;
+    // 우선순위: 표시(marked) 토픽 > 필터 결과 > 전체(-a).
+    const recTopics = marked.size ? [...marked] : (filt ? list.filter((i) => i.kind === 'topic').map((i) => i.name) : null);
     const out = `rdash_rec_${Date.now()}`;
-    const id = spawnJob(`rosbag rec → ${out}`, bagRecordCmd(ver, recTopics, out));
+    const id = spawnJob(`rosbag rec → ${out}`, be.bagRecord(recTopics, out));
     setRec({ id, out, started: Date.now(), n: recTopics ? recTopics.length : 0 });
-    setStatus(`● 녹화: ${recTopics ? recTopics.length + ' 토픽(필터)' : '전체 -a'} → ${out}`);
+    setStatus(`● 녹화: ${recTopics ? recTopics.length + ' 토픽' + (marked.size ? '(표시)' : '(필터)') : '전체 -a'} → ${out}`);
   };
+  // 토픽 표시 토글(멀티선택) — 선택 행이 토픽일 때.
+  const toggleMark = () => {
+    const r = R.current.flat[dsel]; const it = r && r.node.item;
+    if (!it || it.kind !== 'topic') { setStatus('토픽 행에서 . 로 표시(녹화/스냅샷 대상)'); return; }
+    setMarked((s) => { const nn = new Set(s); nn.has(it.name) ? nn.delete(it.name) : nn.add(it.name); return nn; });
+  };
+  const clearMarks = () => setMarked(new Set());
+  // 스냅샷 — 표시(또는 선택) 토픽의 현재 값 1개씩을 파일로 덤프(버그리포트용).
+  const snapshot = () => {
+    const sel = marked.size ? [...marked] : (active && active.kind === 'topic' ? [active.name] : []);
+    if (!sel.length) { setStatus('스냅샷: 토픽을 . 로 표시하거나 선택하세요'); return; }
+    const out = `rdash_snapshot_${Date.now()}.txt`;
+    const echo1 = (t) => (ver === '2' ? `timeout 2 ros2 topic echo --once ${shq(t)}` : `timeout 2 rostopic echo -n1 ${shq(t)}`);
+    const cmd = sel.map((t) => `echo '=== ${t} ==='; ${echo1(t)}`).join('; ') + ` > ${shq(out)} 2>&1`;
+    spawnJob(`snapshot → ${out}`, cmd);
+    setStatus(`📸 snapshot: ${sel.length} 토픽 → ${out} (J 에서 확인)`);
+  };
+  // 라이프사이클(ROS2 managed node) — 전환 선택.
+  const openLifecycle = () => {
+    if (ver !== '2') { setStatus('라이프사이클은 ROS2 전용'); return; }
+    if (!active || active.kind !== 'node') { setStatus('노드를 선택하세요'); return; }
+    setLifeOpen({ node: active.name, idx: 0 });
+  };
+  const runLifecycle = (node, transition) => {
+    run(be.lifecycle(node, transition), (o) => setStatus(`lifecycle ${transition}: ${o}`));
+  };
+  // Teleop — geometry_msgs/Twist 를 하나의 지속 퍼블리셔(-r 10 Hz)로. 방향 바뀔 때만 재기동, 정지 시 0 트위스트.
+  const teleopChildRef = useRef(null);
+  const teleopKill = () => { if (teleopChildRef.current) { try { killTree(teleopChildRef.current, 'SIGINT'); } catch { /* */ } teleopChildRef.current = null; } };
+  const teleopStop = (topic) => {
+    teleopKill();
+    const cmd = be.publish(topic, '{linear: {x: 0.0, y: 0.0, z: 0.0}, angular: {x: 0.0, y: 0.0, z: 0.0}}');
+    if (cmd) runAction(cmd, () => {});   // 0 트위스트 1회
+  };
+  const teleopDrive = (topic, lin, ang) => {
+    teleopKill();
+    teleopChildRef.current = rosSpawn(be.teleop(topic, lin, ang), undefined, true);
+    teleopChildRef.current.on('error', () => {});
+  };
+  const openTeleop = () => setTeleopOpen({ topic: '/cmd_vel', lin: 0.5, ang: 1.0, dir: 'stop' });
+  const openDoctor = () => setDoctorOpen({ idx: 0 });
+  const openBaseline = () => setBaselineOpen({ idx: 0 });
+  const saveBaselineNow = () => { const prof = snapProfile(fullList, Date.now()); const ok = saveBaseline(prof); if (ok) setBaseline(prof); setStatus(ok ? `📌 기준선 저장 — 노드 ${prof.nodes.length}·토픽 ${Object.keys(prof.topics).length}` : '기준선 저장 실패'); };
+  // 🔴 트리거 녹화 — 무장하면 그래프에 ERROR(예: QoS 불일치)가 뜰 때 자동으로 스냅샷을 남긴다(쿨다운 30s).
+  const trigRef = useRef({ last: 0 });
+  const toggleTrigger = () => setTriggerArmed((a) => { const na = !a; if (na) trigRef.current.last = 0; setStatus(na ? '🔴 트리거 무장 — 그래프 ERROR 발생 시 자동 스냅샷(쿨다운 30s)' : '트리거 해제'); return na; });
+  const closeTeleop = () => { setTeleopOpen((p) => { teleopStop(p ? p.topic : '/cmd_vel'); return null; }); };
   const submitBagPlay = (path) => {
     const s = String(path).trim();
     if (!s) return;
-    spawnJob(`rosbag play ${s}`, bagPlayCmd(ver, s));
+    spawnJob(`rosbag play ${s}`, be.bagPlay(s));
     setStatus(`▶ play: ${s}`);
   };
   const submitDomain = (v) => {
@@ -374,58 +531,94 @@ export function StoreProvider({ children }) {
     setDomain(s === '' ? null : s);
     setStatus(`ROS_DOMAIN_ID = ${s || '(unset)'} — 재연결`);
   };
-  const quit = () => { try { mouse.disable(); } catch { /* */ } killAllJobs(); exit(); };
+  const quit = () => {
+    try { saveSession({ expanded: [...expanded], watches, hzMode, treeHidden, activePath: active && active.p }); } catch { /* */ }
+    try { mouse.disable(); } catch { /* */ }
+    killAllJobs(); exit();
+  };
 
   // 종료(언마운트) 시 모든 작업 정리
-  useEffect(() => () => killAllJobs(), []);
+  useEffect(() => () => { killAllJobs(); teleopKill(); }, []);
 
-  // 마우스: 스크롤(트리/값) + 클릭(트리 행 선택/펼침).  RDASH_MOUSE=0 이면 완전 비활성.
-  // (입력창 오염은 typable 필터로, 깜빡임은 Button 의 hover 재렌더 제거로 해결 — 모션은 클릭 감지에
-  //  필요하므로 끄지 않는다.)
+  // 🔴 트리거 감시 — 무장 상태에서 그래프 ERROR 감지 시 자동 스냅샷(쿨다운). fullList 갱신마다 폴링.
+  useEffect(() => {
+    if (!triggerArmed) return;
+    const errs = diagnose(fullList).issues.filter((i) => i.sev === 0);
+    const now = Date.now();
+    if (errs.length && now - trigRef.current.last > 30000) {
+      trigRef.current.last = now;
+      const sel = marked.size ? [...marked] : fullList.filter((i) => i.kind === 'topic' && !i.name.includes('/_action/')).slice(0, 8).map((i) => i.name);
+      const out = `rdash_trig_${now}.txt`;
+      const echo1 = (t) => (ver === '2' ? `timeout 2 ros2 topic echo --once ${shq(t)}` : `timeout 2 rostopic echo -n1 ${shq(t)}`);
+      const cmd = sel.map((t) => `echo '=== ${t} ==='; ${echo1(t)}`).join('; ') + ` > ${shq(out)} 2>&1`;
+      spawnJob(`🔴 trigger(${errs[0].target}) → ${out}`, cmd);
+      setStatus(`🔴 트리거 발동: ${errs[0].target} — 스냅샷 ${sel.length}토픽 → ${out} (J 확인)`);
+    }
+  }, [fullList, triggerArmed]);
+
+  // 마우스: 스크롤(트리/값) + 클릭(트리 행 선택/펼침) + 호버(트리 행 하이라이트). RDASH_MOUSE=0 이면 비활성.
+  // 깜빡임은 라인 diff 출력기가 "바뀐 줄만" 다시 그려 해결 → 호버는 상태가 바뀔 때만 리렌더(모션마다 X).
+  // 오버레이/입력창이 열려 있으면 트리는 가려져 있으므로 트리용 마우스(스크롤/호버/클릭)를 무시한다.
+  const busyRef = useRef(false);
+  busyRef.current = !!(edit || plotPick || searching || domainEdit || bmOpen || bmAdd || infoView
+    || bagPlay || jobsOpen || help || watchOpen || tfEcho || preflightOpen || bagCmp || pubForm || graphOpen || qosOpen || logOpen || paramPanel || overviewOpen || diagOpen || lifeOpen || teleopOpen || doctorOpen || baselineOpen);
+
   useEffect(() => {
     if (!process.stdin.isTTY || process.env.RDASH_MOUSE === '0') return;
     mouse.enable();
     const onScroll = (p, dir) => {
+      if (busyRef.current) return;
       if (dir !== 'scrolldown' && dir !== 'scrollup') return;
       const d = dir === 'scrolldown' ? 3 : -3;
       if (p && p.x > LEFT_W) setValTop((v) => clamp(v + d, 0, valMaxRef.current));
       else setTop((t) => clamp(t + d, 0, Math.max(0, R.current.n - R.current.VISIBLE)));
     };
+    // 트리 행 호버 → hoverIdx (클릭 히트테스트와 같은 좌표 계산). 값이 바뀔 때만 setState.
+    const treeRowAt = (p) => {
+      if (!p || p.x > LEFT_W + 1) return -1;
+      const slot = p.y - (R.current.listPos.top || 0) - 1;
+      if (slot < 0 || slot >= R.current.VISIBLE) return -1;
+      const idx = R.current.dtop + slot;
+      return idx < R.current.n ? idx : -1;
+    };
+    const onMove = (p) => { const idx = busyRef.current ? -1 : treeRowAt(p); setHoverIdx((cur) => (cur === idx ? cur : idx)); };
     let down = false;   // press→release 한 사이클. 중복 press 무시(열자마자 닫힘 방지)
     const onClick = (pos, action) => {
       if (action === 'release') { down = false; return; }
       if (action !== 'press' || down) return;
       down = true;
-      if (pos.x > LEFT_W + 1) return;
-      const slot = pos.y - (R.current.listPos.top || 0) - 1;
-      if (slot >= 0 && slot < R.current.VISIBLE) {
-        const idx = R.current.dtop + slot;
-        if (idx < R.current.n) { setSel(idx); activateRef.current(idx); }
-      }
+      if (busyRef.current) return;
+      const idx = treeRowAt(pos);
+      if (idx >= 0) { setSel(idx); activateRef.current(idx); }
     };
     mouse.events.on('scroll', onScroll);
+    mouse.events.on('position', onMove);
     mouse.events.on('click', onClick);
     return () => {
-      mouse.events.off('scroll', onScroll); mouse.events.off('click', onClick);
+      mouse.events.off('scroll', onScroll); mouse.events.off('position', onMove); mouse.events.off('click', onClick);
       try { mouse.disable(); } catch { /* */ }
     };
   }, []);
 
   const ctx = {
     ver, conn, topics, cols, rows,
-    sel: dsel, top: dtop, n, maxTop, flat, list, VISIBLE, LW, RW, rightW,
+    sel: dsel, top: dtop, n, maxTop, flat, list, VISIBLE, LW, RW, rightW, hoverIdx,
     expanded, active, echo, bw, activeHz, activeAge, valTop, valMaxRef, frozen, renderHz,
     edit, searching, filter, plotPick, status, actHint, hzHistRef, listRef,
     hzMode, domain, domainEdit, env: rosEnv(ver, domain),
     bookmarks, preset, bmOpen, bmAdd, infoView, rec, bagPlay, tfEcho, bagCmp, jobs, jobsOpen, jobLogsRef,
-    treeHidden, help, watches, watchOpen, preflight, preflightOpen, pubForm,
+    treeHidden, help, watches, watchOpen, preflight, preflightOpen, pubForm, pkgNames, graphOpen, graphFocusName, qosOpen, logOpen, paramPanel, overviewOpen, diagOpen, lifeOpen, teleopOpen, doctorOpen, baselineOpen, baseline, triggerArmed, allItems: fullList, marked,
     setSel, setTop, setValTop, setExpanded, setActive, setEdit, setSearching, setPubForm, submitPubForm,
+    setGraphOpen, openGraph, setQosOpen, openQos, setLogOpen, openLog, openMsgDef, copySelection,
+    setParamPanel, openParamPanel, setParam, setOverviewOpen, openOverview, setDiagOpen, openDiag,
+    setLifeOpen, openLifecycle, runLifecycle, setTeleopOpen, openTeleop, closeTeleop, teleopDrive, teleopStop, setDoctorOpen, openDoctor, setBaselineOpen, openBaseline, saveBaselineNow, toggleTrigger, toggleMark, clearMarks, snapshot,
     setFilter, setFrozen, setPlotPick, setRateIdx, setStatus, setDomainEdit,
     setBmOpen, setBmAdd, setInfoView, setBagPlay, setJobsOpen, setHelp, setWatchOpen, setTfEcho, setPreflightOpen, setBagCmp,
     openFieldPicker, addWatch, removeWatch, submitTfEcho, submitBagCompare,
     toggleTree: () => setTreeHidden((v) => !v),
     activate, move, doAction, doRestart, submitSet, submitEdit, doPlot, launchPlot, quit,
     cycleHz, submitDomain, runBookmark, runBookmarkKey, cyclePreset, addBookmark, deleteBookmark, updateBookmark, bmSeedCmd,
+    history: historyRef.current,
     openConnections, openResource, openTf, closeInfo, toggleRec, submitBagPlay,
     killJob, removeJob,
   };

@@ -1,0 +1,60 @@
+// 상태/오버레이 슬롯 — 현재 모드에 맞는 컴포넌트 하나만 마운트(그 컴포넌트가 입력을 소유).
+// 우선순위: 북마크추가 > 북마크 > 도메인 > 필드선택 > 검색 > 파라미터편집 > 기본 상태줄.
+import { h } from '../../react.js';
+import { useDashboard } from '../../store.js';
+import { FieldPicker } from './FieldPicker.js';
+import { SearchBar } from './SearchBar.js';
+import { ParamEdit } from './ParamEdit.js';
+import { DomainEdit } from './DomainEdit.js';
+import { Bookmarks } from './Bookmarks.js';
+import { BookmarkAdd } from './BookmarkAdd.js';
+import { InfoView } from './InfoView.js';
+import { BagPlay } from './BagPlay.js';
+import { TfEcho } from './TfEcho.js';
+import { BagCompare } from './BagCompare.js';
+import { Jobs } from './Jobs.js';
+import { PublishForm } from './PublishForm.js';
+import { Help } from './Help.js';
+import { WatchList } from './WatchList.js';
+import { Preflight } from './Preflight.js';
+import { GraphView } from './GraphView.js';
+import { QoSView } from './QoSView.js';
+import { LogViewer } from './LogViewer.js';
+import { ParamPanel } from './ParamPanel.js';
+import { SystemOverview } from './SystemOverview.js';
+import { DiagnosticsView } from './DiagnosticsView.js';
+import { LifecycleView } from './LifecycleView.js';
+import { TeleopView } from './TeleopView.js';
+import { DoctorView } from './DoctorView.js';
+import { BaselineView } from './BaselineView.js';
+import { StatusLine } from './StatusLine.js';
+
+export function Overlay() {
+  const { plotPick, searching, edit, domainEdit, bmOpen, bmAdd, infoView, bagPlay, tfEcho, bagCmp, jobsOpen, help, watchOpen, preflightOpen, pubForm, graphOpen, qosOpen, logOpen, paramPanel, overviewOpen, diagOpen, lifeOpen, teleopOpen, doctorOpen, baselineOpen } = useDashboard();
+  if (help) return h(Help);
+  if (doctorOpen) return h(DoctorView);
+  if (baselineOpen) return h(BaselineView);
+  if (teleopOpen) return h(TeleopView);
+  if (preflightOpen) return h(Preflight);
+  if (graphOpen) return h(GraphView);
+  if (qosOpen) return h(QoSView);
+  if (logOpen) return h(LogViewer);
+  if (paramPanel) return h(ParamPanel);
+  if (overviewOpen) return h(SystemOverview);
+  if (diagOpen) return h(DiagnosticsView);
+  if (lifeOpen) return h(LifecycleView);
+  if (watchOpen) return h(WatchList);
+  if (pubForm) return h(PublishForm);
+  if (jobsOpen) return h(Jobs);
+  if (tfEcho) return h(TfEcho);
+  if (bagCmp) return h(BagCompare);
+  if (bmAdd) return h(BookmarkAdd);
+  if (bmOpen) return h(Bookmarks);
+  if (infoView) return h(InfoView);
+  if (bagPlay) return h(BagPlay);
+  if (domainEdit) return h(DomainEdit);
+  if (plotPick) return h(FieldPicker);
+  if (searching) return h(SearchBar);
+  if (edit) return h(ParamEdit);
+  return h(StatusLine);
+}

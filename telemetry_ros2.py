@@ -92,7 +92,17 @@ while rclpy.ok():
     for n in [n for n in subs if n not in types]:   # 사라진 토픽 정리(누수 방지)
         drop(n)
     services = sorted({s for s, _ in node.get_service_names_and_types()})
-    nodes = sorted({(ns.rstrip("/") + "/" + nm) for nm, ns in node.get_node_names_and_namespaces()})
+    nns = node.get_node_names_and_namespaces()
+    nodes = sorted({(ns.rstrip("/") + "/" + nm) for nm, ns in nns})
+    # 서비스 → 서버 노드 매핑(그래프에서 서비스 관계 표시용). best-effort.
+    srv_server = {}
+    for nm, ns in nns:
+        full = ns.rstrip("/") + "/" + nm
+        try:
+            for sname, _ in node.get_service_names_and_types_by_node(nm, ns):
+                srv_server.setdefault(sname, []).append(full)
+        except Exception:
+            pass
 
     # 1초 수집 윈도우 (spin_once 로 콜백 처리)
     for n in list(counts):
@@ -104,13 +114,34 @@ while rclpy.ok():
     rates = {n: round(counts.get(n, 0) / dt, 1) for n in types}
 
     now = time.time()
+
+    # 그래프 엣지 + QoS — 각 토픽의 발행/구독 엔드포인트(노드명 + reliability/durability).
+    def eps(topic, getter):
+        out = []
+        try:
+            for e in getter(topic):
+                nn = (e.node_namespace.rstrip("/") + "/" + e.node_name)
+                try:
+                    q = e.qos_profile
+                    r = "R" if q.reliability.name == "RELIABLE" else "B"
+                    d = "T" if q.durability.name == "TRANSIENT_LOCAL" else "V"
+                except Exception:
+                    r = d = None
+                out.append([nn, r, d])
+        except Exception:
+            pass
+        return out
+
     items = []
     for n in sorted(types):
         age = round(now - last_seen[n], 2) if n in last_seen else None   # 마지막 수신 후 경과(초)
         items.append({"p": "topics" + n, "kind": "topic", "name": n,
-                      "ty": types[n], "hz": rates.get(n, 0.0), "age": age})
+                      "ty": types[n], "hz": rates.get(n, 0.0), "age": age,
+                      "pubs": eps(n, node.get_publishers_info_by_topic),
+                      "subs": eps(n, node.get_subscriptions_info_by_topic)})
     for s in services:
-        items.append({"p": "services" + s, "kind": "service", "name": s})
+        items.append({"p": "services" + s, "kind": "service", "name": s,
+                      "server": sorted(set(srv_server.get(s, [])))})
     for nd in nodes:
         items.append({"p": "nodes" + nd, "kind": "node", "name": nd})
     emit({"items": items} if items else {"nomaster": True})

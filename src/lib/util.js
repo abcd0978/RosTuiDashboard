@@ -31,3 +31,16 @@ export const shq = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
 // 텍스트 입력에 통과시킬 "실제 타이핑 한 글자"인지. 마우스 리포트 잔재(예: "[<35;76;33M")는
 // 여러 글자로 들어와 걸러진다. 제어문자/ctrl/meta 도 제외.
 export const typable = (ch, key) => !!ch && ch.length === 1 && ch >= ' ' && !key.ctrl && !key.meta;
+
+// 붙여넣기까지 허용하는 입력 필터 — 한 글자 타이핑과 여러 글자 붙여넣기를 모두 받되,
+// 마우스 리포트/제어 시퀀스 잔재는 거른다. 반환: 삽입할 문자열(정제됨) 또는 null.
+//   multiline=false 면 개행을 공백으로 눌러 한 줄 유지.
+export function editable(input, key, multiline = false) {
+  if (!input || key.ctrl || key.meta) return null;
+  let s = input.replace(/\x1b?\[20[01]~/g, '');       // bracketed-paste 마커 제거
+  if (/^\[[<0-9;]+[Mm]$/.test(s)) return null;         // 마우스 리포트 잔재
+  if (s.includes('\x1b')) return null;                 // 기타 이스케이프 시퀀스
+  s = s.replace(/\r\n?/g, '\n').replace(/[\x00-\x09\x0b\x0c\x0e-\x1f\x7f]/g, '');   // 개행만 남기고 제어문자 제거
+  if (!multiline) s = s.replace(/\n/g, ' ');
+  return s.length ? s : null;
+}
