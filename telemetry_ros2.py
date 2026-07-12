@@ -92,7 +92,17 @@ while rclpy.ok():
     for n in [n for n in subs if n not in types]:   # 사라진 토픽 정리(누수 방지)
         drop(n)
     services = sorted({s for s, _ in node.get_service_names_and_types()})
-    nodes = sorted({(ns.rstrip("/") + "/" + nm) for nm, ns in node.get_node_names_and_namespaces()})
+    nns = node.get_node_names_and_namespaces()
+    nodes = sorted({(ns.rstrip("/") + "/" + nm) for nm, ns in nns})
+    # 서비스 → 서버 노드 매핑(그래프에서 서비스 관계 표시용). best-effort.
+    srv_server = {}
+    for nm, ns in nns:
+        full = ns.rstrip("/") + "/" + nm
+        try:
+            for sname, _ in node.get_service_names_and_types_by_node(nm, ns):
+                srv_server.setdefault(sname, []).append(full)
+        except Exception:
+            pass
 
     # 1초 수집 윈도우 (spin_once 로 콜백 처리)
     for n in list(counts):
@@ -130,7 +140,8 @@ while rclpy.ok():
                       "pubs": eps(n, node.get_publishers_info_by_topic),
                       "subs": eps(n, node.get_subscriptions_info_by_topic)})
     for s in services:
-        items.append({"p": "services" + s, "kind": "service", "name": s})
+        items.append({"p": "services" + s, "kind": "service", "name": s,
+                      "server": sorted(set(srv_server.get(s, [])))})
     for nd in nodes:
         items.append({"p": "nodes" + nd, "kind": "node", "name": nd})
     emit({"items": items} if items else {"nomaster": True})
