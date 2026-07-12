@@ -449,13 +449,23 @@ const Views = {
         for (const [k, v] of Object.entries(nums)) { const key = topic + ' ' + k; (S.series[key] || (S.series[key] = [])).push([t, v]); if (S.series[key].length > 4000) S.series[key].shift(); } };
       S.es[topic] = es; };
     const view = { W: 10, follow: true, tEnd: 0 }; const plots = []; let colorI = 0, cursorT = null;
-    const TF = { raw: '원값', deriv: 'd/dt', integ: '∫dt', abs: '|x|', movavg: '이동평균' };
+    const TF = { raw: '원값', d1: 'd/dt', d2: 'd²/dt²', d3: 'd³/dt³', i1: '∫dt', i2: '∫∫dt', abs: '|x|', movavg: '이동평균' };
+    const derivOnce = (d) => { const o = []; for (let i = 1; i < d.length; i++) { const dt = d[i][0] - d[i - 1][0] || 1e-6; o.push([d[i][0], (d[i][1] - d[i - 1][1]) / dt]); } return o; };
+    const integOnce = (d) => { const o = []; let a = 0; for (let i = 1; i < d.length; i++) { a += (d[i][1] + d[i - 1][1]) / 2 * (d[i][0] - d[i - 1][0]); o.push([d[i][0], a]); } return o; };
     const applyT = (data, tf) => { if (!data || data.length < 2 || tf === 'raw') return data || [];
-      if (tf === 'deriv') { const o = []; for (let i = 1; i < data.length; i++) { const dt = data[i][0] - data[i - 1][0] || 1e-6; o.push([data[i][0], (data[i][1] - data[i - 1][1]) / dt]); } return o; }
-      if (tf === 'integ') { const o = []; let a = 0; for (let i = 1; i < data.length; i++) { a += (data[i][1] + data[i - 1][1]) / 2 * (data[i][0] - data[i - 1][0]); o.push([data[i][0], a]); } return o; }
+      if (tf[0] === 'd') { let r = data; const n = +tf[1] || 1; for (let k = 0; k < n && r.length > 1; k++) r = derivOnce(r); return r; }   // n차 미분
+      if (tf[0] === 'i') { let r = data; const n = +tf[1] || 1; for (let k = 0; k < n && r.length > 1; k++) r = integOnce(r); return r; }   // n차 적분
       if (tf === 'abs') return data.map(([t, v]) => [t, Math.abs(v)]);
       if (tf === 'movavg') { const n = 12, q = []; let s = 0; const o = []; for (const [t, v] of data) { q.push(v); s += v; if (q.length > n) s -= q.shift(); o.push([t, s / q.length]); } return o; }
       return data; };
+    // FFT — 창 데이터를 N(2^k) 균일 샘플로 리샘플 후 radix-2 FFT → [주파수Hz, 크기] 배열(양의 주파수).
+    const fft = (re, im, N) => { for (let i = 1, j = 0; i < N; i++) { let bit = N >> 1; for (; j & bit; bit >>= 1) j ^= bit; j ^= bit; if (i < j) { const tr = re[i]; re[i] = re[j]; re[j] = tr; const ti = im[i]; im[i] = im[j]; im[j] = ti; } }
+      for (let len = 2; len <= N; len <<= 1) { const ang = -2 * Math.PI / len, wr = Math.cos(ang), wi = Math.sin(ang); for (let i = 0; i < N; i += len) { let cr = 1, ci = 0; for (let k = 0; k < len / 2; k++) { const a = i + k, b = i + k + len / 2; const vr = re[b] * cr - im[b] * ci, vi = re[b] * ci + im[b] * cr; re[b] = re[a] - vr; im[b] = im[a] - vi; re[a] += vr; im[a] += vi; const ncr = cr * wr - ci * wi; ci = cr * wi + ci * wr; cr = ncr; } } } };
+    const fftMag = (data, N = 256) => { if (!data || data.length < 8) return null; const t0 = data[0][0], t1 = data[data.length - 1][0], span = t1 - t0 || 1;
+      const re = new Float64Array(N), im = new Float64Array(N); let j = 0;
+      for (let k = 0; k < N; k++) { const t = t0 + span * k / (N - 1); while (j < data.length - 2 && data[j + 1][0] < t) j++; const a = data[j], b = data[Math.min(j + 1, data.length - 1)]; const f = (t - a[0]) / ((b[0] - a[0]) || 1); re[k] = a[1] + (b[1] - a[1]) * f; }
+      let m = 0; for (let k = 0; k < N; k++) m += re[k]; m /= N; for (let k = 0; k < N; k++) re[k] -= m;   // DC 제거
+      fft(re, im, N); const fs = (N - 1) / span, half = N / 2, out = []; for (let k = 1; k < half; k++) out.push([k * fs / N, Math.hypot(re[k], im[k]) * 2 / N]); return out; };
     const latestT = () => { let m = 0; for (const k in S.series) { const a = S.series[k]; if (a.length) m = Math.max(m, a[a.length - 1][0]); } return m; };
 
     const list = el('div', { class: 'pl-list' }), grid = el('div', { class: 'pl-grid' }), win = el('span', { class: 'hint' });
@@ -499,9 +509,10 @@ const Views = {
       const canvas = el('canvas', { class: 'pl-canvas' }), legend = el('div', { class: 'pl-legend' }), cell = el('div', { class: 'pl-cell' });
       const plot = { curves: [], canvas, legend, cell };
       const drawLegend = () => { legend.innerHTML = '';
-        const xyBtn = el('span', { class: 'pl-btn2' + (plot.xy ? ' on' : ''), title: 'XY 플롯(c0=X)', onclick: () => { plot.xy = !plot.xy; drawLegend(); } }, 'XY');
+        const xyBtn = el('span', { class: 'pl-btn2' + (plot.xy ? ' on' : ''), title: 'XY 플롯(c0=X)', onclick: () => { plot.xy = !plot.xy; if (plot.xy) plot.fft = false; drawLegend(); } }, 'XY');
+        const fftBtn = el('span', { class: 'pl-btn2' + (plot.fft ? ' on' : ''), title: 'FFT 스펙트럼(주파수축)', onclick: () => { plot.fft = !plot.fft; if (plot.fft) plot.xy = false; drawLegend(); } }, 'FFT');
         const fxBtn = el('span', { class: 'pl-btn2', title: '커스텀 수식 커브', onclick: () => { plot._fx = !plot._fx; drawLegend(); } }, 'ƒ');
-        legend.append(el('span', { class: 'pl-cv' }, xyBtn, fxBtn));
+        legend.append(el('span', { class: 'pl-cv' }, xyBtn, fftBtn, fxBtn));
         if (plot._fx) { const inp = el('input', { placeholder: '수식(c0,c1…): c0-c1, Math.hypot(c0,c1)' }); const add = el('button', { class: 'pl-btn2', onclick: () => { const ex = inp.value.trim(); if (!ex) return; let fn; try { fn = new Function('c', 'Math', 't', 'return (' + ex + ')'); } catch (_) { return; } plot.curves.push({ custom: true, expr: ex, fn, field: 'ƒ ' + ex, topic: '', color: PAL[colorI++ % PAL.length], tf: 'raw' }); plot._fx = false; drawLegend(); } }, '추가'); legend.append(el('span', { class: 'pl-fx' }, inp, add)); }
         let si = 0; plot.curves.forEach((c) => {
           const idx = c.custom ? null : 'c' + (si++);
@@ -534,6 +545,16 @@ const Views = {
         ctx.strokeStyle = '#1b222c'; ctx.lineWidth = 1; for (let i = 0; i <= 4; i++) { const y = H * i / 4; ctx.beginPath(); ctx.moveTo(32, y); ctx.lineTo(W, y); ctx.stroke(); }
         const srcs = pl.curves.filter((c) => !c.custom);
         const cd = pl.curves.map((c) => ({ c, d: c.custom ? evalCustom(c, srcs, t0, t1) : applyT(S.series[c.key], c.tf).filter(([t]) => t >= t0 && t <= t1) }));
+        if (pl.fft) {   // ── FFT 스펙트럼: X=주파수(Hz), Y=크기 ──
+          const spectra = cd.map((z) => ({ c: z.c, m: fftMag(z.d) })).filter((z) => z.m);
+          let fmax = 1, amax = 1e-9; for (const { m } of spectra) for (const [f, a] of m) { if (f > fmax) fmax = f; if (a > amax) amax = a; }
+          const PX = (f) => 32 + f / fmax * (W - 40), PY = (a) => H - 12 - a / amax * (H - 20);
+          ctx.strokeStyle = '#1b222c'; for (let i = 0; i <= 4; i++) { const x = 32 + (W - 40) * i / 4; ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H - 12); ctx.stroke(); }
+          ctx.fillStyle = '#5c6672'; ctx.font = '9px monospace'; ctx.textAlign = 'left'; ctx.fillText('0Hz', 32, H - 2); ctx.textAlign = 'right'; ctx.fillText(fmax.toFixed(0) + 'Hz', W - 4, H - 2); ctx.textAlign = 'left'; ctx.fillText('|X|', 2, 9);
+          for (const { c, m } of spectra) { ctx.strokeStyle = c.color; ctx.lineWidth = 1.3; ctx.beginPath(); m.forEach(([f, a], i) => { const x = PX(f), y = PY(a); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }); ctx.stroke();
+            if (c._st) { let pk = 0, pf = 0; for (const [f, a] of m) if (a > pk) { pk = a; pf = f; } c._st.textContent = ` peak ${pf.toFixed(1)}Hz`; } }
+          continue;
+        }
         if (pl.xy && srcs.length >= 2) {   // ── XY 플롯: c0=X, 나머지=Y ──
           const xd = cd.find((z) => z.c === srcs[0]).d; let xmn = Infinity, xmx = -Infinity, ymn = Infinity, ymx = -Infinity;
           for (const [, v] of xd) { if (v < xmn) xmn = v; if (v > xmx) xmx = v; }
