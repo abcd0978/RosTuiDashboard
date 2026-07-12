@@ -466,7 +466,14 @@ const Views = {
       el('button', { class: 'act', onclick: () => { grid.style.gridTemplateColumns = '1fr 1fr'; } }, '⊞ 격자'),
       el('span', { class: 'hint' }, '창'), ...[5, 10, 30].map((w) => el('button', { class: 'act', onclick: () => { view.W = w; } }, w + 's')),
       foll, win);
-    openModal('📈 PlotLab — 다중 동기 플롯 (PlotJuggler 스타일)', el('div', { class: 'pl' }, bar, el('div', { class: 'pl-body' }, list, grid)));
+    const pb = { playing: false, speed: 1, last: 0 };
+    const scrub = el('input', { type: 'range', min: '0', max: '100', value: '0', step: '0.01', class: 'pl-scrub' });
+    const playBtn = el('button', { class: 'act', onclick: () => { pb.playing = !pb.playing; pb.last = 0; playBtn.textContent = pb.playing ? '⏸' : '▶'; view.follow = false; foll.textContent = '⏸ frozen'; } }, '▶');
+    const spdSel = el('select', {}); [0.25, 0.5, 1, 2, 4].forEach((s) => spdSel.append(el('option', { value: s }, s + '×'))); spdSel.value = '1'; spdSel.onchange = () => { pb.speed = +spdSel.value; };
+    const scrubLbl = el('span', { class: 'hint' });
+    scrub.oninput = () => { view.follow = false; foll.textContent = '⏸ frozen'; view.tEnd = +scrub.value; };
+    const scrubBar = el('div', { class: 'pl-scrubbar' }, playBtn, spdSel, scrub, scrubLbl);
+    openModal('📈 PlotLab — 다중 동기 플롯 (PlotJuggler 스타일)', el('div', { class: 'pl' }, bar, el('div', { class: 'pl-body' }, list, grid), scrubBar));
     const M = document.querySelector('#modal .m'); const savedW = M ? M.style.cssText : ''; if (M) { M.style.width = 'min(1500px,97vw)'; M.style.height = '90vh'; M.style.maxHeight = '90vh'; }
 
     const search = el('input', { placeholder: '토픽/필드 검색…', style: 'width:100%;margin-bottom:6px' }), listBody = el('div', {});
@@ -483,10 +490,18 @@ const Views = {
     function addPlot() {
       const canvas = el('canvas', { class: 'pl-canvas' }), legend = el('div', { class: 'pl-legend' }), cell = el('div', { class: 'pl-cell' });
       const plot = { curves: [], canvas, legend, cell };
-      const drawLegend = () => { legend.innerHTML = ''; plot.curves.forEach((c) => {
-        const selT = el('select', {}); for (const t in TF) selT.append(el('option', { value: t }, TF[t])); selT.value = c.tf; selT.onchange = () => { c.tf = selT.value; };
-        c._st = el('span', { class: 'pl-stat' });
-        legend.append(el('span', { class: 'pl-cv' }, el('span', { class: 'pl-dot', style: 'background:' + c.color }), c.topic.replace(/^\//, '') + '/' + c.field, selT, c._st, el('span', { class: 'pl-rm', onclick: () => { plot.curves = plot.curves.filter((z) => z !== c); drawLegend(); } }, '×'))); }); };
+      const drawLegend = () => { legend.innerHTML = '';
+        const xyBtn = el('span', { class: 'pl-btn2' + (plot.xy ? ' on' : ''), title: 'XY 플롯(c0=X)', onclick: () => { plot.xy = !plot.xy; drawLegend(); } }, 'XY');
+        const fxBtn = el('span', { class: 'pl-btn2', title: '커스텀 수식 커브', onclick: () => { plot._fx = !plot._fx; drawLegend(); } }, 'ƒ');
+        legend.append(el('span', { class: 'pl-cv' }, xyBtn, fxBtn));
+        if (plot._fx) { const inp = el('input', { placeholder: '수식(c0,c1…): c0-c1, Math.hypot(c0,c1)' }); const add = el('button', { class: 'pl-btn2', onclick: () => { const ex = inp.value.trim(); if (!ex) return; let fn; try { fn = new Function('c', 'Math', 't', 'return (' + ex + ')'); } catch (_) { return; } plot.curves.push({ custom: true, expr: ex, fn, field: 'ƒ ' + ex, topic: '', color: PAL[colorI++ % PAL.length], tf: 'raw' }); plot._fx = false; drawLegend(); } }, '추가'); legend.append(el('span', { class: 'pl-fx' }, inp, add)); }
+        let si = 0; plot.curves.forEach((c) => {
+          const idx = c.custom ? null : 'c' + (si++);
+          const name = c.custom ? c.field : (idx + ': ' + c.topic.replace(/^\//, '') + '/' + c.field);
+          const kids = [el('span', { class: 'pl-dot', style: 'background:' + c.color }), name];
+          if (!c.custom) { const selT = el('select', {}); for (const t in TF) selT.append(el('option', { value: t }, TF[t])); selT.value = c.tf; selT.onchange = () => { c.tf = selT.value; }; kids.push(selT); }
+          c._st = el('span', { class: 'pl-stat' }); kids.push(c._st, el('span', { class: 'pl-rm', onclick: () => { plot.curves = plot.curves.filter((z) => z !== c); drawLegend(); } }, '×'));
+          legend.append(el('span', { class: 'pl-cv' }, ...kids)); }); };
       plot.drawLegend = drawLegend;
       cell.ondragover = (e) => { e.preventDefault(); cell.classList.add('drop'); };
       cell.ondragleave = () => cell.classList.remove('drop');
@@ -496,12 +511,32 @@ const Views = {
     }
     addPlot();
 
+    // 소스 데이터에서 시각 t 에서의 최근값(≤t) — 커스텀 수식 리샘플링용.
+    const sampleAt = (data, t) => { if (!data || !data.length) return 0; let lo = 0, hi = data.length - 1, r = data[0][1]; while (lo <= hi) { const m = (lo + hi) >> 1; if (data[m][0] <= t) { r = data[m][1]; lo = m + 1; } else hi = m - 1; } return r; };
+    const evalCustom = (c, srcs, t0, t1) => { if (!srcs.length || !c.fn) return []; const base = applyT(S.series[srcs[0].key], srcs[0].tf).filter(([t]) => t >= t0 && t <= t1); const others = srcs.map((s) => applyT(S.series[s.key], s.tf)); const o = [];
+      for (const [t] of base) { let v; try { v = c.fn(others.map((d) => sampleAt(d, t)), Math, t); } catch (_) { v = NaN; } if (isFinite(v)) o.push([t, v]); } return o; };
     let raf = 0, alive = true;
-    function frame() { if (!alive) return; const lt = latestT(); if (view.follow) view.tEnd = lt; const t1 = view.tEnd, t0 = t1 - view.W; win.textContent = ` t=${t1.toFixed(1)}s · 창 ${view.W.toFixed(0)}s`;
+    function frame() { if (!alive) return;
+      const lt = latestT(); let minT = Infinity, maxT = 0; for (const k in S.series) { const a = S.series[k]; if (a.length) { if (a[0][0] < minT) minT = a[0][0]; if (a[a.length - 1][0] > maxT) maxT = a[a.length - 1][0]; } } if (!isFinite(minT)) minT = 0;
+      const now = Date.now(); if (pb.playing) { const dt = (now - (pb.last || now)) / 1000 * pb.speed; view.tEnd = Math.min(maxT, view.tEnd + dt); if (view.tEnd >= maxT - 1e-3) { pb.playing = false; playBtn.textContent = '▶'; } } pb.last = now;
+      if (view.follow) view.tEnd = lt;
+      if (document.activeElement !== scrub) { scrub.min = minT; scrub.max = maxT || 1; scrub.value = view.tEnd; }
+      const t1 = view.tEnd, t0 = t1 - view.W; win.textContent = ` t=${t1.toFixed(1)}s · 창 ${view.W.toFixed(0)}s`; scrubLbl.textContent = ` ${(t1 - minT).toFixed(1)}/${(maxT - minT).toFixed(1)}s`;
       for (const pl of plots) { const cv = pl.canvas, W = cv.width = cv.clientWidth, H = cv.height = cv.clientHeight || 150, ctx = cv.getContext('2d'); ctx.clearRect(0, 0, W, H);
         ctx.strokeStyle = '#1b222c'; ctx.lineWidth = 1; for (let i = 0; i <= 4; i++) { const y = H * i / 4; ctx.beginPath(); ctx.moveTo(32, y); ctx.lineTo(W, y); ctx.stroke(); }
-        let mn = Infinity, mx = -Infinity; const cd = pl.curves.map((c) => ({ c, d: applyT(S.series[c.key], c.tf).filter(([t]) => t >= t0 && t <= t1) }));
-        for (const { d } of cd) for (const [, v] of d) { if (v < mn) mn = v; if (v > mx) mx = v; }
+        const srcs = pl.curves.filter((c) => !c.custom);
+        const cd = pl.curves.map((c) => ({ c, d: c.custom ? evalCustom(c, srcs, t0, t1) : applyT(S.series[c.key], c.tf).filter(([t]) => t >= t0 && t <= t1) }));
+        if (pl.xy && srcs.length >= 2) {   // ── XY 플롯: c0=X, 나머지=Y ──
+          const xd = cd.find((z) => z.c === srcs[0]).d; let xmn = Infinity, xmx = -Infinity, ymn = Infinity, ymx = -Infinity;
+          for (const [, v] of xd) { if (v < xmn) xmn = v; if (v > xmx) xmx = v; }
+          const yset = cd.filter((z) => z.c !== srcs[0]); for (const { d } of yset) for (const [, v] of d) { if (v < ymn) ymn = v; if (v > ymx) ymx = v; }
+          if (!isFinite(xmn)) { xmn = 0; xmx = 1; } if (xmx - xmn < 1e-9) { xmx += 1; xmn -= 1; } if (!isFinite(ymn)) { ymn = 0; ymx = 1; } if (ymx - ymn < 1e-9) { ymx += 1; ymn -= 1; }
+          const PX = (v) => 32 + (v - xmn) / (xmx - xmn) * (W - 40), PY = (v) => H - 6 - (v - ymn) / (ymx - ymn) * (H - 20);
+          ctx.fillStyle = '#5c6672'; ctx.font = '9px monospace'; ctx.fillText('X:' + srcs[0].field, 34, H - 3); ctx.fillText(ymx.toPrecision(3), 2, 9);
+          for (const { c, d } of yset) { ctx.strokeStyle = c.color; ctx.lineWidth = 1.2; ctx.beginPath(); d.forEach(([t, vy], i) => { const vx = sampleAt(applyT(S.series[srcs[0].key], srcs[0].tf), t); const x = PX(vx), y = PY(vy); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }); ctx.stroke(); }
+          continue;
+        }
+        let mn = Infinity, mx = -Infinity; for (const { d } of cd) for (const [, v] of d) { if (v < mn) mn = v; if (v > mx) mx = v; }
         if (!isFinite(mn)) { mn = 0; mx = 1; } if (mx - mn < 1e-9) { mx += 1; mn -= 1; }
         const X = (t) => 32 + (t - t0) / (view.W || 1) * (W - 36), Y = (v) => H - 4 - (v - mn) / (mx - mn) * (H - 18);
         ctx.fillStyle = '#5c6672'; ctx.font = '9px monospace'; ctx.textAlign = 'left'; ctx.fillText(mx.toPrecision(3), 2, 9); ctx.fillText(mn.toPrecision(3), 2, H - 4);
