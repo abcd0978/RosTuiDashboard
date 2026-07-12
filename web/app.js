@@ -356,8 +356,9 @@ function mkScene(cv, labelDiv, info) {
     const src = vis.length === 1 ? vis[0] : (() => { const m = new Float32Array(total * 3); let o = 0; for (const a of vis) { m.set(a, o); o += a.length; } return m; })();
     let mn = Infinity, mx = -Infinity; for (let i = 0; i < total; i++) { const z = src[i * 3 + 2]; if (z < mn) mn = z; if (z > mx) mx = z; } zmin = mn; zmax = mx;
     let out;
-    if (total > 4000) { if (permCache.n !== total) { permCache.perm = stridePermute(total); permCache.n = total; } const perm = permCache.perm; out = new Float32Array(total * 3); for (let k = 0; k < total; k++) { const i = perm[k]; out[k * 3] = src[i * 3]; out[k * 3 + 1] = src[i * 3 + 1]; out[k * 3 + 2] = src[i * 3 + 2]; } }
-    else out = src;   // 소량이면 순열 불필요 — 복사 없이 그대로 업로드
+    // LOD 켜짐 + 대용량일 때만 대표성 순열(적응형 프리픽스용). LOD 꺼짐/단일 클라우드는 무복사 업로드 → GPU 여유 최대.
+    if (opt.lod && total > 4000) { if (permCache.n !== total) { permCache.perm = stridePermute(total); permCache.n = total; } const perm = permCache.perm; out = new Float32Array(total * 3); for (let k = 0; k < total; k++) { const i = perm[k]; out[k * 3] = src[i * 3]; out[k * 3 + 1] = src[i * 3 + 1]; out[k * 3 + 2] = src[i * 3 + 2]; } }
+    else out = src;
     gl.bindBuffer(gl.ARRAY_BUFFER, cloudBuf); gl.bufferData(gl.ARRAY_BUFFER, out, gl.DYNAMIC_DRAW);
   }
   function bind(k) { gl.bindBuffer(gl.ARRAY_BUFFER, bufs[k]); gl.vertexAttribPointer(aP, 3, gl.FLOAT, false, 28, 0); gl.vertexAttribPointer(aC, 4, gl.FLOAT, false, 28, 12); }
