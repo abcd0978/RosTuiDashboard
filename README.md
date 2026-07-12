@@ -131,16 +131,33 @@ The web UI has **full parity** with the TUI plus GUI-native views:
     (`sensor_msgs/CameraInfo` principal-point reticle + `K`/`D` readout).
     **Wheel-zoom / drag-pan** with a **pixel (x,y)+rgb** readout.
   - **🧊 3D scene (RViz-class)** — a full raw-**WebGL** scene (no three.js) with
-    an RViz-style **Displays panel**: add **multiple** cloud/marker topics at
-    once, **checkbox show/hide** (unchecking unsubscribes to save bandwidth),
-    remove, and a **＋ add-topic** picker; built-in **Grid / Axes / TF / LOD**
-    toggles. Renders **PointCloud2** (height-colored), **`Marker(Array)`** (cube
-    / sphere / cylinder / arrow / line / points / text, with transparency), and
-    **TF frames** (RGB axes + labels). Orbit / zoom / pan, **camera presets**
-    (Top / Front / Side / Iso), **FPS + point count** overlay, and a
-    **wallclock + simulation-time** readout (`/clock`). **Point-cloud LOD** —
-    server-side voxel downsample (`RDASH_CLOUD_VOXEL`) + client **distance LOD**
-    (fewer points when the camera is far, spatially uniform).
+    an RViz-style **Displays panel**: add **multiple** topics at once, **checkbox
+    show/hide** (unchecking unsubscribes to save bandwidth), remove, and a **＋
+    add-topic** picker; built-in **Grid / Axes / TF / RobotModel** toggles.
+    Renders:
+    - **PointCloud2** with **color modes** — height (z) / **intensity** (jet) /
+      **RGB** / flat, auto-detected from the cloud's fields.
+    - **`Marker(Array)`** (cube / sphere / cylinder / arrow / line / points /
+      text / **triangle-list mesh**, with transparency), TF-placed by `frame_id`.
+    - **TF frames** (RGB axes + labels).
+    - **Native message displays** — **LaserScan**, **Path**, **Odometry**,
+      **PoseArray**, **PoseStamped**, **PointStamped**, **OccupancyGrid**
+      (via `geom_bridge.py`).
+    - **RobotModel** — parses `robot_description` **URDF** (box/cylinder/sphere
+      primitives + **STL meshes**), each link posed by its TF frame.
+    - **Interactive tools** (🛠) — ground-plane click picking: **Publish Point**
+      (`/clicked_point`), **Nav Goal** (`/goal_pose`), **Pose Estimate**
+      (`/initialpose`), and **Measure** (distance between two points).
+    - **Camera / frame** — **Fixed Frame** (re-anchor everything to a chosen
+      frame), **Follow** (camera tracks a TF frame), **Orthographic** projection,
+      orbit / zoom / pan, **camera presets** (Top / Front / Side / Iso).
+    - **FPS + point count** overlay and a **wallclock + simulation-time**
+      readout (`/clock`).
+    - **Point-cloud LOD** (selectable ⚙): server voxel downsample
+      (`RDASH_CLOUD_VOXEL`) + **shader distance LOD** (keep a `lodDist/depth`
+      fraction past a threshold via a stable hash, survivors enlarged), with
+      **Off / Distance / Adaptive** (auto-tune to hold a target FPS) modes, a
+      max-points cap, and round/square points.
 - **State Transitions** — a topic field's value changes as a colored timeline
   (enums / booleans / modes). Plus the full TUI toolset: publish form (skeleton
   prefill), service call, QoS, msg def, connections, TF tree, param table,
@@ -161,7 +178,8 @@ the same UI runs against different data sources:
 Runs in a ROS-sourced shell like the TUI; `RDASH_TELEM=<file>` overrides the
 telemetry source. Sensor streams use small path-configurable bridges
 (`img_bridge.py`, `cloud_bridge.py`, `bag_dump.py`, `ros_echo_mux.py`,
-`marker_bridge.py`, `tf_dump.py`, `img_ann_bridge.py`, `caminfo_bridge.py`).
+`marker_bridge.py`, `tf_dump.py`, `img_ann_bridge.py`, `caminfo_bridge.py`,
+`geom_bridge.py`, `urdf_bridge.py`).
 
 ## Requirements
 - **Node.js ≥ 18**
