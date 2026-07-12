@@ -127,6 +127,7 @@ const server = http.createServer(async (req, res) => {
       try { const skel = JSON.parse((await runOnce(cmd)).trim() || '{}').skel || {}; return json(res, 200, { yaml: buildYaml(flattenSkeleton(skel)) || '{}' }); }
       catch { return json(res, 200, { yaml: '{}' }); }
     }
+    if (p === '/api/bagdump') { const out = await runOnce(be.bagDump(q.get('path'), q.get('topics'))); try { return json(res, 200, JSON.parse(out)); } catch { return json(res, 200, { series: {}, error: out.slice(0, 300) }); } }
     if (p === '/api/connections') return json(res, 200, { out: await runOnce(be.connections(q.get('kind'), q.get('name'))) });
     if (p === '/api/resource') { const b = await readBody(req); return json(res, 200, { out: await runOnce(be.resource(b.nodes || [])) }); }
     if (p === '/api/tftree') return json(res, 200, { out: await runOnce(be.tfTree()) });

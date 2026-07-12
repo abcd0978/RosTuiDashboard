@@ -3,7 +3,7 @@
 //       UI 를 안 고치고 데이터 소스를 바꿀 수 있다. (리뷰 제안: UI ↓ RosBackend ├CliBackend ├RclNode ├Rosbridge)
 // 현행 CliBackend 는 기존 commands.js/ros.js 빌더를 감싸는 파사드 — 셸 명령 문자열을 만든다(spawn 은 호출측).
 import { echoFullCmd, actionFor, restartFor, protoCmd } from './ros.js';
-import { TELEM, TELEM2, IMG_BRIDGE, CLOUD_BRIDGE } from './paths.js';
+import { TELEM, TELEM2, IMG_BRIDGE, CLOUD_BRIDGE, BAG_DUMP } from './paths.js';
 import {
   connectionsCmd, resourceCmd, tfTreeCmd, tfEchoCmd, bagRecordCmd, bagPlayCmd, bagCompareCmd,
   msgDefCmd, paramListCmd, paramGetCmd, paramSetCmd,
@@ -24,7 +24,7 @@ export class RosBackend {
   publish() { return NI('publish'); } serviceCall() { return NI('serviceCall'); } setParam1() { return NI('setParam1'); }
   killNode() { return NI('killNode'); } restartNode() { return NI('restartNode'); } lifecycle() { return NI('lifecycle'); }
   actionGoal() { return NI('actionGoal'); } teleop() { return NI('teleop'); }
-  imgBridge() { return NI('imgBridge'); } cloudBridge() { return NI('cloudBridge'); }
+  imgBridge() { return NI('imgBridge'); } cloudBridge() { return NI('cloudBridge'); } bagDump() { return NI('bagDump'); }
 }
 
 // CliBackend — 현행 구현. ros2/rostopic CLI 명령 문자열 생성(ROS1/ROS2 자동 분기).
@@ -55,6 +55,7 @@ export class CliBackend extends RosBackend {
   teleop(topic, lin, ang) { const y = `{linear: {x: ${lin}, y: 0.0, z: 0.0}, angular: {x: 0.0, y: 0.0, z: ${ang}}}`; return this.ver === '2' ? `ros2 topic pub -r 10 ${shq(topic)} geometry_msgs/msg/Twist ${shq(y)}` : `rostopic pub -r 10 ${shq(topic)} geometry_msgs/Twist ${shq(y)}`; }
   imgBridge(topic) { return `python3 ${shq(process.env.RDASH_IMG_BRIDGE || IMG_BRIDGE)} ${shq(topic)} 2>/dev/null`; }
   cloudBridge(topic) { return `python3 ${shq(process.env.RDASH_CLOUD_BRIDGE || CLOUD_BRIDGE)} ${shq(topic)} 2>/dev/null`; }
+  bagDump(path, topics) { return `python3 ${shq(process.env.RDASH_BAG_DUMP || BAG_DUMP)} ${shq(path)} ${shq(topics || '')} 2>/dev/null`; }
 }
 
 // 확장 지점(미래 구현) — 같은 인터페이스를 구현하면 UI 변경 없이 교체된다.

@@ -443,8 +443,8 @@ const Views = {
   plotlab() {
     // 📈 PlotJuggler 스타일 — 다중 동기 플롯 · 여러 토픽 커브 · 공유 시간축/커서 · 줌/팬 · 변환 · 통계.
     const PAL = ['#57c7d4', '#e2c85a', '#6fd08c', '#c78ad2', '#e06a6a', '#6f9be0', '#d98a4b', '#7ad2b8'];
-    const S = { es: {}, series: {}, fields: {}, t0: Date.now() };
-    const sub = (topic) => { if (S.es[topic]) return; const es = new EventSource('/echo?topic=' + encodeURIComponent(topic));
+    const S = { es: {}, series: {}, fields: {}, bag: new Set(), t0: Date.now() };
+    const sub = (topic) => { if (S.es[topic] || S.bag.has(topic)) return; const es = new EventSource('/echo?topic=' + encodeURIComponent(topic));
       es.onmessage = (e) => { let text; try { text = JSON.parse(e.data); } catch (_) { return; } const nums = numeric(text); const t = (Date.now() - S.t0) / 1000; S.fields[topic] = Object.keys(nums);
         for (const [k, v] of Object.entries(nums)) { const key = topic + ' ' + k; (S.series[key] || (S.series[key] = [])).push([t, v]); if (S.series[key].length > 4000) S.series[key].shift(); } };
       S.es[topic] = es; };
@@ -473,13 +473,21 @@ const Views = {
     const scrubLbl = el('span', { class: 'hint' });
     scrub.oninput = () => { view.follow = false; foll.textContent = '⏸ frozen'; view.tEnd = +scrub.value; };
     const scrubBar = el('div', { class: 'pl-scrubbar' }, playBtn, spdSel, scrub, scrubLbl);
+    const bagInp = el('input', { placeholder: 'bag 경로(디렉터리)', style: 'width:140px' });
+    const bagBtn = el('button', { class: 'act' }, '🗀 bag');
+    bagBtn.onclick = async () => { const pth = bagInp.value.trim(); if (!pth) return; bagBtn.textContent = '로딩…'; let r; try { r = await api('/api/bagdump?path=' + encodeURIComponent(pth) + '&topics='); } catch (_) { r = {}; } bagBtn.textContent = '🗀 bag';
+      if (r && r.series && Object.keys(r.series).length) { for (const key in r.series) { S.series[key] = r.series[key]; const sp = key.indexOf(' '); const tp = key.slice(0, sp), fld = key.slice(sp + 1); S.bag.add(tp); if (S.es[tp]) { S.es[tp].close(); delete S.es[tp]; } S.fields[tp] = S.fields[tp] || []; if (!S.fields[tp].includes(fld)) S.fields[tp].push(fld); }
+        view.follow = false; foll.textContent = '⏸ frozen'; view.W = Math.max(5, r.t1 || 10); view.tEnd = r.t1 || 0; drawList(); win.textContent = ` 📁 bag: ${Object.keys(r.series).length} 커브 · ${(r.t1 || 0).toFixed(1)}s`; }
+      else win.textContent = ' bag 로드 실패(경로/rosbag2 확인)'; };
+    bar.append(bagInp, bagBtn);
     openModal('📈 PlotLab — 다중 동기 플롯 (PlotJuggler 스타일)', el('div', { class: 'pl' }, bar, el('div', { class: 'pl-body' }, list, grid), scrubBar));
     const M = document.querySelector('#modal .m'); const savedW = M ? M.style.cssText : ''; if (M) { M.style.width = 'min(1500px,97vw)'; M.style.height = '90vh'; M.style.maxHeight = '90vh'; }
 
     const search = el('input', { placeholder: '토픽/필드 검색…', style: 'width:100%;margin-bottom:6px' }), listBody = el('div', {});
     list.append(el('div', { class: 'hint', style: 'margin-bottom:4px' }, '커브 (드래그 → 플롯)'), search, listBody);
     const drawList = () => { const f = search.value.toLowerCase(); listBody.innerHTML = '';
-      for (const tp of items.filter((i) => i.kind === 'topic' && !i.name.includes('/_action/')).map((i) => i.name).sort()) {
+      const tset = new Set(items.filter((i) => i.kind === 'topic' && !i.name.includes('/_action/')).map((i) => i.name)); Object.keys(S.fields).forEach((t) => tset.add(t));
+      for (const tp of [...tset].sort()) {
         const flds = S.fields[tp] || []; if (f && !tp.toLowerCase().includes(f) && !flds.some((x) => (tp + ' ' + x).toLowerCase().includes(f))) continue;
         const head = el('div', { class: 'pl-topic' }, (flds.length ? '▾ ' : '▸ ') + tp); head.onclick = () => { sub(tp); setTimeout(drawList, 350); }; listBody.append(head);
         for (const fld of flds) { const key = tp + ' ' + fld; if (f && !key.toLowerCase().includes(f)) continue; const chip = el('div', { class: 'pl-chip', draggable: 'true', title: '드래그 또는 클릭 → 마지막 플롯' }, fld); chip.ondragstart = (e) => e.dataTransfer.setData('text/plain', key); chip.onclick = () => { if (plots.length) addCurve(plots[plots.length - 1], key); }; listBody.append(chip); } } };
