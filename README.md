@@ -68,6 +68,13 @@ npm start          # TUI + web together  (opt out of web: RDASH_NO_WEB=1)
 npm run web        # web only → http://localhost:8080   (RDASH_WEB_PORT to change)
 ```
 
+**Running in a container?** The server binds to `0.0.0.0` (all interfaces) by
+default, so the web UI is reachable **from the host** as long as the port is
+exposed — publish it (`docker run -p 8080:8080 …`) or share the host network
+(`docker run --network host …`, common when the container also talks to ROS).
+Then open `http://<host-ip>:8080`. Lock it to loopback with
+`RDASH_WEB_HOST=127.0.0.1`.
+
 The web UI has **full parity** with the TUI plus GUI-native views:
 
 - **Node graph (rqt_graph-class).** Two modes via a toolbar toggle: **노드**
@@ -198,6 +205,7 @@ node index.js             # TUI only (npm start also launches the web server)
 | `RDASH_NO_AUTOPIP` | `0` | set `1` to skip auto-installing the Python plot deps on startup |
 | `RDASH_PYTHON` | `python3` | interpreter used for telemetry / plot / autocomplete / dep install |
 | `RDASH_WEB_PORT` | `8080` | web server port |
+| `RDASH_WEB_HOST` | `0.0.0.0` | web bind address; `127.0.0.1` to restrict to loopback (host can't reach it) |
 | `RDASH_NO_WEB` | `0` | set `1` so `npm start` launches the TUI **without** the companion web server |
 | `RDASH_BACKEND` | `cli` | web data source: `cli` / `rcl` (single rclpy echo mux) / `rosbridge` (remote websocket) |
 | `RDASH_ROSBRIDGE_URL` | `ws://localhost:9090` | rosbridge endpoint when `RDASH_BACKEND=rosbridge` |

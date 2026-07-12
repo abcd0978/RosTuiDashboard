@@ -16,6 +16,9 @@ import { RosbridgeClient, msgToYaml, looseJson } from '../src/lib/rosbridge.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.RDASH_WEB_PORT) || 8080;
+// 바인딩 주소 — 기본 0.0.0.0(모든 인터페이스): 컨테이너 안에서 돌려도 -p 로 포트만 노출하면 호스트에서 접속 가능.
+// 로컬 전용으로 잠그려면 RDASH_WEB_HOST=127.0.0.1.
+const HOST = process.env.RDASH_WEB_HOST || '0.0.0.0';
 
 function detectVer() {
   if (process.env.ROS_VER) return process.env.ROS_VER;
@@ -231,4 +234,8 @@ const server = http.createServer(async (req, res) => {
 function cleanup() { for (const r of jobs.values()) { try { process.kill(-r.child.pid, 'SIGTERM'); } catch { /* */ } } try { muxChild && muxChild.kill(); } catch { /* */ } }
 process.on('exit', cleanup); process.on('SIGINT', () => { cleanup(); process.exit(0); });
 
-server.listen(PORT, () => { console.log(`RDash web (ROS${VER}) → http://localhost:${PORT}`); });
+server.listen(PORT, HOST, () => {
+  console.log(`RDash web (ROS${VER}) — ${HOST}:${PORT} 리스닝`);
+  console.log(`  로컬:  http://localhost:${PORT}`);
+  if (HOST === '0.0.0.0') console.log(`  호스트/원격: http://<컨테이너-또는-호스트-IP>:${PORT}  (컨테이너면 docker -p ${PORT}:${PORT} 또는 --network host 필요)`);
+});
