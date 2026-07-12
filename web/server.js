@@ -160,6 +160,7 @@ const server = http.createServer(async (req, res) => {
   try {
     if (p === '/' || p === '/index.html') return serveFile(res, 'index.html');
     if (p === '/app.js') return serveFile(res, 'app.js');
+    if (p === '/popup.html') return serveFile(res, 'popup.html');
     if (p === '/api/ver') return json(res, 200, { ver: VER });
     if (p === '/api/preflight') return json(res, 200, { checks: loadPreflight() });
 

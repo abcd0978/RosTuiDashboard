@@ -470,10 +470,13 @@ const Views = {
 
     const list = el('div', { class: 'pl-list' }), grid = el('div', { class: 'pl-grid' }), win = el('span', { class: 'hint' });
     const foll = el('button', { class: 'act', onclick: () => { view.follow = !view.follow; foll.textContent = view.follow ? '▶ follow' : '⏸ frozen'; } }, '▶ follow');
+    let layoutW = '100%';
+    const setLayout = (w) => { layoutW = w; plots.forEach((p) => { p.cell.style.width = w; p.cell.style.height = '230px'; }); };
     const bar = el('div', { class: 'pl-bar' },
       el('button', { class: 'act', onclick: () => addPlot() }, '+ 플롯'),
-      el('button', { class: 'act', onclick: () => { grid.style.gridTemplateColumns = '1fr'; } }, '≡ 세로'),
-      el('button', { class: 'act', onclick: () => { grid.style.gridTemplateColumns = '1fr 1fr'; } }, '⊞ 격자'),
+      el('button', { class: 'act', onclick: () => setLayout('100%') }, '≡ 세로'),
+      el('button', { class: 'act', onclick: () => setLayout('calc(50% - 5px)') }, '⊞ 격자'),
+      el('button', { class: 'act', onclick: () => setLayout('calc(33.33% - 6px)') }, '⊟ 3열'),
       el('span', { class: 'hint' }, '창'), ...[5, 10, 30].map((w) => el('button', { class: 'act', onclick: () => { view.W = w; } }, w + 's')),
       foll, win);
     const pb = { playing: false, speed: 1, last: 0 };
@@ -505,6 +508,13 @@ const Views = {
     const listIv = setInterval(() => { if (!$('#modal').classList.contains('on')) { clearInterval(listIv); return; } drawList(); }, 1500);
 
     function addCurve(plot, key) { if (!key || plot.curves.some((c) => c.key === key)) return; const sp = key.indexOf(' '); const topic = key.slice(0, sp); sub(topic); plot.curves.push({ key, topic, field: key.slice(sp + 1), color: PAL[colorI++ % PAL.length], tf: 'raw' }); plot.drawLegend(); }
+    // 새창(pop-out) — 이 플롯의 커브 설정을 popup.html 에 넘겨 독립 창에서 렌더(같은 SSE 재사용).
+    function popOut(plot) {
+      const curves = plot.curves.filter((c) => !c.custom).map((c) => ({ topic: c.topic, field: c.field, tf: c.tf, color: c.color }));
+      if (!curves.length) { toast('커브를 먼저 추가하세요'); return; }
+      const cfg = encodeURIComponent(JSON.stringify({ curves, xy: !!plot.xy, fft: !!plot.fft, W: view.W }));
+      window.open('/popup.html#' + cfg, '_blank', 'width=780,height=470');
+    }
     function addPlot() {
       const canvas = el('canvas', { class: 'pl-canvas' }), legend = el('div', { class: 'pl-legend' }), cell = el('div', { class: 'pl-cell' });
       const plot = { curves: [], canvas, legend, cell };
@@ -525,7 +535,10 @@ const Views = {
       cell.ondragover = (e) => { e.preventDefault(); cell.classList.add('drop'); };
       cell.ondragleave = () => cell.classList.remove('drop');
       cell.ondrop = (e) => { e.preventDefault(); cell.classList.remove('drop'); addCurve(plot, e.dataTransfer.getData('text/plain')); };
-      cell.append(canvas, legend, el('button', { class: 'pl-x', onclick: () => { const i = plots.indexOf(plot); if (i >= 0) plots.splice(i, 1); cell.remove(); } }, '✕'));
+      cell.style.width = layoutW;
+      cell.append(canvas, legend,
+        el('button', { class: 'pl-x', style: 'right:26px', title: '새창에서 보기', onclick: () => popOut(plot) }, '⧉'),
+        el('button', { class: 'pl-x', onclick: () => { const i = plots.indexOf(plot); if (i >= 0) plots.splice(i, 1); cell.remove(); } }, '✕'));
       plots.push(plot); grid.append(cell);
     }
     addPlot();
