@@ -175,7 +175,7 @@
     const cv = el('canvas', { class: 'wsgl' }); const labelDiv = el('div', { class: 'wsgllabels' });
     const stage = el('div', { class: 'wsstage', style: 'height:100%' }, cv, labelDiv); host.append(stage);
     const scene = mkScene(cv, labelDiv, { textContent: '' }); let cloudES = null, markerES = null, tfES = null;
-    const subCloud = (t) => { if (cloudES) { cloudES.close(); cloudES = null; } scene.setCloud(null); if (!t) return; cloudES = new EventSource('/cloudstream?topic=' + encodeURIComponent(t)); cloudES.onmessage = (e) => { if (!e.data) return; const bin = atob(e.data); const u8 = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i); scene.setCloud(new Float32Array(u8.buffer)); }; };
+    const subCloud = (t) => { if (cloudES) { cloudES.close(); cloudES = null; } scene.setCloud(null); if (!t) return; cloudES = new EventSource('/cloudstream?topic=' + encodeURIComponent(t)); cloudES.onmessage = (e) => { if (!e.data) return; const r = decodeCloud(e.data); if (r) scene.setCloud(r.arr); }; };
     const subMarker = (t) => { if (markerES) { markerES.close(); markerES = null; } scene.setMarkers([]); if (!t) return; markerES = new EventSource('/markerstream?topic=' + encodeURIComponent(t)); markerES.onmessage = (e) => { try { const o = JSON.parse(e.data); scene.setMarkers(o.markers || []); } catch (_) { /* */ } }; };
     const subTF = (on) => { if (tfES) { tfES.close(); tfES = null; } scene.setTF([]); if (!on) return; tfES = new EventSource('/tfstream'); tfES.onmessage = (e) => { try { const o = JSON.parse(e.data); scene.setTF(o.frames || []); } catch (_) { /* */ } }; };
     topicSelect(ctx, cfg, isCloud, '클라우드', 'topic', subCloud);
