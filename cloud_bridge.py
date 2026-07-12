@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
 """포인트클라우드 브리지 — PointCloud2 를 구독해 점당 (x,y,z,c) float32 로 다운샘플, JSON 한 줄씩 stdout.
 c 채널 = intensity 값 또는 packed-rgb(r*65536+g*256+b, <2^24 라 float32 정확) 또는 0. 색상 모드는 클라이언트가 선택.
-웹 3D 씬(web/server.js /cloudstream)이 SSE 로 받아 WebGL 로 렌더(클라이언트는 거리 LOD).
-출력(프레임당 한 줄): {"m":"xyz"|"intensity"|"rgb","d":"base64(float32 stride4 x,y,z,c)"}
+웹 백엔드(web/server.js WS)가 바이너리로 받아 그대로 브라우저에 WS 로 전달(base64 없음 = 최속 경로).
+출력(프레임당 바이너리 프레임): [uint32 LE len][uint32 LE mode][float32 stride4 x,y,z,c ...]  (len = 4 + 부동소수 바이트)
+  mode: 0=xyz · 1=intensity · 2=rgb
 사용: python3 cloud_bridge.py <topic>
 LOD/전송 튜닝(env):
   RDASH_CLOUD_VOXEL  복셀 그리드 다운샘플 크기(m). 0=끔. 예: 0.05 → 5cm 격자당 1점.
   RDASH_CLOUD_MAXN   프레임당 최대 점(기본 30000). 복셀 후에도 넘치면 균등 솎기."""
 import sys
 import os
-import json
-import base64
+import struct
+
+MODEN = {'xyz': 0, 'intensity': 1, 'rgb': 2}
 
 MAXN = int(os.environ.get('RDASH_CLOUD_MAXN', '30000') or 30000)
 VOXEL = float(os.environ.get('RDASH_CLOUD_VOXEL', '0') or 0)
@@ -73,9 +75,9 @@ def main():
             if pts.shape[0] > MAXN:
                 idx = np.linspace(0, pts.shape[0] - 1, MAXN).astype(int)
                 pts = pts[idx]
-            d = base64.b64encode(pts.astype('<f4').tobytes()).decode()
-            sys.stdout.write(json.dumps({"m": mode, "d": d}) + '\n')
-            sys.stdout.flush()
+            payload = struct.pack('<I', MODEN.get(mode, 0)) + pts.astype('<f4').tobytes()
+            sys.stdout.buffer.write(struct.pack('<I', len(payload)) + payload)
+            sys.stdout.buffer.flush()
         except Exception:
             pass
 

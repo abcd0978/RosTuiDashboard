@@ -2,6 +2,7 @@
 // 목표: TUI 의 모든 기능을 웹에서도. 이 파일은 명령을 노출하는 얇은 API(SSE 스트림 + JSON 액션)일 뿐,
 // 로직 빌더는 전부 src/lib 재사용.  실행: node web/server.js (npm run web) · 포트 RDASH_WEB_PORT(기본 8080)
 import http from 'http';
+import { WebSocketServer } from 'ws';
 import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join, extname } from 'path';
@@ -51,23 +52,32 @@ function readBody(req) {
 
 // ── 스트림(SSE) ───────────────────────────────────────────────────────────
 function telemScript() { if (process.env.RDASH_TELEM) { try { return readFileSync(process.env.RDASH_TELEM, 'utf8'); } catch { /* */ } } return be.telemetryScript(); }
-function streamLines(res, cmd, writeScript) {
-  const send = sse(res);
+// ── send-기반 파이프 헬퍼(전송계층 무관: SSE/WS 공용) ──
+function pipeLines(cmd, send, writeScript) {
   const child = rosSpawn(cmd);
   if (writeScript) { child.stdin.on('error', () => {}); child.stdin.write(writeScript); child.stdin.end(); }
   let buf = '';
   child.stdout.on('data', (d) => { buf += d.toString(); let i; while ((i = buf.indexOf('\n')) >= 0) { const l = buf.slice(0, i); buf = buf.slice(i + 1); if (l.trim()) send(l); } });
   if (child.stderr) child.stderr.on('data', () => {});
-  res.on('close', () => { try { child.kill(); } catch { /* */ } });
+  return child;
 }
-function streamBlocks(res, cmd) {   // '---' 구분 블록(echo/diagnostics)
-  const send = sse(res);
+function pipeBlocks(cmd, send) {   // '---' 구분 블록(echo/diagnostics)
   const child = rosSpawn(cmd);
   let buf = '';
   child.stdout.on('data', (d) => { buf += d.toString(); const parts = buf.split('\n---\n'); while (parts.length > 1) { const b = parts.shift().trimEnd(); if (b) send(JSON.stringify(b)); } buf = parts[0]; });
   if (child.stderr) child.stderr.on('data', () => {});
-  res.on('close', () => { try { child.kill(); } catch { /* */ } });
+  return child;
 }
+// 클라우드 바이너리 프레임 리더: [uint32 LE len][payload=mode(4)+float32...]. base64 없이 그대로 흘림(최속).
+function pipeCloud(cmd, sendBin) {
+  const child = rosSpawn(cmd);
+  let buf = Buffer.alloc(0);
+  child.stdout.on('data', (d) => { buf = Buffer.concat([buf, d]); while (buf.length >= 4) { const len = buf.readUInt32LE(0); if (buf.length < 4 + len) break; sendBin(buf.subarray(4, 4 + len)); buf = buf.subarray(4 + len); } });
+  if (child.stderr) child.stderr.on('data', () => {});
+  return child;
+}
+function streamLines(res, cmd, writeScript) { const send = sse(res); const child = pipeLines(cmd, send, writeScript); res.on('close', () => { try { child.kill(); } catch { /* */ } }); }
+function streamBlocks(res, cmd) { const send = sse(res); const child = pipeBlocks(cmd, send); res.on('close', () => { try { child.kill(); } catch { /* */ } }); }
 
 // ── echo 멀티플렉서 — usesMux 백엔드(RDASH_BACKEND=rcl)에서 토픽별 echo 를 프로세스 1개로 팬아웃(폭증 해결) ──
 let muxChild = null; const muxSubs = new Map();   // topic → Set(send)
@@ -80,12 +90,13 @@ function muxEnsure() {
   muxChild.on('close', () => { muxChild = null; });   // 죽으면 다음 요청에 재기동
   return muxChild;
 }
-function muxStream(res, topic) {
-  const send = sse(res); muxEnsure();
+function muxAdd(topic, send) {   // 반환: off() — 구독 해제. SSE/WS 공용.
+  muxEnsure();
   if (!muxSubs.has(topic)) { muxSubs.set(topic, new Set()); try { muxChild.stdin.write('+' + topic + '\n'); } catch { /* */ } }
   muxSubs.get(topic).add(send);
-  res.on('close', () => { const s = muxSubs.get(topic); if (s) { s.delete(send); if (!s.size) { muxSubs.delete(topic); try { muxChild && muxChild.stdin.write('-' + topic + '\n'); } catch { /* */ } } } });
+  return () => { const s = muxSubs.get(topic); if (s) { s.delete(send); if (!s.size) { muxSubs.delete(topic); try { muxChild && muxChild.stdin.write('-' + topic + '\n'); } catch { /* */ } } } };
 }
+function muxStream(res, topic) { const send = sse(res); const off = muxAdd(topic, send); res.on('close', off); }
 const echoStream = (res, topic) => (be.usesMux ? muxStream(res, topic) : streamBlocks(res, be.echo(topic)));
 
 // ── rosbridge(원격 websocket) 백엔드 — 로컬 ROS 없이 원격 로봇의 rosbridge_suite 에 연결 ──
@@ -93,8 +104,9 @@ let rb = null;
 function rbEnsure() { if (!rb) { rb = new RosbridgeClient(be.url); rb.connect(); } return rb; }
 async function rbTopicType(topic) { const r = await rbEnsure().call('/rosapi/topic_type', { topic }); return (r && r.type) || ''; }
 // 그래프+Hz 를 rosapi 로 폴링해 telemetry.py 와 같은 items 스트림 생성.
-function rbTelemetry(res) {
-  const send = sse(res); rbEnsure();
+function rbTelemetry(res) { const send = sse(res); const off = rbTelemetryCore(send); res.on('close', off); }
+function rbTelemetryCore(send) {
+  rbEnsure();
   const counts = {}, last = {}, unsub = new Map(); let alive = true;
   const iv = setInterval(async () => {
     if (!alive) return;
@@ -113,12 +125,10 @@ function rbTelemetry(res) {
     for (const nd of (nodesR && nodesR.nodes) || []) items.push({ p: 'nodes' + nd, kind: 'node', name: nd });
     send(JSON.stringify({ items }));
   }, 1000);
-  res.on('close', () => { alive = false; clearInterval(iv); for (const u of unsub.values()) u(); });
+  return () => { alive = false; clearInterval(iv); for (const u of unsub.values()) u(); };
 }
-function rbEcho(res, topic) {
-  const send = sse(res); rbEnsure();
-  rbTopicType(topic).then((type) => { const off = rb.subscribe(topic, type, (msg) => send(JSON.stringify(msgToYaml(msg)))); res.on('close', off); });
-}
+function rbEchoOff(topic, send) { rbEnsure(); let off = () => {}; rbTopicType(topic).then((type) => { off = rb.subscribe(topic, type, (msg) => send(JSON.stringify(msgToYaml(msg)))); }); return () => off(); }
+function rbEcho(res, topic) { const send = sse(res); const off = rbEchoOff(topic, send); res.on('close', off); }
 
 // ── 잡(Jobs) 레지스트리 — 웹에서 띄운 프로세스(북마크·rosbag·액션) 추적 ──
 let jobSeq = 0;
@@ -172,7 +182,7 @@ const server = http.createServer(async (req, res) => {
     if (p === '/events') return be.kind === 'rosbridge' ? rbTelemetry(res) : streamLines(res, 'python3 -', telemScript());
     if (p === '/echo') return q.get('topic') ? (be.kind === 'rosbridge' ? rbEcho(res, q.get('topic')) : echoStream(res, q.get('topic'))) : json(res, 400, { error: 'topic' });
     if (p === '/imgstream') { const t = q.get('topic'); if (!t) return json(res, 400, { error: 'topic' }); return streamLines(res, be.imgBridge(t)); }
-    if (p === '/cloudstream') { const t = q.get('topic'); if (!t) return json(res, 400, { error: 'topic' }); return streamLines(res, be.cloudBridge(t)); }
+    // /cloudstream 은 WS 전용(바이너리). SSE 로는 제공하지 않음.
     if (p === '/markerstream') { const t = q.get('topic'); if (!t) return json(res, 400, { error: 'topic' }); return streamLines(res, be.markerBridge(t)); }
     if (p === '/tfstream') return streamLines(res, be.tfDump());
     if (p === '/annstream') { const t = q.get('topic'); if (!t) return json(res, 400, { error: 'topic' }); return streamLines(res, be.imgAnnBridge(t)); }
@@ -232,6 +242,41 @@ const server = http.createServer(async (req, res) => {
     res.writeHead(404); res.end('not found');
   } catch (e) { json(res, 500, { error: String(e && e.message || e) }); }
 });
+
+// ── WebSocket 멀티플렉서(/ws) — 브라우저↔백엔드 단일 연결로 모든 스트림 다중화. 클라우드는 바이너리 프레임. ──
+// 프레임: 텍스트 {"i":id,"d":line}  ·  바이너리 [uint32 id][uint32 mode][float32 xyzc...](클라우드).
+const wss = new WebSocketServer({ noServer: true });
+server.on('upgrade', (req, socket, head) => { const u = new URL(req.url, 'http://x'); if (u.pathname === '/ws') wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws)); else socket.destroy(); });
+wss.on('connection', (ws) => {
+  const subs = new Map();   // id → off()
+  ws.on('message', (raw) => { let m; try { m = JSON.parse(raw.toString()); } catch { return; }
+    if (m.op === 'sub') { if (subs.has(m.id)) return; subs.set(m.id, wsStart(ws, m)); }
+    else if (m.op === 'unsub') { const off = subs.get(m.id); if (off) { off(); subs.delete(m.id); } } });
+  ws.on('close', () => { for (const off of subs.values()) { try { off(); } catch { /* */ } } subs.clear(); });
+});
+// 스트림 id 를 시작하고 정리 콜백을 돌려준다. SSE 라우트와 같은 백엔드 커맨드/헬퍼 재사용.
+function wsStart(ws, m) {
+  const { id, stream, params = {} } = m; const t = params.topic;
+  const txt = (l) => { if (ws.readyState === 1) ws.send(JSON.stringify({ i: id, d: l })); };
+  const bin = (payload) => { if (ws.readyState !== 1) return; const out = Buffer.allocUnsafe(4 + payload.length); out.writeUInt32LE(id, 0); payload.copy(out, 4); ws.send(out); };
+  let child = null, off = null;
+  const map = {
+    rosout: () => (child = pipeBlocks(be.rosout(), txt)),
+    diagnostics: () => (child = pipeBlocks(be.diagnostics(), txt)),
+    markerstream: () => t && (child = pipeLines(be.markerBridge(t), txt)),
+    tfstream: () => (child = pipeLines(be.tfDump(), txt)),
+    geomstream: () => t && (child = pipeLines(be.geomBridge(t, params.type || ''), txt)),
+    urdfstream: () => (child = pipeLines(be.urdfBridge(), txt)),
+    annstream: () => t && (child = pipeLines(be.imgAnnBridge(t), txt)),
+    caminfostream: () => t && (child = pipeLines(be.camInfoBridge(t), txt)),
+    imgstream: () => t && (child = pipeLines(be.imgBridge(t), txt)),
+    cloudstream: () => t && (child = pipeCloud(be.cloudBridge(t), bin)),
+  };
+  if (stream === 'events') { if (be.kind === 'rosbridge') off = rbTelemetryCore(txt); else child = pipeLines('python3 -', txt, telemScript()); }
+  else if (stream === 'echo') { if (t) { if (be.kind === 'rosbridge') off = rbEchoOff(t, txt); else if (be.usesMux) off = muxAdd(t, txt); else child = pipeBlocks(be.echo(t), txt); } }
+  else if (map[stream]) map[stream]();
+  return () => { if (child) { try { child.kill(); } catch { /* */ } } if (off) { try { off(); } catch { /* */ } } };
+}
 
 // 종료 시 잡 정리
 function cleanup() { for (const r of jobs.values()) { try { process.kill(-r.child.pid, 'SIGTERM'); } catch { /* */ } } try { muxChild && muxChild.kill(); } catch { /* */ } }

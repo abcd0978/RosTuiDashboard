@@ -7,9 +7,29 @@ const post = (u, b) => api(u, { method: 'POST', headers: { 'Content-Type': 'appl
 const SNAP = location.search.includes('snap');
 // 로딩 스피너 · 빈 상태 — 일관된 대기/무데이터 표현.
 const spinner = (msg = '불러오는 중…') => el('div', { class: 'loading' }, el('span', { class: 'spin' }), msg);
-// 클라우드 SSE 디코드 — {"m":mode,"d":base64(float32 xyzc)} 또는 레거시 raw base64 → {arr(stride4), mode}.
-function decodeCloud(data) { let m = 'xyz', b64 = data; try { const o = JSON.parse(data); if (o && o.d) { b64 = o.d; m = o.m || 'xyz'; } } catch (_) { /* legacy raw base64 */ }
+// 클라우드 디코드 — WS 바이너리 프레임 [id(4)][mode(4)][float32 xyzc] → {arr(stride4), mode}. (레거시 base64 문자열도 허용)
+function decodeCloud(data) {
+  if (data instanceof ArrayBuffer) { const mode = new DataView(data).getUint32(4, true); return { arr: new Float32Array(data, 8), mode: mode === 2 ? 'rgb' : mode === 1 ? 'intensity' : 'xyz' }; }
+  let m = 'xyz', b64 = data; try { const o = JSON.parse(data); if (o && o.d) { b64 = o.d; m = o.m || 'xyz'; } } catch (_) { /* legacy raw base64 */ }
   try { const bin = atob(b64); const u8 = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i); return { arr: new Float32Array(u8.buffer), mode: m }; } catch (_) { return null; } }
+
+// ── WS 멀티플렉스 전송 — 단일 연결로 모든 스트림. openStream(path, onData) → {close}. onData(str|ArrayBuffer). ──
+const WS = { ws: null, seq: 1, subs: new Map(), q: [], ready: false, ever: false };
+function wsSend(m) { const s = JSON.stringify(m); if (WS.ready && WS.ws && WS.ws.readyState === 1) WS.ws.send(s); else WS.q.push(s); }
+function wsConnect() {
+  const w = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws'); w.binaryType = 'arraybuffer'; WS.ws = w;
+  w.onopen = () => { WS.ready = true; WS.ever = true; if (typeof setConn === 'function') setConn('ok', '연결됨'); for (const s of WS.subs.values()) w.send(JSON.stringify({ op: 'sub', id: s.id, stream: s.stream, params: s.params })); const q = WS.q; WS.q = []; q.forEach((m) => w.send(m)); };
+  w.onclose = () => { WS.ready = false; if (typeof setConn === 'function') setConn(WS.ever ? 'wait' : 'bad', WS.ever ? '재연결 중…' : '연결 중…'); setTimeout(wsConnect, 1000); };
+  w.onerror = () => { try { w.close(); } catch (_) { /* */ } };
+  w.onmessage = (e) => { if (typeof e.data === 'string') { let o; try { o = JSON.parse(e.data); } catch (_) { return; } const s = WS.subs.get(o.i); if (s) s.onData(o.d); } else { const s = WS.subs.get(new DataView(e.data).getUint32(0, true)); if (s) s.onData(e.data); } };
+}
+function openStream(path, onData) {
+  const qi = path.indexOf('?'); const stream = (qi < 0 ? path : path.slice(0, qi)).replace(/^\//, '');
+  const params = qi < 0 ? {} : Object.fromEntries(new URLSearchParams(path.slice(qi + 1)));
+  const id = WS.seq++; WS.subs.set(id, { id, stream, params, onData }); wsSend({ op: 'sub', id, stream, params });
+  return { close() { if (WS.subs.delete(id)) wsSend({ op: 'unsub', id }); } };
+}
+wsConnect();
 const emptyState = (ic, msg, sub) => el('div', { class: 'empty' }, el('div', { class: 'ic' }, ic), el('div', { class: 'msg' }, msg), sub ? el('div', { class: 'sub hint' }, sub) : document.createTextNode(''));
 
 // ── 테마(라이트/다크) — 저장값 우선, 없으면 시스템 설정. data-theme 로 CSS 변수 전환. ──
@@ -24,20 +44,14 @@ api('/api/ver').then((o) => { ver = o.ver; $('#verlbl').textContent = 'ROS' + ve
 // ── 시뮬레이션 시각(/clock) — 있으면 구독해 sim time 추적(rosgraph_msgs/Clock). wallclock 과 함께 표시. ──
 const Clock = { sim: null, at: 0, es: null, stale() { return this.sim != null && Date.now() - this.at > 1500; } };
 function ensureClock() { if (Clock.es || !items.some((i) => i.name === '/clock')) return;
-  Clock.es = new EventSource('/echo?topic=/clock');
-  Clock.es.onmessage = (e) => { try { const t = JSON.parse(e.data); const s = /\bsec:\s*(\d+)/.exec(t), ns = /nanosec:\s*(\d+)/.exec(t); if (s) { Clock.sim = (+s[1]) + (ns ? (+ns[1]) / 1e9 : 0); Clock.at = Date.now(); } } catch (_) { /* */ } };
-  Clock.es.onerror = () => { /* */ }; }
+  Clock.es = openStream('/echo?topic=/clock', (d) => { try { const t = JSON.parse(d); const s = /\bsec:\s*(\d+)/.exec(t), ns = /nanosec:\s*(\d+)/.exec(t); if (s) { Clock.sim = (+s[1]) + (ns ? (+ns[1]) / 1e9 : 0); Clock.at = Date.now(); } } catch (_) { /* */ } }); }
 function paintClock() { const c = $('#clock'); if (!c) return; const wall = new Date().toLocaleTimeString();
   c.textContent = Clock.sim != null ? `🕒 ${wall} · sim ${Clock.sim.toFixed(1)}s${Clock.stale() ? ' ⏸' : ''}` : `🕒 ${wall}`; }
 setInterval(paintClock, 500); paintClock();
 
-// ── 텔레메트리 SSE ──────────────────────────────────────────────────────────
+// ── 텔레메트리 (WS 멀티플렉스) ───────────────────────────────────────────────
 function setConn(state, label) { const b = $('#conn'); if (!b) return; b.className = 'connbadge ' + state; $('#connlbl').textContent = label; }
-let everOpen = false;
-const es = new EventSource('/events');
-es.onopen = () => { everOpen = true; setConn('ok', '연결됨'); };
-es.onerror = () => { setConn(es.readyState === 2 ? 'bad' : 'wait', es.readyState === 2 ? '연결 끊김' : (everOpen ? '재연결 중…' : '연결 중…')); };
-es.onmessage = (e) => { try { const o = JSON.parse(e.data); if (o.items) { items = o.items; render(); ensureClock(); } } catch (_) { /* */ } };
+openStream('/events', (d) => { try { const o = JSON.parse(d); if (o.items) { items = o.items; render(); ensureClock(); } } catch (_) { /* */ } });
 
 const nodeName = (e) => (Array.isArray(e) ? e[0] : e);
 const byName = (n) => items.find((i) => i.name === n);
@@ -206,11 +220,10 @@ function leaves(text) { const out = []; const stack = []; for (const raw of text
 function selectTopic(name) {
   $('#valtitle').textContent = name; sel = name; renderSidebar(); renderValActs();
   if (echoES) echoES.close(); series = {}; order = []; picked = new Set(); t0 = Date.now(); gMin = Infinity; gMax = -Infinity; gKey = null; $('#fields').innerHTML = '';
-  echoES = new EventSource('/echo?topic=' + encodeURIComponent(name));
-  echoES.onmessage = (e) => { const text = JSON.parse(e.data); $('#val').textContent = text.slice(0, 1500);
+  echoES = openStream('/echo?topic=' + encodeURIComponent(name), (d) => { const text = JSON.parse(d); $('#val').textContent = text.slice(0, 1500);
     const nums = numeric(text), t = (Date.now() - t0) / 1000;
     for (const [k, v] of Object.entries(nums)) { if (!series[k]) { series[k] = []; order.push(k); if (picked.size < 2) picked.add(k); renderFields(); } series[k].push([t, v]); if (series[k].length > 600) series[k].shift(); }
-    drawPlot(); drawGauge(); };
+    drawPlot(); drawGauge(); });
 }
 function renderValActs() {
   const box = $('#valacts'); box.innerHTML = ''; const it = selItem; if (!it) return;
@@ -271,7 +284,7 @@ function trigBadge() { let b = $('#trigbadge'); if (!b) { b = el('span', { id: '
 function trigFire(reason) { const now = Date.now(); if (now - Trigger.last < 30000) return; Trigger.last = now; post('/api/record', {}).then((r) => { Trigger.log.unshift(`${new Date(now).toLocaleTimeString()} · ${reason} → rosbag job ${r.id || '?'}`); if (Trigger.log.length > 30) Trigger.log.pop(); trigBadge(); }); }
 function trigDisarm() { Trigger.armed = false; if (Trigger.es) { Trigger.es.close(); Trigger.es = null; } if (Trigger.iv) { clearInterval(Trigger.iv); Trigger.iv = null; } trigBadge(); }
 function trigArm(cond) { trigDisarm(); Trigger.armed = true; Trigger.cond = cond; Trigger.last = 0;
-  if (cond === 'diag') { Trigger.es = new EventSource('/diagnostics'); Trigger.es.onmessage = (e) => { try { if (/level:\s*2/.test(JSON.parse(e.data))) trigFire('/diagnostics ERROR'); } catch (_) { /* */ } }; }
+  if (cond === 'diag') { Trigger.es = openStream('/diagnostics', (d) => { try { if (/level:\s*2/.test(JSON.parse(d))) trigFire('/diagnostics ERROR'); } catch (_) { /* */ } }); }
   else { Trigger.iv = setInterval(() => { const errs = diagnose(items).issues.filter((i) => i.sev === 0); if (errs.length) trigFire('그래프 ERROR: ' + errs[0].target); }, 2000); }
   trigBadge();
 }
@@ -521,8 +534,7 @@ const Views = {
     const tbl = el('table', { class: 'tbl' }); const wrap = el('div', {}, filterInp, tbl); openModal(title, wrap);
     const rows = []; const rerender = () => { const f = filterInp.value.toLowerCase(); tbl.innerHTML = ''; rows.filter((r) => !f || r.text.toLowerCase().includes(f)).slice(-400).forEach((r) => tbl.append(el('tr', { class: 'lrow ' + r.cls }, el('td', {}, r.a), el('td', {}, r.b)))); wrap.scrollTop = wrap.scrollHeight; };
     filterInp.oninput = rerender;
-    const s = new EventSource(endpoint); modalSub = s;
-    s.onmessage = (e) => { const blk = JSON.parse(e.data); for (const r of parse(blk)) { rows.push(r); if (rows.length > 1000) rows.shift(); } rerender(); };
+    modalSub = openStream(endpoint, (d) => { const blk = JSON.parse(d); for (const r of parse(blk)) { rows.push(r); if (rows.length > 1000) rows.shift(); } rerender(); });
   },
   log() { const L = (l) => (l >= 50 ? 'FATAL' : l >= 40 ? 'ERROR' : l >= 30 ? 'WARN' : l >= 20 ? 'INFO' : 'DEBUG'), C = (l) => (l >= 40 ? 'ERROR' : l >= 30 ? 'WARN' : 'OK'); this.stream('📜 로그 /rosout', '/rosout', (blk) => { const lv = /level:\s*(\d+)/.exec(blk), nm = /name:\s*["']?([^\n"']+)/.exec(blk), ms = /msg:\s*["']?(.*)/.exec(blk); const lvl = lv ? +lv[1] : 0; return [{ a: L(lvl), b: (nm ? nm[1].trim() : '?') + ': ' + (ms ? ms[1].replace(/["']\s*$/, '').trim() : ''), cls: C(lvl), text: blk }]; }); },
   diag() { const LV = ['OK', 'WARN', 'ERROR', 'STALE']; this.stream('🩺 진단 /diagnostics', '/diagnostics', (blk) => { const out = []; const si = blk.indexOf('status:'); const sb = si >= 0 ? blk.slice(si) : blk; for (const part of sb.split(/\n\s*- /).slice(1)) { const lv = /level:\s*(\d+)/.exec(part), nm = /name:\s*["']?(.*)/.exec(part), ms = /message:\s*["']?(.*)/.exec(part); const lvl = lv ? +lv[1] : 0; out.push({ a: LV[lvl] || '?', b: (nm ? nm[1].replace(/["']\s*$/, '').trim() : '?') + ': ' + (ms ? ms[1].replace(/["']\s*$/, '').trim() : ''), cls: LV[lvl] || 'OK', text: part }); } return out; }); },
@@ -576,17 +588,17 @@ const Views = {
     const displays = new Map();   // id → {id,kind,topic,es,on}
     const idOf = (kind, topic) => kind + ':' + topic;
     let cloudMode = 'xyz', colorSel = null, frameIds = [], lastFrameIds = '';   // 클라우드 채널 + TF 프레임 목록(카메라 옵션용)
-    const subscribe = (d) => { if (d.kind === 'cloud') { d.es = new EventSource('/cloudstream?topic=' + encodeURIComponent(d.topic)); d.es.onmessage = (e) => { if (!e.data) return; const r = decodeCloud(e.data); if (!r) return; cloudMode = r.mode; if (colorSel && colorSel.value === 'auto') applyAutoColor(); scene.setCloudById(d.id, r.arr); }; }
-      else if (d.kind === 'geom') { d.es = new EventSource('/geomstream?topic=' + encodeURIComponent(d.topic) + '&type=' + encodeURIComponent(d.ty || '')); d.es.onmessage = (e) => { if (!e.data) return; try { const o = JSON.parse(e.data); scene.setMarkersById(d.id, o.markers || []); } catch (_) { /* */ } }; }
-      else { d.es = new EventSource('/markerstream?topic=' + encodeURIComponent(d.topic)); d.es.onmessage = (e) => { if (!e.data) return; try { const o = JSON.parse(e.data); scene.setMarkersById(d.id, o.markers || (Array.isArray(o) ? o : [o])); } catch (_) { /* */ } }; } };
+    const subscribe = (d) => { if (d.kind === 'cloud') { d.es = openStream('/cloudstream?topic=' + encodeURIComponent(d.topic), (data) => { const r = decodeCloud(data); if (!r) return; cloudMode = r.mode; if (colorSel && colorSel.value === 'auto') applyAutoColor(); scene.setCloudById(d.id, r.arr); }); }
+      else if (d.kind === 'geom') { d.es = openStream('/geomstream?topic=' + encodeURIComponent(d.topic) + '&type=' + encodeURIComponent(d.ty || ''), (data) => { try { const o = JSON.parse(data); scene.setMarkersById(d.id, o.markers || []); } catch (_) { /* */ } }); }
+      else { d.es = openStream('/markerstream?topic=' + encodeURIComponent(d.topic), (data) => { try { const o = JSON.parse(data); scene.setMarkersById(d.id, o.markers || (Array.isArray(o) ? o : [o])); } catch (_) { /* */ } }); } };
     const applyAutoColor = () => scene.opts({ colorMode: cloudMode === 'rgb' ? 2 : cloudMode === 'intensity' ? 1 : 0 });
     const unsubscribe = (d) => { if (d.es) { d.es.close(); d.es = null; } if (d.kind === 'cloud') scene.setCloudById(d.id, null); else scene.setMarkersById(d.id, []); };
     const addDisplay = (kind, topic, ty) => { const id = idOf(kind, topic); if (displays.has(id)) return; const d = { id, kind, topic, ty, on: true }; displays.set(id, d); subscribe(d); renderList(); };
     const toggle = (d) => { d.on = !d.on; if (d.on) subscribe(d); else unsubscribe(d); renderList(); };
     const removeD = (d) => { unsubscribe(d); scene.removeDisplay(d.kind, d.id); displays.delete(d.id); renderList(); };
     const builtin = { grid: true, axes: true, tf: true, robot: false }; let tfES = null, urdfES = null;
-    const subTF = (on) => { if (tfES) { tfES.close(); tfES = null; } scene.setTF([]); if (!on) return; tfES = new EventSource('/tfstream'); tfES.onmessage = (e) => { if (!e.data) return; try { const o = JSON.parse(e.data); const fr = o.frames || []; scene.setTF(fr); const ids = fr.map((f) => f.id).join(','); if (ids !== lastFrameIds) { lastFrameIds = ids; frameIds = fr.map((f) => f.id); renderCam(); } } catch (_) { /* */ } }; };
-    const subRobot = (on) => { if (urdfES) { urdfES.close(); urdfES = null; } scene.setMarkersById('__robot__', []); if (!on) return; urdfES = new EventSource('/urdfstream'); urdfES.onmessage = (e) => { if (!e.data) return; try { const o = JSON.parse(e.data); scene.setMarkersById('__robot__', o.markers || []); } catch (_) { /* */ } }; };
+    const subTF = (on) => { if (tfES) { tfES.close(); tfES = null; } scene.setTF([]); if (!on) return; tfES = openStream('/tfstream', (data) => { try { const o = JSON.parse(data); const fr = o.frames || []; scene.setTF(fr); const ids = fr.map((f) => f.id).join(','); if (ids !== lastFrameIds) { lastFrameIds = ids; frameIds = fr.map((f) => f.id); renderCam(); } } catch (_) { /* */ } }); };
+    const subRobot = (on) => { if (urdfES) { urdfES.close(); urdfES = null; } scene.setMarkersById('__robot__', []); if (!on) return; urdfES = openStream('/urdfstream', (data) => { try { const o = JSON.parse(data); scene.setMarkersById('__robot__', o.markers || []); } catch (_) { /* */ } }); };
     const listBox = el('div', {});
     const DR = 'display:flex;align-items:center;gap:5px;padding:2px 4px;font-size:11px;cursor:default';
     function renderList() { listBox.innerHTML = '';
@@ -738,11 +750,9 @@ const Views = {
         ctx.fillStyle = '#c78ad2'; ctx.textBaseline = 'top'; ctx.fillText('principal', px + 6, py + 4); ctx.textBaseline = 'bottom'; }
     }
     const subAnn = (t) => { if (annES) { annES.close(); annES = null; } ann = { boxes: [], points: [], circles: [], texts: [] }; drawOverlay(); if (!t) return;
-      annES = new EventSource('/annstream?topic=' + encodeURIComponent(t));
-      annES.onmessage = (e) => { if (!e.data) return; try { const o = JSON.parse(e.data); ann = { boxes: o.boxes || [], points: o.points || [], circles: o.circles || [], texts: o.texts || [] }; drawOverlay(); } catch (_) { /* */ } }; };
+      annES = openStream('/annstream?topic=' + encodeURIComponent(t), (data) => { try { const o = JSON.parse(data); ann = { boxes: o.boxes || [], points: o.points || [], circles: o.circles || [], texts: o.texts || [] }; drawOverlay(); } catch (_) { /* */ } }); };
     const subCam = (t) => { if (camES) { camES.close(); camES = null; } cam = null; drawOverlay(); if (!t) return;
-      camES = new EventSource('/caminfostream?topic=' + encodeURIComponent(t));
-      camES.onmessage = (e) => { if (!e.data) return; try { cam = JSON.parse(e.data); drawOverlay(); camInfoLbl.textContent = cam.K ? `K: fx=${cam.K[0].toFixed(0)} fy=${cam.K[4].toFixed(0)} cx=${cam.K[2].toFixed(0)} cy=${cam.K[5].toFixed(0)} · ${cam.model || ''} D=[${(cam.D || []).map((d) => d.toFixed(3)).join(', ')}]` : ''; } catch (_) { /* */ } }; };
+      camES = openStream('/caminfostream?topic=' + encodeURIComponent(t), (data) => { try { cam = JSON.parse(data); drawOverlay(); camInfoLbl.textContent = cam.K ? `K: fx=${cam.K[0].toFixed(0)} fy=${cam.K[4].toFixed(0)} cx=${cam.K[2].toFixed(0)} cy=${cam.K[5].toFixed(0)} · ${cam.model || ''} D=[${(cam.D || []).map((d) => d.toFixed(3)).join(', ')}]` : ''; } catch (_) { /* */ } }); };
     // ── 소스 선택 컨트롤 ──
     const annSel = el('select', { style: 'font:11px monospace' }); annSel.append(el('option', { value: '' }, '(없음)')); annTopics.forEach((t) => annSel.append(el('option', { value: t }, t))); annSel.onchange = () => subAnn(annSel.value);
     const camSel = el('select', { style: 'font:11px monospace' }); camSel.append(el('option', { value: '' }, '(없음)')); infoTopics.forEach((t) => camSel.append(el('option', { value: t }, t))); camSel.onchange = () => subCam(camSel.value);
@@ -759,9 +769,7 @@ const Views = {
     stage.addEventListener('mousemove', (e) => { if (panning) { zoom.ox += e.clientX - panning.x; zoom.oy += e.clientY - panning.y; panning = { x: e.clientX, y: e.clientY }; applyZoom(); return; }
       const r = img.getBoundingClientRect(); if (!r.width || !off.width) { pixLbl.textContent = ''; return; } const px = Math.floor((e.clientX - r.left) / r.width * off.width), py = Math.floor((e.clientY - r.top) / r.height * off.height);
       if (px < 0 || py < 0 || px >= off.width || py >= off.height) { pixLbl.textContent = ''; return; } let rgb = ''; try { const d = off.getContext('2d').getImageData(px, py, 1, 1).data; rgb = ` · rgb(${d[0]},${d[1]},${d[2]})`; } catch (_) { /* */ } pixLbl.textContent = `(${px}, ${py})${rgb}`; });
-    const es = new EventSource('/imgstream?topic=' + encodeURIComponent(topic));
-    es.onmessage = (e) => { if (!e.data) return; img.src = 'data:image/jpeg;base64,' + e.data; n++; const fps = n / ((Date.now() - t0) / 1000); info.textContent = `${n} 프레임 · ${fps.toFixed(1)} fps`; drawOverlay(); };
-    es.onerror = () => { info.textContent = '스트림 오류 — image_transport/토픽 확인'; };
+    const es = openStream('/imgstream?topic=' + encodeURIComponent(topic), (d) => { if (!d) return; img.src = 'data:image/jpeg;base64,' + d; n++; const fps = n / ((Date.now() - t0) / 1000); info.textContent = `${n} 프레임 · ${fps.toFixed(1)} fps`; drawOverlay(); });
     img.onload = () => { off.width = img.naturalWidth; off.height = img.naturalHeight; try { off.getContext('2d').drawImage(img, 0, 0); } catch (_) { /* */ } drawOverlay(); };
     if (annTopics[0]) { annSel.value = annTopics[0]; subAnn(annTopics[0]); }
     if (infoTopics[0]) { camSel.value = infoTopics[0]; subCam(infoTopics[0]); }
@@ -775,13 +783,12 @@ const Views = {
     const info = el('div', { class: 'hint', style: 'margin-top:6px' });
     openModal('🗺 GPS 지도 — ' + topic, el('div', {}, el('div', { class: 'hint', style: 'margin-bottom:6px' }, 'NavSatFix 위경도 궤적 (외부 타일 없이 로컬 렌더)'), cv, info));
     const track = []; let cur = null;
-    const es = new EventSource('/echo?topic=' + encodeURIComponent(topic)); modalSub = es;
-    es.onmessage = (e) => { const text = JSON.parse(e.data); const g = {};
+    modalSub = openStream('/echo?topic=' + encodeURIComponent(topic), (d) => { const text = JSON.parse(d); const g = {};
       for (const m of text.matchAll(/^(latitude|longitude|altitude):\s*(-?\d+\.?\d*)/gm)) g[m[1]] = parseFloat(m[2]);
       if (g.latitude == null || g.longitude == null) return;
       cur = g; track.push([g.longitude, g.latitude]); if (track.length > 2000) track.shift();
       info.textContent = `lat ${g.latitude.toFixed(6)} · lon ${g.longitude.toFixed(6)} · alt ${(g.altitude ?? 0).toFixed(1)} m · ${track.length} pts`;
-      draw(); };
+      draw(); });
     function draw() {
       const ctx = cv.getContext('2d'); const W = cv.width = cv.clientWidth, H = cv.height; ctx.clearRect(0, 0, W, H);
       if (track.length < 2) return;
@@ -802,10 +809,9 @@ const Views = {
     // 📈 PlotJuggler 스타일 — 다중 동기 플롯 · 여러 토픽 커브 · 공유 시간축/커서 · 줌/팬 · 변환 · 통계.
     const PAL = ['#57c7d4', '#e2c85a', '#6fd08c', '#c78ad2', '#e06a6a', '#6f9be0', '#d98a4b', '#7ad2b8'];
     const S = { es: {}, series: {}, fields: {}, bag: new Set(), t0: Date.now() };
-    const sub = (topic) => { if (S.es[topic] || S.bag.has(topic)) return; const es = new EventSource('/echo?topic=' + encodeURIComponent(topic));
-      es.onmessage = (e) => { let text; try { text = JSON.parse(e.data); } catch (_) { return; } const nums = numeric(text); const t = (Date.now() - S.t0) / 1000; S.fields[topic] = Object.keys(nums);
-        for (const [k, v] of Object.entries(nums)) { const key = topic + ' ' + k; (S.series[key] || (S.series[key] = [])).push([t, v]); if (S.series[key].length > 4000) S.series[key].shift(); } };
-      S.es[topic] = es; };
+    const sub = (topic) => { if (S.es[topic] || S.bag.has(topic)) return;
+      S.es[topic] = openStream('/echo?topic=' + encodeURIComponent(topic), (d) => { let text; try { text = JSON.parse(d); } catch (_) { return; } const nums = numeric(text); const t = (Date.now() - S.t0) / 1000; S.fields[topic] = Object.keys(nums);
+        for (const [k, v] of Object.entries(nums)) { const key = topic + ' ' + k; (S.series[key] || (S.series[key] = [])).push([t, v]); if (S.series[key].length > 4000) S.series[key].shift(); } }); };
     const view = { W: 10, follow: true, tEnd: 0 }; const plots = []; let colorI = 0, cursorT = null;
     const TF = { raw: '원값', d1: 'd/dt', d2: 'd²/dt²', d3: 'd³/dt³', i1: '∫dt', i2: '∫∫dt', abs: '|x|', movavg: '이동평균' };
     const derivOnce = (d) => { const o = []; for (let i = 1; i < d.length; i++) { const dt = d[i][0] - d[i - 1][0] || 1e-6; o.push([d[i][0], (d[i][1] - d[i - 1][1]) / dt]); } return o; };
@@ -1021,12 +1027,11 @@ const Views = {
     const draw = () => { const ctx = cv.getContext('2d'); const W = cv.width = cv.clientWidth || 900, H = cv.height; ctx.clearRect(0, 0, W, H); if (!seg.length) return; const tmin = seg[0].t0, tmax = (live ? live.t1 : seg[seg.length - 1].t1) || tmin + 1, span = tmax - tmin || 1;
       for (const s of seg) { const x = (s.t0 - tmin) / span * W, w = Math.max(1.5, (s.t1 - s.t0) / span * W); ctx.fillStyle = colors[s.v] || '#888'; ctx.fillRect(x, 8, w, 30); }
       leg.innerHTML = ''; Object.entries(colors).forEach(([v, c]) => leg.append(el('label', {}, el('span', { style: `display:inline-block;width:11px;height:11px;border-radius:2px;background:${c}` }), ' ' + v))); };
-    const es = new EventSource('/echo?topic=' + encodeURIComponent(it.name)); modalSub = es;
-    es.onmessage = (e) => { const lv = leaves(JSON.parse(e.data));
+    modalSub = openStream('/echo?topic=' + encodeURIComponent(it.name), (d) => { const lv = leaves(JSON.parse(d));
       if (!fields.length && lv.length) { fields = lv.map((x) => x.path); sel.innerHTML = ''; fields.forEach((f) => sel.append(el('option', { value: f }, f))); field = fields[0]; sel.onchange = () => { field = sel.value; seg.length = 0; live = null; for (const k in colors) delete colors[k]; draw(); }; }
       const f = lv.find((x) => x.path === field); if (!f) return; const v = f.val; const t = (Date.now() - tt0) / 1000; cur.textContent = `현재: ${field} = ${v}`;
       if (live && live.v === v) { live.t1 = t; } else { live = { v, t0: t, t1: t }; seg.push(live); if (!(v in colors)) colors[v] = PAL[Object.keys(colors).length % PAL.length]; if (seg.length > 400) seg.shift(); }
-      draw(); };
+      draw(); });
   },
   async overview() {
     const wrap = el('div', {}); openModal('🩻 시스템 개요', wrap);

@@ -107,7 +107,7 @@
   function makeRaw(host, cfg, ctx) {
     const pre = el('pre', { class: 'wsraw' }); host.append(pre); let es = null;
     const sub = (t) => { if (es) { es.close(); es = null; } pre.textContent = ''; if (!t) { pre.append(emptyState('🧾', '토픽 선택', '헤더에서 토픽을 고르세요')); return; }
-      es = new EventSource('/echo?topic=' + encodeURIComponent(t)); es.onmessage = (e) => { try { pre.textContent = JSON.parse(e.data); } catch (_) { /* */ } }; };
+      es = openStream('/echo?topic=' + encodeURIComponent(t), (d) => { try { pre.textContent = JSON.parse(d); } catch (_) { /* */ } }); };
     topicSelect(ctx, cfg, () => true, '토픽', 'topic', sub); sub(cfg.topic);
     return { dispose() { if (es) es.close(); } };
   }
@@ -118,9 +118,8 @@
     const cv = el('canvas', { class: 'wscanvas' }); const legend = el('div', { class: 'wslegend' });
     host.append(cv, legend); const series = {}, order = []; let t0 = Date.now(), es = null, raf = 0, alive = true;
     const sub = (t) => { if (es) { es.close(); es = null; } for (const k in series) delete series[k]; order.length = 0; legend.innerHTML = ''; if (!t) return;
-      es = new EventSource('/echo?topic=' + encodeURIComponent(t));
-      es.onmessage = (e) => { let txt; try { txt = JSON.parse(e.data); } catch (_) { return; } const nums = numeric(txt); const tt = (Date.now() - t0) / 1000;
-        for (const [k, v] of Object.entries(nums)) { if (!series[k]) { series[k] = []; order.push(k); if (cfg.fields[k] === undefined && order.length <= 2) cfg.fields[k] = true; drawLegend(); } series[k].push([tt, v]); if (series[k].length > 800) series[k].shift(); } }; };
+      es = openStream('/echo?topic=' + encodeURIComponent(t), (d) => { let txt; try { txt = JSON.parse(d); } catch (_) { return; } const nums = numeric(txt); const tt = (Date.now() - t0) / 1000;
+        for (const [k, v] of Object.entries(nums)) { if (!series[k]) { series[k] = []; order.push(k); if (cfg.fields[k] === undefined && order.length <= 2) cfg.fields[k] = true; drawLegend(); } series[k].push([tt, v]); if (series[k].length > 800) series[k].shift(); } }); };
     const drawLegend = () => { legend.innerHTML = ''; order.forEach((k, i) => { const on = cfg.fields[k] !== false;
       const chip = el('span', { class: 'wscv', style: 'opacity:' + (on ? 1 : .45) }, el('span', { class: 'wsdot', style: 'background:' + (on ? PAL[i % PAL.length] : '#666') }), k.length > 26 ? '…' + k.slice(-24) : k);
       chip.onclick = () => { cfg.fields[k] = !on; ctx.save(); drawLegend(); }; legend.append(chip); }); };
@@ -138,12 +137,12 @@
 
   // ── 패널: 스트림(진단/로그) ──
   function makeStream(host, cfg, ctx, arg) {
-    const tbl = el('div', { class: 'wsstream' }); host.append(tbl); const rows = []; const s = new EventSource(arg.ep);
+    const tbl = el('div', { class: 'wsstream' }); host.append(tbl); const rows = [];
     const push = (a, b, cls) => { rows.push({ a, b, cls }); if (rows.length > 500) rows.shift(); rerender(); };
     const rerender = () => { tbl.innerHTML = ''; rows.slice(-300).forEach((r) => tbl.append(el('div', { class: 'wsline ' + r.cls }, el('b', {}, r.a), ' ', r.b))); tbl.scrollTop = tbl.scrollHeight; };
-    s.onmessage = (e) => { let blk; try { blk = JSON.parse(e.data); } catch (_) { return; }
+    const s = openStream(arg.ep, (d) => { let blk; try { blk = JSON.parse(d); } catch (_) { return; }
       if (arg.kind === 'log') { const L = ['DEBUG', 'INFO', 'WARN', 'ERROR', 'FATAL']; const lv = /level:\s*(\d+)/.exec(blk), nm = /name:\s*["']?([^\n"']+)/.exec(blk), ms = /msg:\s*["']?(.*)/.exec(blk); const l = lv ? +lv[1] : 0; const idx = l >= 50 ? 4 : l >= 40 ? 3 : l >= 30 ? 2 : l >= 20 ? 1 : 0; push(L[idx], (nm ? nm[1].trim() : '?') + ': ' + (ms ? ms[1].replace(/["']\s*$/, '').trim() : ''), idx >= 3 ? 'ERROR' : idx === 2 ? 'WARN' : 'OK'); }
-      else { const LV = ['OK', 'WARN', 'ERROR', 'STALE']; const si = blk.indexOf('status:'); const sb = si >= 0 ? blk.slice(si) : blk; for (const part of sb.split(/\n\s*- /).slice(1)) { const lv = /level:\s*(\d+)/.exec(part), nm = /name:\s*["']?(.*)/.exec(part), ms = /message:\s*["']?(.*)/.exec(part); const l = lv ? +lv[1] : 0; push(LV[l] || '?', (nm ? nm[1].replace(/["']\s*$/, '').trim() : '?') + ': ' + (ms ? ms[1].replace(/["']\s*$/, '').trim() : ''), LV[l] || 'OK'); } } };
+      else { const LV = ['OK', 'WARN', 'ERROR', 'STALE']; const si = blk.indexOf('status:'); const sb = si >= 0 ? blk.slice(si) : blk; for (const part of sb.split(/\n\s*- /).slice(1)) { const lv = /level:\s*(\d+)/.exec(part), nm = /name:\s*["']?(.*)/.exec(part), ms = /message:\s*["']?(.*)/.exec(part); const l = lv ? +lv[1] : 0; push(LV[l] || '?', (nm ? nm[1].replace(/["']\s*$/, '').trim() : '?') + ': ' + (ms ? ms[1].replace(/["']\s*$/, '').trim() : ''), LV[l] || 'OK'); } } });
     return { dispose() { s.close(); } };
   }
 
@@ -159,9 +158,9 @@
       for (const cc of ann.circles) { c.strokeStyle = `rgb(${cc.r},${cc.g},${cc.b})`; c.beginPath(); c.arc(cc.x * kx, cc.y * ky, cc.d / 2 * kx, 0, 7); c.stroke(); }
       c.fillStyle = '#e2c85a'; for (const t of ann.texts) c.fillText(t.t, t.x * kx, t.y * ky);
       if (cam && cam.K && cam.K.length === 9) { const px = cam.K[2] * kx, py = cam.K[5] * ky; c.strokeStyle = '#c78ad2'; c.lineWidth = 1; c.beginPath(); c.moveTo(px - 10, py); c.lineTo(px + 10, py); c.moveTo(px, py - 10); c.lineTo(px, py + 10); c.stroke(); } };
-    const subImg = (t) => { if (es) { es.close(); es = null; } img.removeAttribute('src'); if (!t) return; es = new EventSource('/imgstream?topic=' + encodeURIComponent(t)); es.onmessage = (e) => { if (e.data) { img.src = 'data:image/jpeg;base64,' + e.data; drawOv(); } }; };
-    const subAnn = (t) => { if (annES) { annES.close(); annES = null; } ann = { boxes: [], points: [], circles: [], texts: [] }; if (!t) { drawOv(); return; } annES = new EventSource('/annstream?topic=' + encodeURIComponent(t)); annES.onmessage = (e) => { try { const o = JSON.parse(e.data); ann = { boxes: o.boxes || [], points: o.points || [], circles: o.circles || [], texts: o.texts || [] }; drawOv(); } catch (_) { /* */ } }; };
-    const subCam = (t) => { if (camES) { camES.close(); camES = null; } cam = null; if (!t) { drawOv(); return; } camES = new EventSource('/caminfostream?topic=' + encodeURIComponent(t)); camES.onmessage = (e) => { try { cam = JSON.parse(e.data); drawOv(); } catch (_) { /* */ } }; };
+    const subImg = (t) => { if (es) { es.close(); es = null; } img.removeAttribute('src'); if (!t) return; es = openStream('/imgstream?topic=' + encodeURIComponent(t), (d) => { if (d) { img.src = 'data:image/jpeg;base64,' + d; drawOv(); } }); };
+    const subAnn = (t) => { if (annES) { annES.close(); annES = null; } ann = { boxes: [], points: [], circles: [], texts: [] }; if (!t) { drawOv(); return; } annES = openStream('/annstream?topic=' + encodeURIComponent(t), (d) => { try { const o = JSON.parse(d); ann = { boxes: o.boxes || [], points: o.points || [], circles: o.circles || [], texts: o.texts || [] }; drawOv(); } catch (_) { /* */ } }); };
+    const subCam = (t) => { if (camES) { camES.close(); camES = null; } cam = null; if (!t) { drawOv(); return; } camES = openStream('/caminfostream?topic=' + encodeURIComponent(t), (d) => { try { cam = JSON.parse(d); drawOv(); } catch (_) { /* */ } }); };
     topicSelect(ctx, cfg, isImg, '이미지', 'topic', subImg);
     topicSelect(ctx, cfg, isAnn, '어노테이션', 'ann', subAnn);
     topicSelect(ctx, cfg, isCamInfo, 'CameraInfo', 'cam', subCam);
@@ -175,9 +174,9 @@
     const cv = el('canvas', { class: 'wsgl' }); const labelDiv = el('div', { class: 'wsgllabels' });
     const stage = el('div', { class: 'wsstage', style: 'height:100%' }, cv, labelDiv); host.append(stage);
     const scene = mkScene(cv, labelDiv, { textContent: '' }); let cloudES = null, markerES = null, tfES = null;
-    const subCloud = (t) => { if (cloudES) { cloudES.close(); cloudES = null; } scene.setCloud(null); if (!t) return; cloudES = new EventSource('/cloudstream?topic=' + encodeURIComponent(t)); cloudES.onmessage = (e) => { if (!e.data) return; const r = decodeCloud(e.data); if (r) scene.setCloud(r.arr); }; };
-    const subMarker = (t) => { if (markerES) { markerES.close(); markerES = null; } scene.setMarkers([]); if (!t) return; markerES = new EventSource('/markerstream?topic=' + encodeURIComponent(t)); markerES.onmessage = (e) => { try { const o = JSON.parse(e.data); scene.setMarkers(o.markers || []); } catch (_) { /* */ } }; };
-    const subTF = (on) => { if (tfES) { tfES.close(); tfES = null; } scene.setTF([]); if (!on) return; tfES = new EventSource('/tfstream'); tfES.onmessage = (e) => { try { const o = JSON.parse(e.data); scene.setTF(o.frames || []); } catch (_) { /* */ } }; };
+    const subCloud = (t) => { if (cloudES) { cloudES.close(); cloudES = null; } scene.setCloud(null); if (!t) return; cloudES = openStream('/cloudstream?topic=' + encodeURIComponent(t), (data) => { const r = decodeCloud(data); if (r) scene.setCloud(r.arr); }); };
+    const subMarker = (t) => { if (markerES) { markerES.close(); markerES = null; } scene.setMarkers([]); if (!t) return; markerES = openStream('/markerstream?topic=' + encodeURIComponent(t), (data) => { try { const o = JSON.parse(data); scene.setMarkers(o.markers || []); } catch (_) { /* */ } }); };
+    const subTF = (on) => { if (tfES) { tfES.close(); tfES = null; } scene.setTF([]); if (!on) return; tfES = openStream('/tfstream', (data) => { try { const o = JSON.parse(data); scene.setTF(o.frames || []); } catch (_) { /* */ } }); };
     topicSelect(ctx, cfg, isCloud, '클라우드', 'topic', subCloud);
     topicSelect(ctx, cfg, isMarker, '마커', 'marker', subMarker);
     const tf = el('label', { class: 'wschk' }, (() => { const c = el('input', { type: 'checkbox' }); c.checked = cfg.tf !== false; c.onchange = () => { cfg.tf = c.checked; ctx.save(); subTF(c.checked); }; return c; })(), 'TF'); ctx.cfgSlot.append(tf);
