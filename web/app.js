@@ -315,7 +315,7 @@ function inv16(m) { const o = new Array(16);
   for (let i = 0; i < 16; i++) o[i] *= det; return o; }
 function mkScene(cv, labelDiv, info) {
   const gl = cv.getContext('webgl', { antialias: true, alpha: false, preserveDrawingBuffer: SNAP }) || cv.getContext('experimental-webgl');
-  if (!gl) { info.textContent = 'WebGL 미지원 브라우저'; return { setCloud() {}, setMarkers() {}, setCloudById() {}, setMarkersById() {}, setVisible() {}, removeDisplay() {}, setTF() {}, opts() {}, view() {}, setPointSize() {}, getStats() { return { fps: 0, points: 0, drawn: 0 }; }, dispose() {} }; }
+  if (!gl) { info.textContent = 'WebGL 미지원 브라우저'; return { setCloud() {}, setMarkers() {}, setCloudById() {}, setMarkersById() {}, setVisible() {}, removeDisplay() {}, setTF() {}, opts() {}, view() {}, setPointSize() {}, setPickHandler() {}, setCamImage() {}, setCamOpts() {}, clearCamera() {}, getStats() { return { fps: 0, points: 0, drawn: 0 }; }, dispose() {} }; }
   const VS = 'attribute vec3 p; attribute vec4 col; uniform mat4 mvp; uniform float psize; varying vec4 vc; void main(){ gl_Position = mvp*vec4(p,1.0); gl_PointSize = psize; vc = col; }';
   const FS = 'precision mediump float; varying vec4 vc; uniform float round; void main(){ if(round>0.5){ vec2 d=gl_PointCoord-0.5; if(dot(d,d)>0.25) discard; } gl_FragColor = vc; }';
   // 클라우드 전용 셰이더 — xyz 만 올리고 높이색을 GPU(FS)에서 계산: 점당 JS 색 루프 제거 + 버퍼 절반(3f vs 7f).
@@ -343,6 +343,11 @@ function mkScene(cv, labelDiv, info) {
   const gMat4 = () => { const g = computeG(); if (!g) return IDENT16; const q = g.q, x = q[0], y = q[1], z = q[2], w = q[3], xx = x * x, yy = y * y, zz = z * z, xy = x * y, xz = x * z, yz = y * z, wx = w * x, wy = w * y, wz = w * z;
     return [1 - 2 * (yy + zz), 2 * (xy + wz), 2 * (xz - wy), 0, 2 * (xy - wz), 1 - 2 * (xx + zz), 2 * (yz + wx), 0, 2 * (xz + wy), 2 * (yz - wx), 1 - 2 * (xx + yy), 0, g.p[0], g.p[1], g.p[2], 1]; };
   gl.enableVertexAttribArray(caC);
+  // 텍스처 프로그램 — 카메라 이미지 3D 투영(광학 프레임에 FOV 크기 텍스처 쿼드).
+  const tprog = mkProg('attribute vec3 p; attribute vec2 uv; uniform mat4 mvp; varying vec2 vuv; void main(){ gl_Position = mvp*vec4(p,1.0); vuv = uv; }',
+    'precision mediump float; varying vec2 vuv; uniform sampler2D tex; uniform float alpha; void main(){ gl_FragColor = vec4(texture2D(tex, vuv).rgb, alpha); }');
+  const taP = gl.getAttribLocation(tprog, 'p'), taUV = gl.getAttribLocation(tprog, 'uv'), tuMVP = gl.getUniformLocation(tprog, 'mvp'), tuTex = gl.getUniformLocation(tprog, 'tex'), tuAlpha = gl.getUniformLocation(tprog, 'alpha');
+  const camTex = gl.createTexture(), camBuf = gl.createBuffer(); const camState = { on: false, ready: false, W: 640, H: 480, fx: 500, fy: 500, frame: '', dist: 2, alpha: 1 };
   gl.enableVertexAttribArray(aP); gl.enableVertexAttribArray(aC);
   gl.clearColor(0.043, 0.055, 0.071, 1); gl.enable(gl.DEPTH_TEST); gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
   const bufs = { pts: gl.createBuffer(), line: gl.createBuffer(), tri: gl.createBuffer(), triA: gl.createBuffer() };
@@ -455,6 +460,15 @@ function mkScene(cv, labelDiv, info) {
       const dc = opt.maxPoints > 0 ? Math.min(cloudN, opt.maxPoints) : cloudN; lastDrawn = dc;   // 셰이더가 거리 LOD 로 추가 컬링
       gl.drawArrays(gl.POINTS, 0, dc); gl.useProgram(prog); } else lastDrawn = 0;
     if (nV.triA) { gl.depthMask(false); bind('triA'); gl.drawArrays(gl.TRIANGLES, 0, nV.triA); gl.depthMask(true); }
+    // 카메라 이미지 3D 투영 — 광학 프레임에 FOV 크기 텍스처 쿼드(카메라 프레임 TF ∘ 고정프레임 g).
+    if (camState.on && camState.ready) { const fr = frameMap[camState.frame], g = computeG(); const d = camState.dist, hw = d * (camState.W / 2) / camState.fx, hh = d * (camState.H / 2) / camState.fy;
+      const loc = [[-hw, -hh, d, 0, 0], [hw, -hh, d, 1, 0], [hw, hh, d, 1, 1], [-hw, -hh, d, 0, 0], [hw, hh, d, 1, 1], [-hw, hh, d, 0, 1]]; const vd = [];
+      for (const c of loc) { let pt = [c[0], c[1], c[2]]; if (fr) { const r = qrot(fr.q, pt); pt = [r[0] + fr.p[0], r[1] + fr.p[1], r[2] + fr.p[2]]; } if (g) pt = applyG(g, pt); vd.push(pt[0], pt[1], pt[2], c[3], c[4]); }
+      gl.useProgram(tprog); gl.uniformMatrix4fv(tuMVP, false, mvpF); gl.uniform1f(tuAlpha, camState.alpha); gl.uniform1i(tuTex, 0);
+      gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, camTex);
+      gl.bindBuffer(gl.ARRAY_BUFFER, camBuf); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vd), gl.DYNAMIC_DRAW);
+      gl.vertexAttribPointer(taP, 3, gl.FLOAT, false, 20, 0); gl.vertexAttribPointer(taUV, 2, gl.FLOAT, false, 20, 12);
+      gl.depthMask(camState.alpha > 0.99); gl.drawArrays(gl.TRIANGLES, 0, 6); gl.depthMask(true); gl.useProgram(prog); }
     projectLabels(mvp);
     frameN++; const now = (typeof performance !== 'undefined' ? performance.now() : fpsClock + 16); if (now - fpsClock >= 500) { fps = Math.round(frameN * 1000 / (now - fpsClock)); frameN = 0; fpsClock = now;
       // 적응형 LOD — FPS 가 목표보다 낮으면 거리 임계(lodDist)를 낮춰 먼 점을 더 솎고, 여유 있으면 높여 디테일 복원.
@@ -482,6 +496,10 @@ function mkScene(cv, labelDiv, info) {
     view(p) { pan = [0, 0]; if (p === 'top') { yaw = 0; pitch = -1.554; } else if (p === 'front') { yaw = 0; pitch = 0; } else if (p === 'side') { yaw = Math.PI / 2; pitch = 0; } else if (p === 'back') { yaw = Math.PI; pitch = 0; } else { yaw = 0.7; pitch = -0.6; dist = 12; center = [0, 0, 0.5]; } },
     setPointSize(s) { psize = s; },
     setPickHandler(fn) { pickHandler = fn; cv.style.cursor = fn ? 'crosshair' : 'grab'; },
+    setCamImage(imgEl, cam, frame) { if (!imgEl || !cam || !cam.K) return; camState.W = cam.width || imgEl.naturalWidth || 640; camState.H = cam.height || imgEl.naturalHeight || 480; camState.fx = cam.K[0] || 500; camState.fy = cam.K[4] || 500; camState.frame = frame || cam.frame_id || ''; camState.on = true;
+      gl.bindTexture(gl.TEXTURE_2D, camTex); try { gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, imgEl); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE); camState.ready = true; } catch (_) { /* */ } },
+    setCamOpts(o) { Object.assign(camState, o); },
+    clearCamera() { camState.on = false; camState.ready = false; },
     getStats() { return { fps, points: cloudN, drawn: lastDrawn, lodDist: opt.lodDist, lodMode: opt.lodMode }; },
     dispose() { alive = false; cancelAnimationFrame(raf); if (labelDiv) labelDiv.innerHTML = ''; try { for (const k in bufs) gl.deleteBuffer(bufs[k]); gl.deleteBuffer(cloudBuf); gl.deleteProgram(prog); gl.deleteProgram(cprog); } catch (_) { /* */ } },
   };
@@ -579,6 +597,11 @@ const Views = {
     const markerTopics = () => items.filter((i) => /visualization_msgs\/(msg\/)?Marker(Array)?/.test(i.ty || '')).map((i) => i.name);
     const GEOMRE = /LaserScan|nav_msgs\/(msg\/)?Path|Odometry|PoseArray|PoseStamped|PointStamped|OccupancyGrid|VehicleOdometry/;
     const geomTopics = () => items.filter((i) => GEOMRE.test(i.ty || '')).map((i) => [i.name, i.ty || '']);
+    const imgTopics = () => items.filter((i) => /CompressedImage|sensor_msgs\/(msg\/)?Image/.test(i.ty || '')).map((i) => i.name);
+    const camInfoTopics = () => items.filter((i) => /CameraInfo/.test(i.ty || '')).map((i) => i.name);
+    const camImgEl = new Image(); let camImgES = null, camInfES = null, camObj = null;
+    const subCamImg = (t) => { if (camImgES) { camImgES.close(); camImgES = null; } if (!t) { scene.clearCamera(); return; } camImgES = openStream('/imgstream?topic=' + encodeURIComponent(t), (d) => { if (!d) return; camImgEl.onload = () => { if (camObj) scene.setCamImage(camImgEl, camObj, camObj.frame_id); }; camImgEl.src = 'data:image/jpeg;base64,' + d; }); };
+    const subCamInf = (t) => { if (camInfES) { camInfES.close(); camInfES = null; } if (!t) return; camInfES = openStream('/caminfostream?topic=' + encodeURIComponent(t), (d) => { try { camObj = JSON.parse(d); } catch (_) { /* */ } }); };
     const cv = el('canvas', { width: 900, height: 560, style: 'width:100%;height:560px;background:#0b0e12;border:1px solid var(--line);border-radius:6px;cursor:grab;display:block' });
     const labelDiv = el('div', { style: 'position:absolute;inset:0;pointer-events:none;overflow:hidden' });
     const fpsOv = el('div', { style: 'position:absolute;left:8px;top:8px;font:11px monospace;color:#9aa7b8;background:rgba(13,17,22,.6);padding:2px 7px;border-radius:4px;pointer-events:none' });
@@ -687,14 +710,21 @@ const Views = {
     renderTools();
     // ── 📷 카메라/프레임 — 고정 프레임(fixed frame) · 추종(follow) · 직교 투영 ──
     const camBox = el('div', { style: 'margin-top:10px;border-top:1px solid var(--line);padding-top:8px' });
-    const CO = { fixedFrame: '', follow: '', ortho: false };
+    const CO = { fixedFrame: '', follow: '', ortho: false, camImg: '', camInf: '', camDist: 2 };
     function frameSelect(cur, first, cb) { const s = el('select', { style: 'width:100%;font:11px monospace' }); s.append(el('option', { value: '' }, first)); frameIds.forEach((f) => s.append(el('option', { value: f }, f))); s.value = cur; s.onchange = () => cb(s.value); return s; }
+    function topicPick(list, cur, first, cb) { const s = el('select', { style: 'width:100%;font:11px monospace' }); s.append(el('option', { value: '' }, first)); list.forEach((t) => s.append(el('option', { value: t }, t))); s.value = cur; s.onchange = () => cb(s.value); return s; }
     function renderCam() { camBox.innerHTML = '';
       camBox.append(el('div', { class: 'hint', style: 'font-weight:600;margin-bottom:2px' }, '📷 카메라 / 프레임'));
       camBox.append(el('label', { class: 'hint', style: 'display:block;margin:4px 0 2px' }, '고정 프레임 (Fixed Frame)'), frameSelect(CO.fixedFrame, '기본 (루트)', (v) => { CO.fixedFrame = v; scene.opts({ fixedFrame: v || null }); }));
       camBox.append(el('label', { class: 'hint', style: 'display:block;margin:5px 0 2px' }, '추종 (Follow)'), frameSelect(CO.follow, '끔', (v) => { CO.follow = v; scene.opts({ follow: v || null }); if (!v) scene.view('iso'); }));
       const oc = el('input', { type: 'checkbox' }); oc.checked = CO.ortho; oc.onchange = () => { CO.ortho = oc.checked; scene.opts({ ortho: oc.checked }); };
-      camBox.append(el('label', { style: 'display:flex;align-items:center;gap:5px;margin-top:6px;font-size:11px' }, oc, el('span', {}, '직교 투영 (Orthographic)'))); }
+      camBox.append(el('label', { style: 'display:flex;align-items:center;gap:5px;margin-top:6px;font-size:11px' }, oc, el('span', {}, '직교 투영 (Orthographic)')));
+      // 카메라 이미지 3D 투영
+      camBox.append(el('div', { class: 'hint', style: 'font-weight:600;margin:8px 0 2px' }, '🎥 이미지 투영'));
+      camBox.append(el('label', { class: 'hint', style: 'display:block;margin:3px 0 2px' }, '이미지'), topicPick(imgTopics(), CO.camImg, '끔', (v) => { CO.camImg = v; subCamImg(v); }));
+      camBox.append(el('label', { class: 'hint', style: 'display:block;margin:5px 0 2px' }, 'CameraInfo'), topicPick(camInfoTopics(), CO.camInf, '끔', (v) => { CO.camInf = v; subCamInf(v); }));
+      const ds = el('input', { type: 'range', min: '0.3', max: '10', step: '0.1', value: String(CO.camDist), style: 'width:100%' }); ds.oninput = () => { CO.camDist = +ds.value; scene.setCamOpts({ dist: CO.camDist }); };
+      camBox.append(el('label', { class: 'hint', style: 'display:block;margin:5px 0 2px' }, '투영 거리 (m)'), ds); }
     renderCam();
     const timeBar = el('div', { class: 'hint', style: 'margin-top:4px' });
     const panel = el('div', { style: 'display:flex;gap:10px' },
@@ -711,7 +741,7 @@ const Views = {
       const s = scene.getStats(); fpsOv.textContent = `${s.fps} FPS · ${s.drawn.toLocaleString()} / ${s.points.toLocaleString()} pts${s.lodMode !== 'off' ? ` · LOD ${Math.round(s.lodDist)}m` : ''}`;
       const wall = new Date().toLocaleTimeString(); const sim = Clock.sim != null ? Clock.sim.toFixed(2) + 's' : '—';
       timeBar.textContent = `🕒 wall ${wall} · sim ${sim}${Clock.sim == null ? ' (no /clock)' : Clock.stale() ? ' (paused)' : ''}`; }, 500);
-    modalSub = { close: () => { clearInterval(statIv); for (const d of displays.values()) if (d.es) d.es.close(); if (tfES) tfES.close(); if (urdfES) urdfES.close(); scene.dispose(); } };
+    modalSub = { close: () => { clearInterval(statIv); for (const d of displays.values()) if (d.es) d.es.close(); if (tfES) tfES.close(); if (urdfES) urdfES.close(); if (camImgES) camImgES.close(); if (camInfES) camInfES.close(); scene.dispose(); } };
   },
   image(it) {
     // 🖼 카메라 — base64 JPEG SSE + 어노테이션(검출 박스/점/원/텍스트) + 보정(CameraInfo 주점·레티클) 오버레이.
