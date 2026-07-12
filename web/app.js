@@ -5,14 +5,24 @@ const el = (t, a = {}, ...kids) => { const e = document.createElement(t); for (c
 const api = (u, opt) => fetch(u, opt).then((r) => r.json());
 const post = (u, b) => api(u, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b || {}) });
 const SNAP = location.search.includes('snap');
+// 로딩 스피너 · 빈 상태 — 일관된 대기/무데이터 표현.
+const spinner = (msg = '불러오는 중…') => el('div', { class: 'loading' }, el('span', { class: 'spin' }), msg);
+const emptyState = (ic, msg, sub) => el('div', { class: 'empty' }, el('div', { class: 'ic' }, ic), el('div', { class: 'msg' }, msg), sub ? el('div', { class: 'sub hint' }, sub) : document.createTextNode(''));
+
+// ── 테마(라이트/다크) — 저장값 우선, 없으면 시스템 설정. data-theme 로 CSS 변수 전환. ──
+function applyTheme(t) { document.documentElement.setAttribute('data-theme', t); const b = $('#themebtn'); if (b) { b.textContent = t === 'light' ? '☀️' : '🌙'; b.title = (t === 'light' ? '다크' : '라이트') + ' 테마로 전환'; } }
+applyTheme(localStorage.getItem('rdash-theme') || (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'));
+$('#themebtn').onclick = () => { const next = document.documentElement.getAttribute('data-theme') === 'light' ? 'dark' : 'light'; localStorage.setItem('rdash-theme', next); applyTheme(next); };
 
 let items = [], ver = '?', sel = null, selItem = null, marked = new Set();
 api('/api/ver').then((o) => { ver = o.ver; $('#verlbl').textContent = 'ROS' + ver + ' · localhost'; });
 
 // ── 텔레메트리 SSE ──────────────────────────────────────────────────────────
+function setConn(state, label) { const b = $('#conn'); if (!b) return; b.className = 'connbadge ' + state; $('#connlbl').textContent = label; }
+let everOpen = false;
 const es = new EventSource('/events');
-es.onopen = () => { $('#conn').textContent = '● 연결됨'; };
-es.onerror = () => { $('#conn').textContent = '× 연결 끊김'; };
+es.onopen = () => { everOpen = true; setConn('ok', '연결됨'); };
+es.onerror = () => { setConn(es.readyState === 2 ? 'bad' : 'wait', es.readyState === 2 ? '연결 끊김' : (everOpen ? '재연결 중…' : '연결 중…')); };
 es.onmessage = (e) => { try { const o = JSON.parse(e.data); if (o.items) { items = o.items; render(); } } catch (_) { /* */ } };
 
 const nodeName = (e) => (Array.isArray(e) ? e[0] : e);
@@ -133,7 +143,9 @@ function renderSidebar() {
         it.kind === 'topic' ? el('span', { class: 'hz ' + (live ? 'live' : stale ? 'stale' : '') }, String(it.hz ?? '')) : el('span'));
       row.onclick = () => onPick(it); H.push(row);
     } }
-  const side = $('#side'); side.innerHTML = ''; H.forEach((x) => side.append(x));
+  const side = $('#side'); side.innerHTML = '';
+  if (!H.length) { side.append(items.length ? emptyState('🔍', '표시할 항목 없음', '필터를 확인하세요') : (everOpen ? emptyState('📡', 'ROS 그래프가 비어 있음', '실행 중인 노드/토픽이 없습니다') : spinner('그래프 수집 중…'))); return; }
+  H.forEach((x) => side.append(x));
 }
 function onPick(it) {
   sel = it.name; selItem = it; renderSidebar();
@@ -344,11 +356,15 @@ let activeModal = null;
 function openModal(title, node, refresh) { $('#mtitle').textContent = title; const b = $('#mbody'); b.innerHTML = ''; b.append(node); $('#modal').classList.add('on'); activeModal = { refresh, close: () => {} }; }
 function closeModal() { $('#modal').classList.remove('on'); if (activeModal && activeModal.close) { try { activeModal.close(); } catch (_) { /* */ } } if (modalSub) { modalSub.close(); modalSub = null; } activeModal = null; }
 let modalSub = null;   // 모달이 연 SSE
-function toast(msg) { $('#conn').textContent = String(msg).slice(0, 60); }
+// 토스트 — 우하단에 뜨는 알림(레벨: ok/warn/err/info). 연결 배지를 덮어쓰지 않는다.
+function toast(msg, level = 'info') { const wrap = $('#toasts'); if (!wrap) return;
+  const ICON = { ok: '✓', warn: '▲', err: '✕', info: 'ℹ' };
+  const t = el('div', { class: 'toast ' + level }, el('span', { class: 'ti', style: 'color:var(--' + ({ ok: 'green', warn: 'yellow', err: 'red', info: 'cyan' }[level]) + ')' }, ICON[level] || 'ℹ'), el('span', {}, String(msg)));
+  wrap.append(t); setTimeout(() => { t.classList.add('out'); setTimeout(() => t.remove(), 260); }, 3200); }
 
 // ── 뷰들 ───────────────────────────────────────────────────────────────────
 const Views = {
-  async msgdef(it) { const pre = el('pre', { class: 'out' }, '조회 중…'); openModal('📄 ' + (it.ty || it.name), pre); const r = await api('/api/msgdef?type=' + encodeURIComponent(it.ty || '')); pre.textContent = r.out || '(없음)'; },
+  async msgdef(it) { const pre = el('pre', { class: 'out' }, spinner('메시지 정의 조회 중…')); openModal('📄 ' + (it.ty || it.name), pre); const r = await api('/api/msgdef?type=' + encodeURIComponent(it.ty || '')); pre.textContent = r.out || ''; if (!r.out) { pre.textContent = ''; pre.append(emptyState('📭', '메시지 정의 없음', (it.ty || '') + ' 타입 정보를 가져올 수 없습니다')); } },
   qos(it) {
     const t = byName(it.name) || it; const pubs = t.pubs || [], subs = t.subs || [];
     const REL = (r) => (r === 'R' ? 'RELIABLE' : r === 'B' ? 'BEST_EFFORT' : '?'), DUR = (d) => (d === 'T' ? 'TRANSIENT_LOCAL' : d === 'V' ? 'VOLATILE' : '?');
@@ -359,16 +375,17 @@ const Views = {
     const warn = el('p', { style: 'color:' + (mismatch ? 'var(--red)' : 'var(--green)') }, mismatch ? '⚠ reliability 불일치 — RELIABLE 구독자는 BEST_EFFORT 발행자 메시지를 못 받습니다' : '✓ reliability 호환');
     openModal('🔌 QoS — ' + it.name, el('div', {}, tbl, warn));
   },
-  async connections(it) { const pre = el('pre', { class: 'out' }, '조회 중…'); openModal('🔗 ' + it.name, pre); const r = await api(`/api/connections?kind=${it.kind}&name=${encodeURIComponent(it.name)}`); pre.textContent = r.out; },
-  async tftree() { const pre = el('pre', { class: 'out' }, '/tf 수집 중…'); openModal('🌳 TF tree', pre); const r = await api('/api/tftree'); pre.textContent = r.out; },
+  async connections(it) { const pre = el('pre', { class: 'out' }, spinner('연결 관계 조회 중…')); openModal('🔗 ' + it.name, pre); const r = await api(`/api/connections?kind=${it.kind}&name=${encodeURIComponent(it.name)}`); pre.textContent = r.out || ''; if (!r.out) { pre.append(emptyState('🔗', '연결 정보 없음')); } },
+  async tftree() { const pre = el('pre', { class: 'out' }, spinner('/tf 수집 중…')); openModal('🌳 TF tree', pre); const r = await api('/api/tftree'); pre.textContent = r.out || ''; if (!(r.out || '').trim()) { pre.append(emptyState('🌳', 'TF 프레임 없음', '/tf 토픽에서 변환을 받지 못했습니다')); } },
   publish(it) { this._msgForm('▲ publish — ' + it.name, '/api/publish', { name: it.name }, 'msg', '/api/proto?name=' + encodeURIComponent(it.name) + '&type=' + encodeURIComponent(it.ty || '')); },
   service(it) { this._msgForm('call service — ' + it.name, '/api/service', { name: it.name }, 'req'); },
   action(it) { const ta = el('textarea', { rows: 4, style: 'width:100%', html: '{}' }); const out = el('pre', { class: 'out' }); const btn = el('button', { class: 'act', onclick: async () => { const r = await post('/api/action', { name: it.name, type: it.ty || '', goal: ta.value }); out.textContent = 'goal 전송 (job ' + r.id + ') — Jobs 에서 피드백'; } }, 'send goal'); openModal('🎯 action goal — ' + it.name, el('div', {}, el('div', { class: 'hint' }, 'goal (YAML)'), ta, el('div', { class: 'actbtns' }, btn), out)); },
   _msgForm(title, url, base, key, protoUrl) { const ta = el('textarea', { rows: 5, style: 'width:100%', html: '{}' }); const out = el('pre', { class: 'out' }); const btn = el('button', { class: 'act', onclick: async () => { out.textContent = '전송 중…'; const r = await post(url, { ...base, [key]: ta.value }); out.textContent = r.out; } }, '전송'); openModal(title, el('div', {}, el('div', { class: 'hint' }, key + ' (YAML/JSON)'), ta, el('div', { class: 'actbtns' }, btn), out)); if (protoUrl) api(protoUrl).then((r) => { if (r && r.yaml && ta.value.trim() === '{}') ta.value = r.yaml; }).catch(() => {}); },
   setparam(it) { const inp = el('input', { style: 'width:100%', value: '' }); const out = el('pre', { class: 'out' }); openModal('set param — ' + it.name, el('div', {}, inp, el('div', { class: 'actbtns' }, el('button', { class: 'act', onclick: async () => { const r = await post('/api/setparam1', { name: it.name, value: inp.value }); out.textContent = r.out; } }, '적용')), out)); },
   async params(it) {
-    const wrap = el('div', {}, '조회 중…'); openModal('⚙ params — ' + it.name, wrap);
+    const wrap = el('div', {}, spinner('파라미터 조회 중…')); openModal('⚙ params — ' + it.name, wrap);
     const r = await api('/api/param/list?node=' + encodeURIComponent(it.name)); wrap.innerHTML = '';
+    if (!r.rows || !r.rows.length) { wrap.append(emptyState('⚙', '파라미터 없음', it.name + ' 노드에 선언된 파라미터가 없습니다')); return; }
     const tbl = el('table', { class: 'tbl' }); tbl.append(el('tr', {}, el('th', {}, 'parameter'), el('th', {}, 'value'), el('th', {}, '')));
     for (const row of r.rows) { const val = el('input', { value: row.value, style: 'width:120px' }); const cell = el('td', {}, val);
       const setb = el('button', { class: 'act', onclick: async () => { const rr = await post('/api/param/set', { node: it.name, name: row.name, value: val.value }); val.value = rr.value; } }, 'set');
@@ -405,7 +422,7 @@ const Views = {
     const wrap = el('div', {}); openModal('📌 Baseline / 회귀', wrap, () => {});
     const clr = ['var(--red)', 'var(--yellow)', 'var(--dim)'], mark = ['●', '▲', 'ℹ'], SV = ['ERROR', 'WARN', 'INFO'];
     let base = null;
-    const save = async () => { await post('/api/baseline', { profile: { ...snapProfile(items), at: Date.now() } }); base = (await api('/api/baseline')).baseline; draw(); toast('📌 기준선 저장'); };
+    const save = async () => { await post('/api/baseline', { profile: { ...snapProfile(items), at: Date.now() } }); base = (await api('/api/baseline')).baseline; draw(); toast('기준선 저장됨', 'ok'); };
     const draw = () => { wrap.innerHTML = '';
       const bar = el('div', { class: 'actbtns', style: 'margin-bottom:8px' }, el('button', { class: 'act', onclick: save }, base ? '기준선 재저장(현재)' : '현재를 기준선으로 저장'));
       wrap.append(bar);
@@ -622,7 +639,7 @@ const Views = {
     // 새창(pop-out) — 이 플롯의 커브 설정을 popup.html 에 넘겨 독립 창에서 렌더(같은 SSE 재사용).
     function popOut(plot) {
       const curves = plot.curves.filter((c) => !c.custom).map((c) => ({ topic: c.topic, field: c.field, tf: c.tf, color: c.color }));
-      if (!curves.length) { toast('커브를 먼저 추가하세요'); return; }
+      if (!curves.length) { toast('커브를 먼저 추가하세요', 'warn'); return; }
       const cfg = encodeURIComponent(JSON.stringify({ curves, xy: !!plot.xy, fft: !!plot.fft, W: view.W }));
       window.open('/popup.html#' + cfg, '_blank', 'width=780,height=470');
     }
