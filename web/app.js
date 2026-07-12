@@ -467,15 +467,58 @@ const Views = {
     modalSub = { close: () => { if (cloudES) cloudES.close(); if (markerES) markerES.close(); if (tfES) tfES.close(); scene.dispose(); } };
   },
   image(it) {
-    // 🖼 카메라 — CompressedImage/Image 프레임을 base64 JPEG SSE 로 받아 표시.
+    // 🖼 카메라 — base64 JPEG SSE + 어노테이션(검출 박스/점/원/텍스트) + 보정(CameraInfo 주점·레티클) 오버레이.
+    //   Foxglove 이미지 패널 대응: 원본 이미지 픽셀 좌표계로 온 주석을 표시 크기에 맞춰 스케일 렌더.
     const topic = it ? it.name : (items.find((i) => /CompressedImage|sensor_msgs\/msg\/Image/.test(i.ty || '')) || {}).name;
     if (!topic) { openModal('🖼 카메라', el('p', { class: 'hint' }, '이미지 토픽이 없습니다.')); return; }
-    const img = el('img', { style: 'max-width:100%;display:block;background:#0d1116;border:1px solid var(--line);border-radius:6px;image-rendering:auto' });
+    const annTopics = items.filter((i) => /Detection2D(Array)?|ImageAnnotations/.test(i.ty || '')).map((i) => i.name);
+    const infoTopics = items.filter((i) => /CameraInfo/.test(i.ty || '')).map((i) => i.name);
+    const img = el('img', { style: 'display:block;max-width:100%;background:#0d1116;border:1px solid var(--line);border-radius:6px;image-rendering:auto' });
+    const ov = el('canvas', { style: 'position:absolute;left:0;top:0;pointer-events:none' });
+    const stage = el('div', { style: 'position:relative;display:inline-block;max-width:100%' }, img, ov);
     const info = el('div', { class: 'hint', style: 'margin-top:6px' }, '연결 중…'); let n = 0, t0 = Date.now();
-    openModal('🖼 카메라 — ' + topic, el('div', {}, img, info));
-    const es = new EventSource('/imgstream?topic=' + encodeURIComponent(topic)); modalSub = es;
-    es.onmessage = (e) => { if (!e.data) return; img.src = 'data:image/jpeg;base64,' + e.data; n++; const fps = n / ((Date.now() - t0) / 1000); info.textContent = `${n} 프레임 · ${fps.toFixed(1)} fps`; };
+    let ann = { boxes: [], points: [], circles: [], texts: [] }, cam = null;
+    let annES = null, camES = null;
+    // ── 오버레이 렌더: 이미지 원본 픽셀(iw×ih) → 표시 크기(cw×ch) 스케일 ──
+    function drawOverlay() {
+      const cw = img.clientWidth, ch = img.clientHeight; if (!cw || !ch) return;
+      if (ov.width !== cw) ov.width = cw; if (ov.height !== ch) ov.height = ch;
+      const iw = (cam && cam.width) || img.naturalWidth || cw, ih = (cam && cam.height) || img.naturalHeight || ch;
+      const kx = cw / iw, ky = ch / ih; const ctx = ov.getContext('2d'); ctx.clearRect(0, 0, cw, ch);
+      ctx.lineWidth = 2; ctx.font = '12px monospace'; ctx.textBaseline = 'bottom';
+      for (const b of ann.boxes) { const x = (b.cx - b.w / 2) * kx, y = (b.cy - b.h / 2) * ky, w = b.w * kx, h = b.h * ky;
+        ctx.strokeStyle = '#6fd08c'; ctx.strokeRect(x, y, w, h);
+        const tag = (b.label || 'obj') + (b.score ? ' ' + (b.score * 100 | 0) + '%' : '');
+        ctx.fillStyle = '#6fd08c'; const tw = ctx.measureText(tag).width + 6; ctx.fillRect(x, y - 15, tw, 15);
+        ctx.fillStyle = '#0d1116'; ctx.fillText(tag, x + 3, y - 2); }
+      for (const p of ann.points) { ctx.fillStyle = `rgb(${p[2]},${p[3]},${p[4]})`; ctx.beginPath(); ctx.arc(p[0] * kx, p[1] * ky, 3, 0, 7); ctx.fill(); }
+      for (const c of ann.circles) { ctx.strokeStyle = `rgb(${c.r},${c.g},${c.b})`; ctx.beginPath(); ctx.arc(c.x * kx, c.y * ky, c.d / 2 * kx, 0, 7); ctx.stroke(); }
+      ctx.fillStyle = '#e2c85a'; for (const t of ann.texts) ctx.fillText(t.t, t.x * kx, t.y * ky);
+      if (cam && cam.K && cam.K.length === 9) { // 보정: 주점(cx,cy) 십자 + 이미지 중심 대비
+        const px = cam.K[2] * kx, py = cam.K[5] * ky; ctx.strokeStyle = '#c78ad2'; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(px - 12, py); ctx.lineTo(px + 12, py); ctx.moveTo(px, py - 12); ctx.lineTo(px, py + 12); ctx.stroke();
+        ctx.fillStyle = '#c78ad2'; ctx.textBaseline = 'top'; ctx.fillText('principal', px + 6, py + 4); ctx.textBaseline = 'bottom'; }
+    }
+    const subAnn = (t) => { if (annES) { annES.close(); annES = null; } ann = { boxes: [], points: [], circles: [], texts: [] }; drawOverlay(); if (!t) return;
+      annES = new EventSource('/annstream?topic=' + encodeURIComponent(t));
+      annES.onmessage = (e) => { if (!e.data) return; try { const o = JSON.parse(e.data); ann = { boxes: o.boxes || [], points: o.points || [], circles: o.circles || [], texts: o.texts || [] }; drawOverlay(); } catch (_) { /* */ } }; };
+    const subCam = (t) => { if (camES) { camES.close(); camES = null; } cam = null; drawOverlay(); if (!t) return;
+      camES = new EventSource('/caminfostream?topic=' + encodeURIComponent(t));
+      camES.onmessage = (e) => { if (!e.data) return; try { cam = JSON.parse(e.data); drawOverlay(); camInfoLbl.textContent = cam.K ? `K: fx=${cam.K[0].toFixed(0)} fy=${cam.K[4].toFixed(0)} cx=${cam.K[2].toFixed(0)} cy=${cam.K[5].toFixed(0)} · ${cam.model || ''} D=[${(cam.D || []).map((d) => d.toFixed(3)).join(', ')}]` : ''; } catch (_) { /* */ } }; };
+    // ── 소스 선택 컨트롤 ──
+    const annSel = el('select', { style: 'font:11px monospace' }); annSel.append(el('option', { value: '' }, '(없음)')); annTopics.forEach((t) => annSel.append(el('option', { value: t }, t))); annSel.onchange = () => subAnn(annSel.value);
+    const camSel = el('select', { style: 'font:11px monospace' }); camSel.append(el('option', { value: '' }, '(없음)')); infoTopics.forEach((t) => camSel.append(el('option', { value: t }, t))); camSel.onchange = () => subCam(camSel.value);
+    const lbl = (t, node) => el('label', { style: 'display:inline-flex;align-items:center;gap:3px;margin-right:12px' }, el('span', { class: 'hint' }, t), node);
+    const camInfoLbl = el('div', { class: 'hint', style: 'margin-top:4px;color:var(--purple,#c78ad2)' });
+    const ctrl = el('div', { style: 'display:flex;flex-wrap:wrap;margin-bottom:6px' }, lbl('어노테이션', annSel), lbl('CameraInfo', camSel));
+    openModal('🖼 카메라 — ' + topic, el('div', {}, ctrl, stage, info, camInfoLbl));
+    const es = new EventSource('/imgstream?topic=' + encodeURIComponent(topic));
+    es.onmessage = (e) => { if (!e.data) return; img.src = 'data:image/jpeg;base64,' + e.data; n++; const fps = n / ((Date.now() - t0) / 1000); info.textContent = `${n} 프레임 · ${fps.toFixed(1)} fps`; drawOverlay(); };
     es.onerror = () => { info.textContent = '스트림 오류 — image_transport/토픽 확인'; };
+    img.onload = drawOverlay;
+    if (annTopics[0]) { annSel.value = annTopics[0]; subAnn(annTopics[0]); }
+    if (infoTopics[0]) { camSel.value = infoTopics[0]; subCam(infoTopics[0]); }
+    modalSub = { close: () => { es.close(); if (annES) annES.close(); if (camES) camES.close(); } };
   },
   map(it) {
     // 🗺 GPS 지도 — NavSatFix lat/lon 궤적을 캔버스에 플롯(외부 타일 없이, 오프라인/CSP 안전).

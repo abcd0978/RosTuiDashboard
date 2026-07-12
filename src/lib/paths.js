@@ -12,5 +12,7 @@ export const BAG_DUMP = join(ROOT, 'bag_dump.py');         // rosbag2 → 숫자
 export const ECHO_MUX = join(ROOT, 'ros_echo_mux.py');     // 단일 rclpy 노드 echo 멀티플렉서(프로세스 폭증 해결)
 export const MARKER_BRIDGE = join(ROOT, 'marker_bridge.py'); // visualization_msgs/Marker(Array) → JSON 스트림 (3D 씬)
 export const TF_DUMP = join(ROOT, 'tf_dump.py');           // /tf → 루트 기준 프레임 변환 JSON 스트림 (3D 씬)
+export const IMG_ANN_BRIDGE = join(ROOT, 'img_ann_bridge.py'); // 검출/주석 → JSON (이미지 오버레이)
+export const CAMINFO_BRIDGE = join(ROOT, 'caminfo_bridge.py'); // CameraInfo → 보정 파라미터 JSON (이미지 오버레이)
 export const TELEM = readFileSync(join(ROOT, 'telemetry.py'), 'utf8');
 export const TELEM2 = readFileSync(join(ROOT, 'telemetry_ros2.py'), 'utf8');
