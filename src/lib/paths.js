@@ -16,5 +16,6 @@ export const IMG_ANN_BRIDGE = join(ROOT, 'img_ann_bridge.py'); // 검출/주석 
 export const CAMINFO_BRIDGE = join(ROOT, 'caminfo_bridge.py'); // CameraInfo → 보정 파라미터 JSON (이미지 오버레이)
 export const GEOM_BRIDGE = join(ROOT, 'geom_bridge.py');   // LaserScan/Path/Odometry/Pose*/OccupancyGrid → 마커 JSON (3D 씬)
 export const URDF_BRIDGE = join(ROOT, 'urdf_bridge.py');   // robot_description(URDF) → 링크 비주얼 마커(TRIANGLE_LIST 메시) (3D 씬)
+export const IM_BRIDGE = join(ROOT, 'im_bridge.py');       // InteractiveMarker(6-DOF) ↔ 피드백(양방향) JSON (3D 씬)
 export const TELEM = readFileSync(join(ROOT, 'telemetry.py'), 'utf8');
 export const TELEM2 = readFileSync(join(ROOT, 'telemetry_ros2.py'), 'utf8');

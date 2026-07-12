@@ -251,8 +251,9 @@ wss.on('connection', (ws) => {
   const subs = new Map();   // id → off()
   ws.on('message', (raw) => { let m; try { m = JSON.parse(raw.toString()); } catch { return; }
     if (m.op === 'sub') { if (subs.has(m.id)) return; subs.set(m.id, wsStart(ws, m)); }
-    else if (m.op === 'unsub') { const off = subs.get(m.id); if (off) { off(); subs.delete(m.id); } } });
-  ws.on('close', () => { for (const off of subs.values()) { try { off(); } catch { /* */ } } subs.clear(); });
+    else if (m.op === 'unsub') { const s = subs.get(m.id); if (s) { s.off(); subs.delete(m.id); } }
+    else if (m.op === 'feed') { const s = subs.get(m.id); if (s && s.feed) s.feed(m.data); } });   // 브라우저→브리지 stdin(인터랙티브 마커 피드백)
+  ws.on('close', () => { for (const s of subs.values()) { try { s.off(); } catch { /* */ } } subs.clear(); });
 });
 // 스트림 id 를 시작하고 정리 콜백을 돌려준다. SSE 라우트와 같은 백엔드 커맨드/헬퍼 재사용.
 function wsStart(ws, m) {
@@ -270,12 +271,16 @@ function wsStart(ws, m) {
     annstream: () => t && (child = pipeLines(be.imgAnnBridge(t), txt)),
     caminfostream: () => t && (child = pipeLines(be.camInfoBridge(t), txt)),
     imgstream: () => t && (child = pipeLines(be.imgBridge(t), txt)),
+    imstream: () => t && (child = pipeLines(be.imBridge(t), txt)),   // 인터랙티브 마커(양방향: feed→stdin)
     cloudstream: () => t && (child = pipeCloud(be.cloudBridge(t), bin)),
   };
   if (stream === 'events') { if (be.kind === 'rosbridge') off = rbTelemetryCore(txt); else child = pipeLines('python3 -', txt, telemScript()); }
   else if (stream === 'echo') { if (t) { if (be.kind === 'rosbridge') off = rbEchoOff(t, txt); else if (be.usesMux) off = muxAdd(t, txt); else child = pipeBlocks(be.echo(t), txt); } }
   else if (map[stream]) map[stream]();
-  return () => { if (child) { try { child.kill(); } catch { /* */ } } if (off) { try { off(); } catch { /* */ } } };
+  return {
+    off: () => { if (child) { try { child.kill(); } catch { /* */ } } if (off) { try { off(); } catch { /* */ } } },
+    feed: (data) => { if (child && child.stdin && child.stdin.writable) { try { child.stdin.write(JSON.stringify(data) + '\n'); } catch { /* */ } } },
+  };
 }
 
 // 종료 시 잡 정리

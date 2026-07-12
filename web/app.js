@@ -27,7 +27,7 @@ function openStream(path, onData) {
   const qi = path.indexOf('?'); const stream = (qi < 0 ? path : path.slice(0, qi)).replace(/^\//, '');
   const params = qi < 0 ? {} : Object.fromEntries(new URLSearchParams(path.slice(qi + 1)));
   const id = WS.seq++; WS.subs.set(id, { id, stream, params, onData }); wsSend({ op: 'sub', id, stream, params });
-  return { close() { if (WS.subs.delete(id)) wsSend({ op: 'unsub', id }); } };
+  return { close() { if (WS.subs.delete(id)) wsSend({ op: 'unsub', id }); }, feed(data) { wsSend({ op: 'feed', id, data }); } };   // feed: 브리지 stdin(양방향)
 }
 wsConnect();
 const emptyState = (ic, msg, sub) => el('div', { class: 'empty' }, el('div', { class: 'ic' }, ic), el('div', { class: 'msg' }, msg), sub ? el('div', { class: 'sub hint' }, sub) : document.createTextNode(''));
@@ -315,7 +315,7 @@ function inv16(m) { const o = new Array(16);
   for (let i = 0; i < 16; i++) o[i] *= det; return o; }
 function mkScene(cv, labelDiv, info) {
   const gl = cv.getContext('webgl', { antialias: true, alpha: false, preserveDrawingBuffer: SNAP }) || cv.getContext('experimental-webgl');
-  if (!gl) { info.textContent = 'WebGL 미지원 브라우저'; return { setCloud() {}, setMarkers() {}, setCloudById() {}, setMarkersById() {}, setVisible() {}, removeDisplay() {}, setTF() {}, opts() {}, view() {}, setPointSize() {}, setPickHandler() {}, setCamImage() {}, setCamOpts() {}, clearCamera() {}, getStats() { return { fps: 0, points: 0, drawn: 0 }; }, dispose() {} }; }
+  if (!gl) { info.textContent = 'WebGL 미지원 브라우저'; return { setCloud() {}, setMarkers() {}, setCloudById() {}, setMarkersById() {}, setVisible() {}, removeDisplay() {}, setTF() {}, opts() {}, view() {}, setPointSize() {}, setPickHandler() {}, setCamImage() {}, setCamOpts() {}, clearCamera() {}, setInteractiveMarkers() {}, setImHandler() {}, getStats() { return { fps: 0, points: 0, drawn: 0 }; }, dispose() {} }; }
   const VS = 'attribute vec3 p; attribute vec4 col; uniform mat4 mvp; uniform float psize; varying vec4 vc; void main(){ gl_Position = mvp*vec4(p,1.0); gl_PointSize = psize; vc = col; }';
   const FS = 'precision mediump float; varying vec4 vc; uniform float round; void main(){ if(round>0.5){ vec2 d=gl_PointCoord-0.5; if(dot(d,d)>0.25) discard; } gl_FragColor = vc; }';
   // 클라우드 전용 셰이더 — xyz 만 올리고 높이색을 GPU(FS)에서 계산: 점당 JS 색 루프 제거 + 버퍼 절반(3f vs 7f).
@@ -367,6 +367,8 @@ function mkScene(cv, labelDiv, info) {
   const labelPool = [];          // 라벨 span 재사용(프레임마다 DOM 재생성 방지)
   const clouds = new Map();      // 디스플레이 id → {data:Float32Array(xyz), visible} — 여러 클라우드 동시 렌더
   const markerSets = new Map();  // 디스플레이 id → {markers:[], visible}
+  const ims = new Map();         // 인터랙티브 마커 name → {frame_id, pose, scale, visual[], handles[], visible}
+  let imDrag = null, imHandler = null, imFeedT = 0;   // 6-DOF 드래그 상태 · 피드백 콜백 · 스로틀
   let fps = 0, lastDrawn = 0, frameN = 0, fpsClock = (typeof performance !== 'undefined' ? performance.now() : 0);
   const gcd = (a, b) => { while (b) { const t = b; b = a % b; a = t; } return a; };
   // prefix 가 공간적으로 대표성 있도록 큰 서로소 곱 순열(거리 LOD 로 앞쪽 N개만 그려도 골고루).
@@ -399,6 +401,39 @@ function mkScene(cv, labelDiv, info) {
     for (let i = 0; i < seg; i++) { const a0 = i / seg * 2 * Math.PI, a1 = (i + 1) / seg * 2 * Math.PI; tri(A, po, C(a0, -hz), C(a1, -hz), C(a1, hz), col); tri(A, po, C(a0, -hz), C(a1, hz), C(a0, hz), col); tri(A, po, [0, 0, hz], C(a0, hz), C(a1, hz), col); tri(A, po, [0, 0, -hz], C(a1, -hz), C(a0, -hz), col); } }
   function arrow(A, po, s, col, seg) { seg = seg || 12; const L = s[0] || 1, rs = (s[1] || 0.1) / 2, rh = (s[2] || 0.2) / 2, sl = L * 0.72; const C = (a, x, r) => [x, r * Math.cos(a), r * Math.sin(a)];
     for (let i = 0; i < seg; i++) { const a0 = i / seg * 2 * Math.PI, a1 = (i + 1) / seg * 2 * Math.PI; tri(A, po, C(a0, 0, rs), C(a1, 0, rs), C(a1, sl, rs), col); tri(A, po, C(a0, 0, rs), C(a1, sl, rs), C(a0, sl, rs), col); tri(A, po, [L, 0, 0], C(a0, sl, rh), C(a1, sl, rh), col); } }
+  // ── 6-DOF 인터랙티브 마커 — 프레임/월드 변환, 화면투영, 레이, 축/링 드래그 수학 ──
+  const v3 = { sub: (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]], add: (a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]], dot: (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2],
+    scale: (a, s) => [a[0] * s, a[1] * s, a[2] * s], cross: (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]], norm: (a) => { const l = Math.hypot(a[0], a[1], a[2]) || 1; return [a[0] / l, a[1] / l, a[2] / l]; } };
+  const qconj = (q) => [-q[0], -q[1], -q[2], q[3]];
+  const frameW = (fid) => { let q = [0, 0, 0, 1], p = [0, 0, 0]; const fr = fid && frameMap[fid]; if (fr) { q = fr.q; p = fr.p; } const g = computeG(); if (g) { q = qmul(g.q, q); p = applyG(g, p); } return { q, p }; };
+  const imWorld = (im) => { const W = frameW(im.frame_id), lp = im.pose.p, lq = im.pose.q, wp = qrot(W.q, lp); return { q: qmul(W.q, lq), p: [wp[0] + W.p[0], wp[1] + W.p[1], wp[2] + W.p[2]] }; };
+  const imLocal = (im, wq, wp) => { const W = frameW(im.frame_id), cq = qconj(W.q); return { q: qmul(cq, wq), p: qrot(cq, [wp[0] - W.p[0], wp[1] - W.p[1], wp[2] - W.p[2]]) }; };
+  const screenOf = (w) => { const m = mvpMat(), x = w[0], y = w[1], z = w[2], cw = m[3] * x + m[7] * y + m[11] * z + m[15]; if (cw <= 1e-6) return null; return [((m[0] * x + m[4] * y + m[8] * z + m[12]) / cw * 0.5 + 0.5) * cv.clientWidth, (-(m[1] * x + m[5] * y + m[9] * z + m[13]) / cw * 0.5 + 0.5) * cv.clientHeight]; };
+  const screenRay = (cx, cy) => { const rect = cv.getBoundingClientRect(), nx = (cx - rect.left) / cv.clientWidth * 2 - 1, ny = -((cy - rect.top) / cv.clientHeight * 2 - 1), inv = inv16(mvpMat()); if (!inv) return null;
+    const un = (zz) => { const w = inv[3] * nx + inv[7] * ny + inv[11] * zz + inv[15]; return [(inv[0] * nx + inv[4] * ny + inv[8] * zz + inv[12]) / w, (inv[1] * nx + inv[5] * ny + inv[9] * zz + inv[13]) / w, (inv[2] * nx + inv[6] * ny + inv[10] * zz + inv[14]) / w]; }; const a = un(-1), b = un(1); return { o: a, d: v3.sub(b, a) }; };
+  const segDist = (px, py, ax, ay, bx, by) => { const dx = bx - ax, dy = by - ay, l2 = dx * dx + dy * dy; let t = l2 ? ((px - ax) * dx + (py - ay) * dy) / l2 : 0; t = Math.max(0, Math.min(1, t)); return Math.hypot(px - (ax + t * dx), py - (ay + t * dy)); };
+  const axisColor = (ax) => { const a = [Math.abs(ax[0]), Math.abs(ax[1]), Math.abs(ax[2])]; if (a[0] >= a[1] && a[0] >= a[2]) return [0.95, 0.4, 0.4, 1]; if (a[1] >= a[2]) return [0.45, 0.9, 0.5, 1]; return [0.45, 0.6, 1, 1]; };
+  const ringBasis = (N) => { const e1 = v3.norm(Math.abs(N[2]) < 0.9 ? v3.cross(N, [0, 0, 1]) : v3.cross(N, [1, 0, 0])); return [e1, v3.cross(N, e1)]; };
+  // 레이(O,D)에 가장 가까운 축선(P0+A t)의 파라미터 t — 축 이동 드래그.
+  const axisParam = (P0, A, O, D) => { const w0 = v3.sub(P0, O), a = v3.dot(A, A), b = v3.dot(A, D), c = v3.dot(D, D), d = v3.dot(A, w0), e = v3.dot(D, w0), den = a * c - b * b; return Math.abs(den) < 1e-9 ? d / a : (b * e - c * d) / den; };
+  // 중심 C, 법선 N 평면에 레이 투영 → 링 위 각도(회전 드래그).
+  const ringAngle = (C, N, ray) => { const dn = v3.dot(N, ray.d); if (Math.abs(dn) < 1e-9) return 0; const u = v3.dot(N, v3.sub(C, ray.o)) / dn, hit = v3.add(ray.o, v3.scale(ray.d, u)), vec = v3.sub(hit, C), be = ringBasis(N); return Math.atan2(v3.dot(vec, be[1]), v3.dot(vec, be[0])); };
+  function pickIm(cx, cy) { let best = null, bestD = 14;   // (cx,cy: 캔버스 상대) 화면상 핸들 최근접 히트테스트
+    for (const im of ims.values()) { if (!im.visible || !(im.handles && im.handles.length)) continue; const w = imWorld(im), s = (im.scale || 1) * 0.9;
+      for (const h of im.handles) { const ax = v3.norm(qrot(w.q, h.axis));
+        if (h.mode === 'move') { const a = screenOf(v3.add(w.p, v3.scale(ax, s))), b = screenOf(v3.sub(w.p, v3.scale(ax, s))); if (!a || !b) continue; const dd = segDist(cx, cy, a[0], a[1], b[0], b[1]); if (dd < bestD) { bestD = dd; best = { im, h }; } }
+        else { const bs = ringBasis(ax), R = s * 0.85; let md = 1e9; for (let i = 0; i < 28; i++) { const t = i / 28 * 2 * Math.PI, pnt = screenOf(v3.add(w.p, v3.add(v3.scale(bs[0], R * Math.cos(t)), v3.scale(bs[1], R * Math.sin(t))))); if (pnt) { const q = Math.hypot(cx - pnt[0], cy - pnt[1]); if (q < md) md = q; } } if (md < bestD) { bestD = md; best = { im, h }; } } } }
+    return best; }
+  function startImDrag(hit, e) { const w = imWorld(hit.im), axW = v3.norm(qrot(w.q, hit.h.axis)), ray = screenRay(e.clientX, e.clientY);
+    const st = { im: hit.im, h: hit.h, axW, startWorld: { q: w.q.slice(), p: w.p.slice() } };
+    if (hit.h.mode === 'move') st.t0 = ray ? axisParam(w.p, axW, ray.o, ray.d) : 0; else st.ang0 = ray ? ringAngle(w.p, axW, ray) : 0;
+    if (imHandler) imHandler(hit.im.name, hit.im.pose, 'mouse_down', hit.h.name); return st; }
+  function updateImDrag(e) { const st = imDrag, ray = screenRay(e.clientX, e.clientY); if (!ray) return; let wp = st.startWorld.p, wq = st.startWorld.q;
+    if (st.h.mode === 'move') { const t = axisParam(st.startWorld.p, st.axW, ray.o, ray.d); wp = v3.add(st.startWorld.p, v3.scale(st.axW, t - st.t0)); }
+    else { const dA = ringAngle(st.startWorld.p, st.axW, ray) - st.ang0, hh = dA / 2, sn = Math.sin(hh); wq = qmul([st.axW[0] * sn, st.axW[1] * sn, st.axW[2] * sn, Math.cos(hh)], st.startWorld.q); }
+    st.im.pose = imLocal(st.im, wq, wp); rebuildScene();
+    const now = (typeof performance !== 'undefined' ? performance.now() : 0); if (imHandler && now - imFeedT > 40) { imFeedT = now; imHandler(st.im.name, st.im.pose, 'pose_update', st.h.name); } }
+  function finishImDrag() { if (imDrag && imHandler) imHandler(imDrag.im.name, imDrag.im.pose, 'mouse_up', imDrag.h.name); }
   // 씬 지오메트리(그리드·좌표축·TF·마커)만 재구성 — 마커/TF/opts 변경 시에만 호출(클라우드와 분리).
   function rebuildScene() {
     const L = [], T = [], TA = [], Pc = []; labels = [];
@@ -424,6 +459,20 @@ function mkScene(cv, labelDiv, info) {
       else if (m.type === 8) pts.forEach((q, i) => put(Pc, xf(po, q), (m.colors[i] || col)));
       else if (m.type === 11) { for (let i = 0; i + 2 < pts.length; i += 3) tri(A, po, pts[i], pts[i + 1], pts[i + 2], (m.colors[i / 3 | 0] || col)); }
       else if (m.type === 9) labels.push({ p: po.p, t: m.text, c: `rgb(${col[0] * 255 | 0},${col[1] * 255 | 0},${col[2] * 255 | 0})` }); } }
+    // ── 인터랙티브 마커 — 비주얼 지오메트리 + 6-DOF 기즈모(이동 화살표선 · 회전 링) ──
+    for (const im of ims.values()) { if (!im.visible) continue; const w = imWorld(im), base = { q: w.q, p: w.p }, O0 = { q: [0, 0, 0, 1], p: [0, 0, 0] };
+      for (const m of (im.visual || [])) { const po = { q: qmul(w.q, (m.pose && m.pose.q) || [0, 0, 0, 1]), p: xf(base, (m.pose && m.pose.p) || [0, 0, 0]) };
+        const col = m.color && m.color.length === 4 ? m.color : [0.5, 0.7, 0.9, 1]; const A = col[3] < 0.99 ? TA : T; const s = m.scale || [1, 1, 1], pts = m.points || [];
+        if (m.type === 1) box(A, po, s, col); else if (m.type === 2) sphere(A, po, s, col); else if (m.type === 3) cyl(A, po, s, col); else if (m.type === 0) arrow(A, po, s, col);
+        else if (m.type === 4) { for (let i = 0; i + 1 < pts.length; i++) line(L, po, pts[i], pts[i + 1], col); }
+        else if (m.type === 5) { for (let i = 0; i + 1 < pts.length; i += 2) line(L, po, pts[i], pts[i + 1], col); }
+        else if (m.type === 11) { for (let i = 0; i + 2 < pts.length; i += 3) tri(A, po, pts[i], pts[i + 1], pts[i + 2], col); }
+        else if (m.type === 8) pts.forEach((qp) => put(Pc, xf(po, qp), col)); }
+      const s = (im.scale || 1) * 0.9;
+      for (const h of (im.handles || [])) { const ax = v3.norm(qrot(w.q, h.axis)); const hot = imDrag && imDrag.im === im && imDrag.h === h; const c = hot ? [1, 0.9, 0.3, 1] : axisColor(h.axis);
+        if (h.mode === 'move') { line(L, O0, v3.add(w.p, v3.scale(ax, s)), v3.sub(w.p, v3.scale(ax, s)), c); box(T, { q: w.q, p: v3.add(w.p, v3.scale(ax, s)) }, [s * 0.09, s * 0.09, s * 0.09], c); }
+        else { const bs = ringBasis(ax), R = s * 0.85; let prev = null; for (let i = 0; i <= 40; i++) { const t = i / 40 * 2 * Math.PI, pnt = v3.add(w.p, v3.add(v3.scale(bs[0], R * Math.cos(t)), v3.scale(bs[1], R * Math.sin(t)))); if (prev) line(L, O0, prev, pnt, c); prev = pnt; } } }
+      labels.push({ p: [w.p[0], w.p[1], w.p[2] + s * 1.15], t: im.name, c: '#c8d2df' }); }
     upload('line', new Float32Array(L)); upload('tri', new Float32Array(T)); upload('triA', new Float32Array(TA));
     upload('pts', new Float32Array(Pc));   // 마커 POINTS(항상 그림, 소량)
   }
@@ -474,9 +523,11 @@ function mkScene(cv, labelDiv, info) {
       // 적응형 LOD — FPS 가 목표보다 낮으면 거리 임계(lodDist)를 낮춰 먼 점을 더 솎고, 여유 있으면 높여 디테일 복원.
       if (opt.lodMode === 'adaptive' && cloudN) { if (fps < opt.targetFps - 5) opt.lodDist = Math.max(3, opt.lodDist * 0.85); else if (fps > opt.targetFps + 8) opt.lodDist = Math.min(200, opt.lodDist * 1.12); } } }
   let drag = null, btn = 0, pickHandler = null;
-  cv.addEventListener('mousedown', (e) => { if (pickHandler && e.button === 0) { const w = pickGround(e.clientX, e.clientY); if (w) { pickHandler(w, e); e.preventDefault(); return; } } drag = { x: e.clientX, y: e.clientY }; btn = e.button; cv.style.cursor = 'grabbing'; e.preventDefault(); });
-  window.addEventListener('mouseup', () => { drag = null; cv.style.cursor = 'grab'; });
-  cv.addEventListener('mousemove', (e) => { if (!drag) return; const dx = e.clientX - drag.x, dy = e.clientY - drag.y; drag = { x: e.clientX, y: e.clientY }; if (btn === 2) { pan[0] += dx * dist * 0.002; pan[1] -= dy * dist * 0.002; } else { yaw += dx * 0.01; pitch = Math.max(-1.55, Math.min(1.55, pitch + dy * 0.01)); } });
+  cv.addEventListener('mousedown', (e) => { if (pickHandler && e.button === 0) { const w = pickGround(e.clientX, e.clientY); if (w) { pickHandler(w, e); e.preventDefault(); return; } }
+    if (e.button === 0 && ims.size) { const rect = cv.getBoundingClientRect(); const hit = pickIm(e.clientX - rect.left, e.clientY - rect.top); if (hit) { imDrag = startImDrag(hit, e); rebuildScene(); cv.style.cursor = 'grabbing'; e.preventDefault(); return; } }
+    drag = { x: e.clientX, y: e.clientY }; btn = e.button; cv.style.cursor = 'grabbing'; e.preventDefault(); });
+  window.addEventListener('mouseup', () => { if (imDrag) { finishImDrag(); imDrag = null; rebuildScene(); } drag = null; cv.style.cursor = 'grab'; });
+  cv.addEventListener('mousemove', (e) => { if (imDrag) { updateImDrag(e); return; } if (!drag) return; const dx = e.clientX - drag.x, dy = e.clientY - drag.y; drag = { x: e.clientX, y: e.clientY }; if (btn === 2) { pan[0] += dx * dist * 0.002; pan[1] -= dy * dist * 0.002; } else { yaw += dx * 0.01; pitch = Math.max(-1.55, Math.min(1.55, pitch + dy * 0.01)); } });
   cv.addEventListener('wheel', (e) => { e.preventDefault(); dist *= e.deltaY < 0 ? 0.9 : 1.1; }, { passive: false });
   cv.addEventListener('contextmenu', (e) => e.preventDefault());
   rebuildScene();   // 그리드·좌표축을 데이터 도착 전에도 표시
@@ -500,6 +551,8 @@ function mkScene(cv, labelDiv, info) {
       gl.bindTexture(gl.TEXTURE_2D, camTex); try { gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, imgEl); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE); camState.ready = true; } catch (_) { /* */ } },
     setCamOpts(o) { Object.assign(camState, o); },
     clearCamera() { camState.on = false; camState.ready = false; },
+    setInteractiveMarkers(list) { ims.clear(); for (const im of (list || [])) if (im && im.name) ims.set(im.name, { ...im, visible: true }); rebuildScene(); },
+    setImHandler(fn) { imHandler = fn; },
     getStats() { return { fps, points: cloudN, drawn: lastDrawn, lodDist: opt.lodDist, lodMode: opt.lodMode }; },
     dispose() { alive = false; cancelAnimationFrame(raf); if (labelDiv) labelDiv.innerHTML = ''; try { for (const k in bufs) gl.deleteBuffer(bufs[k]); gl.deleteBuffer(cloudBuf); gl.deleteProgram(prog); gl.deleteProgram(cprog); } catch (_) { /* */ } },
   };
@@ -599,6 +652,7 @@ const Views = {
     const geomTopics = () => items.filter((i) => GEOMRE.test(i.ty || '')).map((i) => [i.name, i.ty || '']);
     const imgTopics = () => items.filter((i) => /CompressedImage|sensor_msgs\/(msg\/)?Image/.test(i.ty || '')).map((i) => i.name);
     const camInfoTopics = () => items.filter((i) => /CameraInfo/.test(i.ty || '')).map((i) => i.name);
+    const imTopics = () => items.filter((i) => /InteractiveMarkerUpdate/.test(i.ty || '')).map((i) => i.name.replace(/\/update$/, ''));
     const camImgEl = new Image(); let camImgES = null, camInfES = null, camObj = null;
     const subCamImg = (t) => { if (camImgES) { camImgES.close(); camImgES = null; } if (!t) { scene.clearCamera(); return; } camImgES = openStream('/imgstream?topic=' + encodeURIComponent(t), (d) => { if (!d) return; camImgEl.onload = () => { if (camObj) scene.setCamImage(camImgEl, camObj, camObj.frame_id); }; camImgEl.src = 'data:image/jpeg;base64,' + d; }); };
     const subCamInf = (t) => { if (camInfES) { camInfES.close(); camInfES = null; } if (!t) return; camInfES = openStream('/caminfostream?topic=' + encodeURIComponent(t), (d) => { try { camObj = JSON.parse(d); } catch (_) { /* */ } }); };
@@ -606,16 +660,18 @@ const Views = {
     const labelDiv = el('div', { style: 'position:absolute;inset:0;pointer-events:none;overflow:hidden' });
     const fpsOv = el('div', { style: 'position:absolute;left:8px;top:8px;font:11px monospace;color:#9aa7b8;background:rgba(13,17,22,.6);padding:2px 7px;border-radius:4px;pointer-events:none' });
     const stage = el('div', { style: 'position:relative;flex:1;min-width:0' }, cv, labelDiv, fpsOv);
-    const info = el('div', { class: 'hint', style: 'margin-top:4px' }, '드래그=회전 · 휠=줌 · 우클릭드래그=이동');
+    const info = el('div', { class: 'hint', style: 'margin-top:4px' }, '드래그=회전 · 휠=줌 · 우클릭드래그=이동 · 기즈모 드래그=마커 이동/회전');
     const scene = mkScene(cv, labelDiv, info);
     const displays = new Map();   // id → {id,kind,topic,es,on}
     const idOf = (kind, topic) => kind + ':' + topic;
     let cloudMode = 'xyz', colorSel = null, frameIds = [], lastFrameIds = '';   // 클라우드 채널 + TF 프레임 목록(카메라 옵션용)
     const subscribe = (d) => { if (d.kind === 'cloud') { d.es = openStream('/cloudstream?topic=' + encodeURIComponent(d.topic), (data) => { const r = decodeCloud(data); if (!r) return; cloudMode = r.mode; if (colorSel && colorSel.value === 'auto') applyAutoColor(); scene.setCloudById(d.id, r.arr); }); }
       else if (d.kind === 'geom') { d.es = openStream('/geomstream?topic=' + encodeURIComponent(d.topic) + '&type=' + encodeURIComponent(d.ty || ''), (data) => { try { const o = JSON.parse(data); scene.setMarkersById(d.id, o.markers || []); } catch (_) { /* */ } }); }
+      else if (d.kind === 'im') { d.es = openStream('/imstream?topic=' + encodeURIComponent(d.topic), (data) => { try { const o = JSON.parse(data); scene.setInteractiveMarkers(o.ims || []); } catch (_) { /* */ } });
+        scene.setImHandler((name, pose, event, control) => { if (d.es) d.es.feed({ name, pose, event, control }); }); }   // 기즈모 드래그 → <topic>/feedback 발행
       else { d.es = openStream('/markerstream?topic=' + encodeURIComponent(d.topic), (data) => { try { const o = JSON.parse(data); scene.setMarkersById(d.id, o.markers || (Array.isArray(o) ? o : [o])); } catch (_) { /* */ } }); } };
     const applyAutoColor = () => scene.opts({ colorMode: cloudMode === 'rgb' ? 2 : cloudMode === 'intensity' ? 1 : 0 });
-    const unsubscribe = (d) => { if (d.es) { d.es.close(); d.es = null; } if (d.kind === 'cloud') scene.setCloudById(d.id, null); else scene.setMarkersById(d.id, []); };
+    const unsubscribe = (d) => { if (d.es) { d.es.close(); d.es = null; } if (d.kind === 'cloud') scene.setCloudById(d.id, null); else if (d.kind === 'im') { scene.setInteractiveMarkers([]); scene.setImHandler(null); } else scene.setMarkersById(d.id, []); };
     const addDisplay = (kind, topic, ty) => { const id = idOf(kind, topic); if (displays.has(id)) return; const d = { id, kind, topic, ty, on: true }; displays.set(id, d); subscribe(d); renderList(); };
     const toggle = (d) => { d.on = !d.on; if (d.on) subscribe(d); else unsubscribe(d); renderList(); };
     const removeD = (d) => { unsubscribe(d); scene.removeDisplay(d.kind, d.id); displays.delete(d.id); renderList(); };
@@ -630,11 +686,11 @@ const Views = {
       listBox.append(chk('Grid', 'grid', (v) => scene.opts({ grid: v })), chk('Axes', 'axes', (v) => scene.opts({ axes: v })), chk('TF', 'tf', (v) => subTF(v)), chk('RobotModel (URDF)', 'robot', (v) => subRobot(v)));
       listBox.append(el('div', { class: 'hint', style: 'margin:6px 0 2px;text-transform:uppercase;letter-spacing:.05em' }, '디스플레이'));
       if (!displays.size) listBox.append(el('div', { class: 'hint', style: 'padding:2px 4px' }, '아래에서 토픽 추가'));
-      const ICON = { cloud: '🌩 ', marker: '📐 ', geom: '🧭 ' };
+      const ICON = { cloud: '🌩 ', marker: '📐 ', geom: '🧭 ', im: '🎯 ' };
       for (const d of displays.values()) { const c = el('input', { type: 'checkbox' }); c.checked = d.on; c.onchange = () => toggle(d);
         const rm = el('span', { style: 'cursor:pointer;color:var(--dim)', title: '제거', onclick: () => removeD(d) }, '✕');
         listBox.append(el('label', { style: DR }, c, el('span', { style: 'flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap', title: d.topic }, (ICON[d.kind] || '') + d.topic), rm)); }
-      const avail = [...cloudTopics().map((t) => ['cloud', t, '']), ...markerTopics().map((t) => ['marker', t, '']), ...geomTopics().map(([t, ty]) => ['geom', t, ty])].filter(([k, t]) => !displays.has(idOf(k, t)));
+      const avail = [...cloudTopics().map((t) => ['cloud', t, '']), ...markerTopics().map((t) => ['marker', t, '']), ...geomTopics().map(([t, ty]) => ['geom', t, ty]), ...imTopics().map((t) => ['im', t, ''])].filter(([k, t]) => !displays.has(idOf(k, t)));
       const addSel = el('select', { style: 'width:100%;margin-top:5px;font:11px monospace' }); addSel.append(el('option', { value: '' }, '＋ 토픽 추가…'));
       avail.forEach(([k, t]) => addSel.append(el('option', { value: k + '\0' + t }, (ICON[k] || '') + t)));
       addSel.onchange = () => { if (!addSel.value) return; const [k, t] = addSel.value.split('\0'); const ty = (geomTopics().find(([n]) => n === t) || [])[1] || ''; addDisplay(k, t, ty); };

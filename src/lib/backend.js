@@ -3,7 +3,7 @@
 //       UI 를 안 고치고 데이터 소스를 바꿀 수 있다. (리뷰 제안: UI ↓ RosBackend ├CliBackend ├RclNode ├Rosbridge)
 // 현행 CliBackend 는 기존 commands.js/ros.js 빌더를 감싸는 파사드 — 셸 명령 문자열을 만든다(spawn 은 호출측).
 import { echoFullCmd, actionFor, restartFor, protoCmd } from './ros.js';
-import { TELEM, TELEM2, IMG_BRIDGE, CLOUD_BRIDGE, BAG_DUMP, ECHO_MUX, MARKER_BRIDGE, TF_DUMP, IMG_ANN_BRIDGE, CAMINFO_BRIDGE, GEOM_BRIDGE, URDF_BRIDGE } from './paths.js';
+import { TELEM, TELEM2, IMG_BRIDGE, CLOUD_BRIDGE, BAG_DUMP, ECHO_MUX, MARKER_BRIDGE, TF_DUMP, IMG_ANN_BRIDGE, CAMINFO_BRIDGE, GEOM_BRIDGE, URDF_BRIDGE, IM_BRIDGE } from './paths.js';
 import {
   connectionsCmd, resourceCmd, tfTreeCmd, tfEchoCmd, bagRecordCmd, bagPlayCmd, bagCompareCmd,
   msgDefCmd, paramListCmd, paramGetCmd, paramSetCmd,
@@ -25,6 +25,7 @@ export class RosBackend {
   killNode() { return NI('killNode'); } restartNode() { return NI('restartNode'); } lifecycle() { return NI('lifecycle'); }
   actionGoal() { return NI('actionGoal'); } teleop() { return NI('teleop'); }
   imgBridge() { return NI('imgBridge'); } cloudBridge() { return NI('cloudBridge'); } bagDump() { return NI('bagDump'); }
+  imBridge() { return NI('imBridge'); }
 }
 
 // CliBackend — 현행 구현. ros2/rostopic CLI 명령 문자열 생성(ROS1/ROS2 자동 분기).
@@ -63,6 +64,7 @@ export class CliBackend extends RosBackend {
   camInfoBridge(topic) { return `python3 ${shq(process.env.RDASH_CAMINFO_BRIDGE || CAMINFO_BRIDGE)} ${shq(topic)} 2>/dev/null`; }
   geomBridge(topic, ty) { return `python3 ${shq(process.env.RDASH_GEOM_BRIDGE || GEOM_BRIDGE)} ${shq(topic)} ${shq(ty || '')} 2>/dev/null`; }
   urdfBridge() { return `python3 ${shq(process.env.RDASH_URDF_BRIDGE || URDF_BRIDGE)} ${shq(process.env.RDASH_URDF_FILE || 'topic')} 2>/dev/null`; }
+  imBridge(topic) { return `python3 ${shq(process.env.RDASH_IM_BRIDGE || IM_BRIDGE)} ${shq(topic)}`; }
   // echo 멀티플렉서 명령. CLI 백엔드는 기본적으로 안 씀(usesMux=false)지만, RDASH_ECHO_MUX 로 켜서 테스트 가능.
   get usesMux() { return !!process.env.RDASH_ECHO_MUX; }
   echoMux() { return `python3 ${shq(process.env.RDASH_ECHO_MUX || ECHO_MUX)} ${this.ver}`; }
