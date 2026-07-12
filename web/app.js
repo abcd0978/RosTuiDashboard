@@ -280,6 +280,26 @@ function trigArm(cond) { trigDisarm(); Trigger.armed = true; Trigger.cond = cond
 // 점/선/삼각형을 pos(vec3)+col(vec4) 한 셰이더로 그린다. 불투명→선→점→반투명(깊이쓰기 off) 순서로 블렌딩.
 const qrot = (q, v) => { const x = q[0], y = q[1], z = q[2], w = q[3], a = v[0], b = v[1], c = v[2]; const tx = 2 * (y * c - z * b), ty = 2 * (z * a - x * c), tz = 2 * (x * b - y * a); return [a + w * tx + (y * tz - z * ty), b + w * ty + (z * tx - x * tz), c + w * tz + (x * ty - y * tx)]; };
 const qmul = (a, b) => [a[3] * b[0] + a[0] * b[3] + a[1] * b[2] - a[2] * b[1], a[3] * b[1] - a[0] * b[2] + a[1] * b[3] + a[2] * b[0], a[3] * b[2] + a[0] * b[1] - a[1] * b[0] + a[2] * b[3], a[3] * b[3] - a[0] * b[0] - a[1] * b[1] - a[2] * b[2]];
+// 열-우선 4x4 역행렬(gluInvertMatrix) — 화면 클릭 → 월드 광선 언프로젝트(그라운드 픽킹)용.
+function inv16(m) { const o = new Array(16);
+  o[0] = m[5] * m[10] * m[15] - m[5] * m[11] * m[14] - m[9] * m[6] * m[15] + m[9] * m[7] * m[14] + m[13] * m[6] * m[11] - m[13] * m[7] * m[10];
+  o[4] = -m[4] * m[10] * m[15] + m[4] * m[11] * m[14] + m[8] * m[6] * m[15] - m[8] * m[7] * m[14] - m[12] * m[6] * m[11] + m[12] * m[7] * m[10];
+  o[8] = m[4] * m[9] * m[15] - m[4] * m[11] * m[13] - m[8] * m[5] * m[15] + m[8] * m[7] * m[13] + m[12] * m[5] * m[11] - m[12] * m[7] * m[9];
+  o[12] = -m[4] * m[9] * m[14] + m[4] * m[10] * m[13] + m[8] * m[5] * m[14] - m[8] * m[6] * m[13] - m[12] * m[5] * m[10] + m[12] * m[6] * m[9];
+  o[1] = -m[1] * m[10] * m[15] + m[1] * m[11] * m[14] + m[9] * m[2] * m[15] - m[9] * m[3] * m[14] - m[13] * m[2] * m[11] + m[13] * m[3] * m[10];
+  o[5] = m[0] * m[10] * m[15] - m[0] * m[11] * m[14] - m[8] * m[2] * m[15] + m[8] * m[3] * m[14] + m[12] * m[2] * m[11] - m[12] * m[3] * m[10];
+  o[9] = -m[0] * m[9] * m[15] + m[0] * m[11] * m[13] + m[8] * m[1] * m[15] - m[8] * m[3] * m[13] - m[12] * m[1] * m[11] + m[12] * m[3] * m[9];
+  o[13] = m[0] * m[9] * m[14] - m[0] * m[10] * m[13] - m[8] * m[1] * m[14] + m[8] * m[2] * m[13] + m[12] * m[1] * m[10] - m[12] * m[2] * m[9];
+  o[2] = m[1] * m[6] * m[15] - m[1] * m[7] * m[14] - m[5] * m[2] * m[15] + m[5] * m[3] * m[14] + m[13] * m[2] * m[7] - m[13] * m[3] * m[6];
+  o[6] = -m[0] * m[6] * m[15] + m[0] * m[7] * m[14] + m[4] * m[2] * m[15] - m[4] * m[3] * m[14] - m[12] * m[2] * m[7] + m[12] * m[3] * m[6];
+  o[10] = m[0] * m[5] * m[15] - m[0] * m[7] * m[13] - m[4] * m[1] * m[15] + m[4] * m[3] * m[13] + m[12] * m[1] * m[7] - m[12] * m[3] * m[5];
+  o[14] = -m[0] * m[5] * m[14] + m[0] * m[6] * m[13] + m[4] * m[1] * m[14] - m[4] * m[2] * m[13] - m[12] * m[1] * m[6] + m[12] * m[2] * m[5];
+  o[3] = -m[1] * m[6] * m[11] + m[1] * m[7] * m[10] + m[5] * m[2] * m[11] - m[5] * m[3] * m[10] - m[9] * m[2] * m[7] + m[9] * m[3] * m[6];
+  o[7] = m[0] * m[6] * m[11] - m[0] * m[7] * m[10] - m[4] * m[2] * m[11] + m[4] * m[3] * m[10] + m[8] * m[2] * m[7] - m[8] * m[3] * m[6];
+  o[11] = -m[0] * m[5] * m[11] + m[0] * m[7] * m[9] + m[4] * m[1] * m[11] - m[4] * m[3] * m[9] - m[8] * m[1] * m[7] + m[8] * m[3] * m[5];
+  o[15] = m[0] * m[5] * m[10] - m[0] * m[6] * m[9] - m[4] * m[1] * m[10] + m[4] * m[2] * m[9] + m[8] * m[1] * m[6] - m[8] * m[2] * m[5];
+  let det = m[0] * o[0] + m[1] * o[4] + m[2] * o[8] + m[3] * o[12]; if (!det) return null; det = 1 / det;
+  for (let i = 0; i < 16; i++) o[i] *= det; return o; }
 function mkScene(cv, labelDiv, info) {
   const gl = cv.getContext('webgl', { antialias: true, alpha: false, preserveDrawingBuffer: SNAP }) || cv.getContext('experimental-webgl');
   if (!gl) { info.textContent = 'WebGL 미지원 브라우저'; return { setCloud() {}, setMarkers() {}, setCloudById() {}, setMarkersById() {}, setVisible() {}, removeDisplay() {}, setTF() {}, opts() {}, view() {}, setPointSize() {}, getStats() { return { fps: 0, points: 0, drawn: 0 }; }, dispose() {} }; }
@@ -334,6 +354,12 @@ function mkScene(cv, labelDiv, info) {
     const Ry = [cy, sy, 0, 0, -sy, cy, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1], Rp = [1, 0, 0, 0, 0, cp, sp, 0, 0, -sp, cp, 0, 0, 0, 0, 1];
     const T = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, -center[0] + pan[0], -center[1], -center[2] + pan[1], 1], V = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, -dist, 1];
     return mul(P, mul(V, mul(Rp, mul(Ry, T)))); }
+  // 화면 클릭 → 그라운드(z=0) 평면 교점(월드). 3D 툴(Publish/Nav Goal/측정)용.
+  function pickGround(cx, cy) { const rect = cv.getBoundingClientRect(); const W = cv.clientWidth, H = cv.clientHeight;
+    const nx = (cx - rect.left) / W * 2 - 1, ny = -((cy - rect.top) / H * 2 - 1); const inv = inv16(mvpMat()); if (!inv) return null;
+    const un = (z) => { const w = inv[3] * nx + inv[7] * ny + inv[11] * z + inv[15]; return [(inv[0] * nx + inv[4] * ny + inv[8] * z + inv[12]) / w, (inv[1] * nx + inv[5] * ny + inv[9] * z + inv[13]) / w, (inv[2] * nx + inv[6] * ny + inv[10] * z + inv[14]) / w]; };
+    const a = un(-1), b = un(1); const dz = b[2] - a[2]; if (Math.abs(dz) < 1e-9) return null; const t = -a[2] / dz; if (t < 0) return null;
+    return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, 0]; }
   // ── 지오메트리 빌더(로컬 좌표 → pose(q,p) 적용, 스케일은 생성 시 반영) ──
   const xf = (po, v) => { const r = qrot(po.q, v); return [r[0] + po.p[0], r[1] + po.p[1], r[2] + po.p[2]]; };
   const put = (A, p, c) => { A.push(p[0], p[1], p[2], c[0], c[1], c[2], c[3]); };
@@ -410,8 +436,8 @@ function mkScene(cv, labelDiv, info) {
     frameN++; const now = (typeof performance !== 'undefined' ? performance.now() : fpsClock + 16); if (now - fpsClock >= 500) { fps = Math.round(frameN * 1000 / (now - fpsClock)); frameN = 0; fpsClock = now;
       // 적응형 LOD — FPS 가 목표보다 낮으면 거리 임계(lodDist)를 낮춰 먼 점을 더 솎고, 여유 있으면 높여 디테일 복원.
       if (opt.lodMode === 'adaptive' && cloudN) { if (fps < opt.targetFps - 5) opt.lodDist = Math.max(3, opt.lodDist * 0.85); else if (fps > opt.targetFps + 8) opt.lodDist = Math.min(200, opt.lodDist * 1.12); } } }
-  let drag = null, btn = 0;
-  cv.addEventListener('mousedown', (e) => { drag = { x: e.clientX, y: e.clientY }; btn = e.button; cv.style.cursor = 'grabbing'; e.preventDefault(); });
+  let drag = null, btn = 0, pickHandler = null;
+  cv.addEventListener('mousedown', (e) => { if (pickHandler && e.button === 0) { const w = pickGround(e.clientX, e.clientY); if (w) { pickHandler(w, e); e.preventDefault(); return; } } drag = { x: e.clientX, y: e.clientY }; btn = e.button; cv.style.cursor = 'grabbing'; e.preventDefault(); });
   window.addEventListener('mouseup', () => { drag = null; cv.style.cursor = 'grab'; });
   cv.addEventListener('mousemove', (e) => { if (!drag) return; const dx = e.clientX - drag.x, dy = e.clientY - drag.y; drag = { x: e.clientX, y: e.clientY }; if (btn === 2) { pan[0] += dx * dist * 0.002; pan[1] -= dy * dist * 0.002; } else { yaw += dx * 0.01; pitch = Math.max(-1.55, Math.min(1.55, pitch + dy * 0.01)); } });
   cv.addEventListener('wheel', (e) => { e.preventDefault(); dist *= e.deltaY < 0 ? 0.9 : 1.1; }, { passive: false });
@@ -432,6 +458,7 @@ function mkScene(cv, labelDiv, info) {
     opts(o) { Object.assign(opt, o); rebuildScene(); },
     view(p) { pan = [0, 0]; if (p === 'top') { yaw = 0; pitch = -1.554; } else if (p === 'front') { yaw = 0; pitch = 0; } else if (p === 'side') { yaw = Math.PI / 2; pitch = 0; } else if (p === 'back') { yaw = Math.PI; pitch = 0; } else { yaw = 0.7; pitch = -0.6; dist = 12; center = [0, 0, 0.5]; } },
     setPointSize(s) { psize = s; },
+    setPickHandler(fn) { pickHandler = fn; cv.style.cursor = fn ? 'crosshair' : 'grab'; },
     getStats() { return { fps, points: cloudN, drawn: lastDrawn, lodDist: opt.lodDist, lodMode: opt.lodMode }; },
     dispose() { alive = false; cancelAnimationFrame(raf); if (labelDiv) labelDiv.innerHTML = ''; try { for (const k in bufs) gl.deleteBuffer(bufs[k]); gl.deleteBuffer(cloudBuf); gl.deleteProgram(prog); gl.deleteProgram(cprog); } catch (_) { /* */ } },
   };
@@ -599,9 +626,46 @@ const Views = {
       const rc = el('input', { type: 'checkbox' }); rc.checked = O.round; rc.onchange = () => { O.round = rc.checked; scene.opts({ round: O.round }); };
       optBox.append(el('label', { style: 'display:flex;align-items:center;gap:5px;margin-top:6px;font-size:11px' }, rc, el('span', {}, '둥근 점 (끄면 사각·더 빠름)'))); }
     renderOpt();
+    // ── 🛠 3D 도구 — 그라운드(z=0) 클릭 → Publish Point / Nav Goal / Pose Estimate / 측정 ──
+    const toolBox = el('div', { style: 'margin-top:10px;border-top:1px solid var(--line);padding-top:8px' });
+    const toolTopics = { point: '/clicked_point', goal: '/goal_pose', pose: '/initialpose' };
+    const FF = 'map'; let activeTool = null, toolStage = null;
+    const sph = (id, p, c) => ({ ns: 'tool', id, type: 2, action: 0, frame_id: FF, pose: { p, q: [0, 0, 0, 1] }, scale: [0.2, 0.2, 0.2], color: c, points: [], colors: [], text: '' });
+    const arw = (id, p, yaw, c) => ({ ns: 'tool', id, type: 0, action: 0, frame_id: FF, pose: { p, q: [0, 0, Math.sin(yaw / 2), Math.cos(yaw / 2)] }, scale: [0.7, 0.1, 0.15], color: c, points: [], colors: [], text: '' });
+    const showTool = (ms) => scene.setMarkersById('__tool__', ms);
+    const clearTool = () => { activeTool = null; toolStage = null; scene.setPickHandler(null); showTool([]); renderTools(); };
+    const pub = (topic, yaml) => post('/api/publish', { name: topic, msg: yaml }).then(() => toast('발행 → ' + topic, 'ok')).catch(() => toast('발행 실패', 'err'));
+    function onToolPick(w) {
+      if (activeTool === 'measure') {
+        if (!toolStage) { toolStage = { p1: w }; showTool([sph(1, w, [0.9, 0.8, 0.3, 1])]); }
+        else { const p1 = toolStage.p1, d = Math.hypot(w[0] - p1[0], w[1] - p1[1], w[2] - p1[2]);
+          showTool([sph(1, p1, [0.9, 0.8, 0.3, 1]), sph(2, w, [0.9, 0.8, 0.3, 1]),
+            { ns: 'tool', id: 3, type: 4, action: 0, frame_id: FF, pose: { p: [0, 0, 0], q: [0, 0, 0, 1] }, scale: [0.03, 0, 0], color: [0.9, 0.8, 0.3, 1], points: [p1, w], colors: [], text: '' },
+            { ns: 'tool', id: 4, type: 9, action: 0, frame_id: FF, pose: { p: [(p1[0] + w[0]) / 2, (p1[1] + w[1]) / 2, 0.3], q: [0, 0, 0, 1] }, scale: [0, 0, 0.3], color: [1, 1, 1, 1], points: [], colors: [], text: d.toFixed(3) + ' m' }]);
+          toast('거리: ' + d.toFixed(3) + ' m', 'info'); toolStage = null; }
+        return;
+      }
+      if (activeTool === 'point') { showTool([sph(1, w, [0.9, 0.42, 0.42, 1])]); pub(toolTopics.point, `{header: {frame_id: "${FF}"}, point: {x: ${w[0].toFixed(3)}, y: ${w[1].toFixed(3)}, z: 0.0}}`); clearTool(); return; }
+      if (activeTool === 'goal' || activeTool === 'pose') {
+        if (!toolStage) { toolStage = { p1: w }; showTool([sph(1, w, [0.44, 0.6, 0.95, 1])]); return; }
+        const p1 = toolStage.p1, yaw = Math.atan2(w[1] - p1[1], w[0] - p1[0]), qz = Math.sin(yaw / 2), qw = Math.cos(yaw / 2);
+        showTool([arw(1, p1, yaw, [0.44, 0.6, 0.95, 1])]);
+        const posy = `position: {x: ${p1[0].toFixed(3)}, y: ${p1[1].toFixed(3)}, z: 0.0}, orientation: {x: 0.0, y: 0.0, z: ${qz.toFixed(4)}, w: ${qw.toFixed(4)}}`;
+        pub(activeTool === 'goal' ? toolTopics.goal : toolTopics.pose, activeTool === 'goal'
+          ? `{header: {frame_id: "${FF}"}, pose: {${posy}}}`
+          : `{header: {frame_id: "${FF}"}, pose: {pose: {${posy}}, covariance: [0.25,0,0,0,0,0, 0,0.25,0,0,0,0, 0,0,0,0,0,0, 0,0,0,0,0,0, 0,0,0,0,0,0, 0,0,0,0,0,0.0685]}}`);
+        clearTool();
+      }
+    }
+    function renderTools() { toolBox.innerHTML = '';
+      toolBox.append(el('div', { class: 'hint', style: 'font-weight:600;margin-bottom:3px' }, '🛠 도구'));
+      const tb = (label, tool) => el('button', { class: 'act', style: 'padding:2px 6px;margin:2px 3px 2px 0;font-size:11px' + (activeTool === tool ? ';border-color:var(--cyan);color:var(--cyan)' : ''), onclick: () => { if (activeTool === tool) { clearTool(); return; } activeTool = tool; toolStage = null; showTool([]); scene.setPickHandler(onToolPick); renderTools(); } }, label);
+      toolBox.append(tb('📍 Point', 'point'), tb('🎯 Nav Goal', 'goal'), tb('📌 Pose', 'pose'), tb('📏 측정', 'measure'));
+      toolBox.append(el('div', { class: 'hint', style: 'margin-top:3px' }, activeTool ? (activeTool === 'point' ? '그라운드 클릭 → 발행' : activeTool === 'measure' ? '두 점 클릭 → 거리(반복)' : '클릭=위치, 다시 클릭=방향') : '도구 선택 후 씬 클릭 (z=0 평면)')); }
+    renderTools();
     const timeBar = el('div', { class: 'hint', style: 'margin-top:4px' });
     const panel = el('div', { style: 'display:flex;gap:10px' },
-      el('div', { style: 'width:210px;flex:none;border-right:1px solid var(--line);padding-right:8px;overflow:auto;max-height:78vh' }, el('div', { class: 'hint', style: 'font-weight:600;margin-bottom:2px' }, '🗂 Displays'), listBox, optBox),
+      el('div', { style: 'width:210px;flex:none;border-right:1px solid var(--line);padding-right:8px;overflow:auto;max-height:78vh' }, el('div', { class: 'hint', style: 'font-weight:600;margin-bottom:2px' }, '🗂 Displays'), listBox, optBox, toolBox),
       el('div', { style: 'flex:1;min-width:0;display:flex;flex-direction:column' }, topbar, stage, info, timeBar));
     openModal('🧊 3D 씬 (RViz 식)', panel);
     const M = document.querySelector('#modal .m'); if (M) { M.style.width = 'min(1300px,96vw)'; }
