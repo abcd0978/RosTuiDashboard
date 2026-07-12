@@ -29,6 +29,7 @@ export class RosBackend {
 
 // CliBackend — 현행 구현. ros2/rostopic CLI 명령 문자열 생성(ROS1/ROS2 자동 분기).
 export class CliBackend extends RosBackend {
+  get kind() { return 'cli'; }
   telemetryScript() { return this.ver === '2' ? TELEM2 : TELEM; }
   echo(topic) { return echoFullCmd(this.ver, topic); }
   rosout() { return this.ver === '2' ? 'stdbuf -oL ros2 topic echo /rosout 2>/dev/null' : 'stdbuf -oL rostopic echo /rosout 2>/dev/null'; }
@@ -67,14 +68,23 @@ export class CliBackend extends RosBackend {
 // 참고: 원 제안의 rclnodejs 대신 rclpy 를 쓴다 — 네이티브 npm 빌드 의존성이 없고, 코드베이스(telemetry)와 일관되며,
 //       서버측 멀티플렉싱을 mock 으로 검증 가능하기 때문. rosbridge 연결은 향후 RosbridgeBackend 로.
 export class RclNodeBackend extends CliBackend {
+  get kind() { return 'rcl'; }
   get usesMux() { return true; }
 }
-export class RosbridgeBackend extends RosBackend { /* TODO: ws://host:9090 rosbridge_suite */ }
 
-// 팩토리 — RDASH_BACKEND(cli|rcl) 로 선택.
+// RosbridgeBackend — 원격 로봇의 rosbridge_suite(websocket)에 붙는 백엔드. 로컬 ROS 설치 불필요.
+// 스트림(events/echo)·그래프·publish/service 는 서버가 RosbridgeClient 로 처리(server.js 의 rosbridge 분기).
+// 로컬 전용 기능(node 리소스·rosbag 녹화 등)은 원격에선 의미가 없어 미지원 처리.
+export class RosbridgeBackend extends CliBackend {
+  get kind() { return 'rosbridge'; }
+  get url() { return process.env.RDASH_ROSBRIDGE_URL || 'ws://localhost:9090'; }
+}
+
+// 팩토리 — RDASH_BACKEND(cli|rcl|rosbridge) 로 선택.
 export function makeBackend(ver, kind = process.env.RDASH_BACKEND || 'cli') {
   switch (kind) {
     case 'rcl': return new RclNodeBackend(ver);
+    case 'rosbridge': return new RosbridgeBackend(ver);
     case 'cli': return new CliBackend(ver);
     default: return new CliBackend(ver);
   }

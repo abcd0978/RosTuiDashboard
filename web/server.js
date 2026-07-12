@@ -12,6 +12,7 @@ import { loadBookmarks, saveBookmarks } from '../src/lib/bookmarks.js';
 import { loadPreflight } from '../src/lib/preflight.js';
 import { loadBaseline, saveBaseline } from '../src/lib/baseline.js';
 import { makeBackend } from '../src/lib/backend.js';
+import { RosbridgeClient, msgToYaml, looseJson } from '../src/lib/rosbridge.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.RDASH_WEB_PORT) || 8080;
@@ -84,6 +85,38 @@ function muxStream(res, topic) {
 }
 const echoStream = (res, topic) => (be.usesMux ? muxStream(res, topic) : streamBlocks(res, be.echo(topic)));
 
+// ── rosbridge(원격 websocket) 백엔드 — 로컬 ROS 없이 원격 로봇의 rosbridge_suite 에 연결 ──
+let rb = null;
+function rbEnsure() { if (!rb) { rb = new RosbridgeClient(be.url); rb.connect(); } return rb; }
+async function rbTopicType(topic) { const r = await rbEnsure().call('/rosapi/topic_type', { topic }); return (r && r.type) || ''; }
+// 그래프+Hz 를 rosapi 로 폴링해 telemetry.py 와 같은 items 스트림 생성.
+function rbTelemetry(res) {
+  const send = sse(res); rbEnsure();
+  const counts = {}, last = {}, unsub = new Map(); let alive = true;
+  const iv = setInterval(async () => {
+    if (!alive) return;
+    const tr = await rb.call('/rosapi/topics'); if (!tr) { send(JSON.stringify({ nomaster: true })); return; }
+    const names = tr.topics || [], types = {}; names.forEach((n, i) => { types[n] = (tr.types || [])[i] || '?'; });
+    for (const n of names) if (!unsub.has(n)) { counts[n] = 0; unsub.set(n, rb.subscribe(n, types[n], () => { counts[n] = (counts[n] || 0) + 1; last[n] = Date.now(); })); }
+    for (const n of [...unsub.keys()]) if (!(n in types)) { unsub.get(n)(); unsub.delete(n); }
+    const [nodesR, svcR] = await Promise.all([rb.call('/rosapi/nodes'), rb.call('/rosapi/services')]);
+    const edges = await Promise.all(names.map((n) => Promise.all([rb.call('/rosapi/publishers', { topic: n }), rb.call('/rosapi/subscribers', { topic: n })])));
+    const now = Date.now(); const items = [];
+    names.forEach((n, i) => { const [pubR, subR] = edges[i] || [{}, {}];
+      const hz = counts[n] || 0; counts[n] = 0;
+      items.push({ p: 'topics' + n, kind: 'topic', name: n, ty: types[n], hz, age: last[n] ? (now - last[n]) / 1000 : null,
+        pubs: ((pubR && pubR.publishers) || []).map((x) => [x, null, null]), subs: ((subR && subR.subscribers) || []).map((x) => [x, null, null]) }); });
+    for (const s of (svcR && svcR.services) || []) items.push({ p: 'services' + s, kind: 'service', name: s, server: [] });
+    for (const nd of (nodesR && nodesR.nodes) || []) items.push({ p: 'nodes' + nd, kind: 'node', name: nd });
+    send(JSON.stringify({ items }));
+  }, 1000);
+  res.on('close', () => { alive = false; clearInterval(iv); for (const u of unsub.values()) u(); });
+}
+function rbEcho(res, topic) {
+  const send = sse(res); rbEnsure();
+  rbTopicType(topic).then((type) => { const off = rb.subscribe(topic, type, (msg) => send(JSON.stringify(msgToYaml(msg)))); res.on('close', off); });
+}
+
 // ── 잡(Jobs) 레지스트리 — 웹에서 띄운 프로세스(북마크·rosbag·액션) 추적 ──
 let jobSeq = 0;
 const jobs = new Map();   // id → {id,label,pid,status,log[]}
@@ -131,12 +164,12 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/preflight') return json(res, 200, { checks: loadPreflight() });
 
     // 스트림
-    if (p === '/events') return streamLines(res, 'python3 -', telemScript());
-    if (p === '/echo') return q.get('topic') ? echoStream(res, q.get('topic')) : json(res, 400, { error: 'topic' });
+    if (p === '/events') return be.kind === 'rosbridge' ? rbTelemetry(res) : streamLines(res, 'python3 -', telemScript());
+    if (p === '/echo') return q.get('topic') ? (be.kind === 'rosbridge' ? rbEcho(res, q.get('topic')) : echoStream(res, q.get('topic'))) : json(res, 400, { error: 'topic' });
     if (p === '/imgstream') { const t = q.get('topic'); if (!t) return json(res, 400, { error: 'topic' }); return streamLines(res, be.imgBridge(t)); }
     if (p === '/cloudstream') { const t = q.get('topic'); if (!t) return json(res, 400, { error: 'topic' }); return streamLines(res, be.cloudBridge(t)); }
-    if (p === '/rosout') return be.usesMux ? muxStream(res, '/rosout') : streamBlocks(res, be.rosout());
-    if (p === '/diagnostics') return be.usesMux ? muxStream(res, '/diagnostics') : streamBlocks(res, be.diagnostics());
+    if (p === '/rosout') return be.kind === 'rosbridge' ? rbEcho(res, '/rosout') : (be.usesMux ? muxStream(res, '/rosout') : streamBlocks(res, be.rosout()));
+    if (p === '/diagnostics') return be.kind === 'rosbridge' ? rbEcho(res, '/diagnostics') : (be.usesMux ? muxStream(res, '/diagnostics') : streamBlocks(res, be.diagnostics()));
 
     // 조회(one-shot)
     if (p === '/api/msgdef') return json(res, 200, { out: await runOnce(be.msgDef(q.get('type'))) });
@@ -147,7 +180,11 @@ const server = http.createServer(async (req, res) => {
       catch { return json(res, 200, { yaml: '{}' }); }
     }
     if (p === '/api/bagdump') { const out = await runOnce(be.bagDump(q.get('path'), q.get('topics'))); try { return json(res, 200, JSON.parse(out)); } catch { return json(res, 200, { series: {}, error: out.slice(0, 300) }); } }
-    if (p === '/api/connections') return json(res, 200, { out: await runOnce(be.connections(q.get('kind'), q.get('name'))) });
+    if (p === '/api/connections') { if (be.kind === 'rosbridge') { const kind = q.get('kind'), name = q.get('name'), rbc = rbEnsure();
+      if (kind === 'topic') { const [pu, su, ty] = await Promise.all([rbc.call('/rosapi/publishers', { topic: name }), rbc.call('/rosapi/subscribers', { topic: name }), rbc.call('/rosapi/topic_type', { topic: name })]);
+        return json(res, 200, { out: `Type: ${(ty && ty.type) || '?'}\nPublishers:\n  ${(((pu && pu.publishers) || []).join('\n  ')) || '(none)'}\nSubscribers:\n  ${(((su && su.subscribers) || []).join('\n  ')) || '(none)'}` }); }
+      const nd = await rbc.call('/rosapi/node_details', { node: name }); return json(res, 200, { out: nd ? JSON.stringify(nd, null, 2) : '(rosbridge: 조회 실패)' }); }
+      return json(res, 200, { out: await runOnce(be.connections(q.get('kind'), q.get('name'))) }); }
     if (p === '/api/resource') { const b = await readBody(req); return json(res, 200, { out: await runOnce(be.resource(b.nodes || [])) }); }
     if (p === '/api/tftree') return json(res, 200, { out: await runOnce(be.tfTree()) });
     if (p === '/api/tfecho') return json(res, 200, { out: await runOnce(be.tfEcho(q.get('src'), q.get('tgt'))) });
@@ -157,8 +194,8 @@ const server = http.createServer(async (req, res) => {
     // 액션(POST)
     if (p === '/api/run' && post) { const b = await readBody(req); return json(res, 200, { out: await runOnce(`${b.cmd} 2>&1`) }); }
     if (p === '/api/param/set' && post) { const b = await readBody(req); await runOnce(be.paramSet(b.node, b.name, b.value)); return json(res, 200, { value: (await runOnce(be.paramGet(b.node, b.name))).trim() }); }
-    if (p === '/api/publish' && post) { const b = await readBody(req); const cmd = be.publish(b.name, b.msg); return json(res, 200, { out: cmd ? await runOnce(cmd) : '(no cmd)' }); }
-    if (p === '/api/service' && post) { const b = await readBody(req); const cmd = be.serviceCall(b.name, b.req); return json(res, 200, { out: cmd ? await runOnce(cmd) : '(no cmd)' }); }
+    if (p === '/api/publish' && post) { const b = await readBody(req); if (be.kind === 'rosbridge') { rbEnsure().publish(b.name, await rbTopicType(b.name), looseJson(b.msg)); return json(res, 200, { out: 'published (rosbridge)' }); } const cmd = be.publish(b.name, b.msg); return json(res, 200, { out: cmd ? await runOnce(cmd) : '(no cmd)' }); }
+    if (p === '/api/service' && post) { const b = await readBody(req); if (be.kind === 'rosbridge') { const v = await rbEnsure().call(b.name, looseJson(b.req)); return json(res, 200, { out: v == null ? '(no response)' : JSON.stringify(v, null, 2) }); } const cmd = be.serviceCall(b.name, b.req); return json(res, 200, { out: cmd ? await runOnce(cmd) : '(no cmd)' }); }
     if (p === '/api/setparam1' && post) { const b = await readBody(req); const cmd = be.setParam1(b.name, b.value); return json(res, 200, { out: cmd ? await runOnce(cmd) : '(ROS2: per-node)' }); }
     if (p === '/api/killnode' && post) { const b = await readBody(req); const cmd = be.killNode(b.name); return json(res, 200, { out: cmd ? await runOnce(cmd) : '(no cmd)' }); }
     if (p === '/api/restart' && post) { const b = await readBody(req); const cmd = be.restartNode(b.name); return json(res, 200, { out: cmd ? await runOnce(cmd) : '(no cmd)' }); }
