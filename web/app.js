@@ -33,6 +33,10 @@ const visible = () => items.filter((i) => !(i.name || '').includes('/_action/'))
 
 // ── 노드 그래프 — rqt_graph 스타일(노드/토픽 이분 그래프) + 서비스·액션 관계 ──────────
 let G = { ents: new Map(), edges: [] }, pos = new Map(), dragging = null;
+const gview = { s: 1, ox: 0, oy: 0 };   // 그래프 줌/팬(#edges·#nodes 그룹 transform)
+const applyGView = () => { const tr = `translate(${gview.ox},${gview.oy}) scale(${gview.s})`; const e = $('#edges'), n = $('#nodes'); if (e) e.setAttribute('transform', tr); if (n) n.setAttribute('transform', tr); };
+// 화면좌표 → 그래프좌표(줌/팬 역변환).
+const toGraph = (clientX, clientY) => { const rc = $('#graph').getBoundingClientRect(); return { x: (clientX - rc.left - gview.ox) / gview.s, y: (clientY - rc.top - gview.oy) / gview.s }; };
 let GMODE = 'nodes';                                    // 'nodes'(노드만) | 'bipartite'(노드+토픽)
 const GF = { debug: false, tf: true, services: true, actions: true, leaves: true };   // 표시 필터
 const isDebug = (n) => n === '/rosout' || n === '/rosout_agg' || n === '/parameter_events';
@@ -123,8 +127,9 @@ function paint() {
     else if (e.type === 'action') g.appendChild(mkSVG('polygon', { points: `${-hw + 11},-12 ${hw - 11},-12 ${hw},0 ${hw - 11},12 ${-hw + 11},12 ${-hw},0` }));
     else g.appendChild(mkSVG('rect', { x: -hw, y: -11, width: w, height: 22 }));
     g.appendChild(Object.assign(mkSVG('text', { 'text-anchor': 'middle', y: 4 }), { textContent: label }));
-    g.onmousedown = (ev) => { dragging = id; selectNode(id); if (e.type === 'topic') selectTopic(id); const mv = (m) => { const rc = $('#graph').getBoundingClientRect(); const pp = pos.get(id); pp.x = m.clientX - rc.left; pp.y = m.clientY - rc.top; }; const up = () => { dragging = null; document.removeEventListener('mousemove', mv); document.removeEventListener('mouseup', up); }; document.addEventListener('mousemove', mv); document.addEventListener('mouseup', up); ev.preventDefault(); };
+    g.onmousedown = (ev) => { ev.stopPropagation(); dragging = id; selectNode(id); if (e.type === 'topic') selectTopic(id); const mv = (m) => { const pp = pos.get(id); const gp = toGraph(m.clientX, m.clientY); pp.x = gp.x; pp.y = gp.y; }; const up = () => { dragging = null; document.removeEventListener('mousemove', mv); document.removeEventListener('mouseup', up); }; document.addEventListener('mousemove', mv); document.addEventListener('mouseup', up); ev.preventDefault(); };
     ng.appendChild(g); }
+  applyGView();
 }
 function selectNode(id) { sel = id; const e = G.ents.get(id); selItem = byName(id) || { kind: e ? e.type : 'node', name: id }; renderSidebar(); renderValActs(); }
 
@@ -494,9 +499,12 @@ const Views = {
     if (!topic) { openModal('🖼 카메라', el('p', { class: 'hint' }, '이미지 토픽이 없습니다.')); return; }
     const annTopics = items.filter((i) => /Detection2D(Array)?|ImageAnnotations/.test(i.ty || '')).map((i) => i.name);
     const infoTopics = items.filter((i) => /CameraInfo/.test(i.ty || '')).map((i) => i.name);
-    const img = el('img', { style: 'display:block;max-width:100%;background:#0d1116;border:1px solid var(--line);border-radius:6px;image-rendering:auto' });
+    const img = el('img', { style: 'display:block;max-width:100%;background:#0d1116;image-rendering:auto' });
     const ov = el('canvas', { style: 'position:absolute;left:0;top:0;pointer-events:none' });
-    const stage = el('div', { style: 'position:relative;display:inline-block;max-width:100%' }, img, ov);
+    const zoomWrap = el('div', { style: 'position:relative;transform-origin:0 0' }, img, ov);
+    const stage = el('div', { style: 'position:relative;display:inline-block;max-width:100%;overflow:hidden;border:1px solid var(--line);border-radius:6px;cursor:grab' }, zoomWrap);
+    const off = document.createElement('canvas'); const zoom = { s: 1, ox: 0, oy: 0 }; let panning = null;
+    const applyZoom = () => { zoomWrap.style.transform = `translate(${zoom.ox}px,${zoom.oy}px) scale(${zoom.s})`; };
     const info = el('div', { class: 'hint', style: 'margin-top:6px' }, '연결 중…'); let n = 0, t0 = Date.now();
     let ann = { boxes: [], points: [], circles: [], texts: [] }, cam = null;
     let annES = null, camES = null;
@@ -531,12 +539,21 @@ const Views = {
     const camSel = el('select', { style: 'font:11px monospace' }); camSel.append(el('option', { value: '' }, '(없음)')); infoTopics.forEach((t) => camSel.append(el('option', { value: t }, t))); camSel.onchange = () => subCam(camSel.value);
     const lbl = (t, node) => el('label', { style: 'display:inline-flex;align-items:center;gap:3px;margin-right:12px' }, el('span', { class: 'hint' }, t), node);
     const camInfoLbl = el('div', { class: 'hint', style: 'margin-top:4px;color:var(--purple,#c78ad2)' });
-    const ctrl = el('div', { style: 'display:flex;flex-wrap:wrap;margin-bottom:6px' }, lbl('어노테이션', annSel), lbl('CameraInfo', camSel));
+    const pixLbl = el('span', { class: 'hint', style: 'margin-left:12px;color:var(--cyan)' });
+    const zreset = el('button', { class: 'act', style: 'padding:2px 7px', onclick: () => { zoom.s = 1; zoom.ox = 0; zoom.oy = 0; applyZoom(); } }, '1:1');
+    const ctrl = el('div', { style: 'display:flex;flex-wrap:wrap;align-items:center;margin-bottom:6px' }, lbl('어노테이션', annSel), lbl('CameraInfo', camSel), zreset, el('span', { class: 'hint', style: 'margin-left:8px' }, '휠=줌 · 드래그=이동'), pixLbl);
     openModal('🖼 카메라 — ' + topic, el('div', {}, ctrl, stage, info, camInfoLbl));
+    // 줌/팬 + 픽셀값 — Foxglove 이미지 패널 대응(휠=커서 기준 줌, 드래그=이동, 이동 시 (x,y) rgb 표시).
+    stage.addEventListener('wheel', (e) => { e.preventDefault(); const r = stage.getBoundingClientRect(); const mx = e.clientX - r.left, my = e.clientY - r.top; const f = e.deltaY < 0 ? 1.15 : 1 / 1.15; const ns = Math.max(1, Math.min(16, zoom.s * f)); const k = ns / zoom.s; zoom.ox = mx - (mx - zoom.ox) * k; zoom.oy = my - (my - zoom.oy) * k; zoom.s = ns; if (zoom.s <= 1.001) { zoom.s = 1; zoom.ox = 0; zoom.oy = 0; } applyZoom(); }, { passive: false });
+    stage.addEventListener('mousedown', (e) => { panning = { x: e.clientX, y: e.clientY }; stage.style.cursor = 'grabbing'; e.preventDefault(); });
+    window.addEventListener('mouseup', () => { if (panning) { panning = null; stage.style.cursor = 'grab'; } });
+    stage.addEventListener('mousemove', (e) => { if (panning) { zoom.ox += e.clientX - panning.x; zoom.oy += e.clientY - panning.y; panning = { x: e.clientX, y: e.clientY }; applyZoom(); return; }
+      const r = img.getBoundingClientRect(); if (!r.width || !off.width) { pixLbl.textContent = ''; return; } const px = Math.floor((e.clientX - r.left) / r.width * off.width), py = Math.floor((e.clientY - r.top) / r.height * off.height);
+      if (px < 0 || py < 0 || px >= off.width || py >= off.height) { pixLbl.textContent = ''; return; } let rgb = ''; try { const d = off.getContext('2d').getImageData(px, py, 1, 1).data; rgb = ` · rgb(${d[0]},${d[1]},${d[2]})`; } catch (_) { /* */ } pixLbl.textContent = `(${px}, ${py})${rgb}`; });
     const es = new EventSource('/imgstream?topic=' + encodeURIComponent(topic));
     es.onmessage = (e) => { if (!e.data) return; img.src = 'data:image/jpeg;base64,' + e.data; n++; const fps = n / ((Date.now() - t0) / 1000); info.textContent = `${n} 프레임 · ${fps.toFixed(1)} fps`; drawOverlay(); };
     es.onerror = () => { info.textContent = '스트림 오류 — image_transport/토픽 확인'; };
-    img.onload = drawOverlay;
+    img.onload = () => { off.width = img.naturalWidth; off.height = img.naturalHeight; try { off.getContext('2d').drawImage(img, 0, 0); } catch (_) { /* */ } drawOverlay(); };
     if (annTopics[0]) { annSel.value = annTopics[0]; subAnn(annTopics[0]); }
     if (infoTopics[0]) { camSel.value = infoTopics[0]; subCam(infoTopics[0]); }
     modalSub = { close: () => { es.close(); if (annES) annES.close(); if (camES) camES.close(); } };
@@ -851,5 +868,11 @@ window.addEventListener('keydown', (e) => {
 });
 
 window.addEventListener('resize', paint);
+// 그래프 줌(휠, 커서 기준)/팬(빈 곳 드래그) — 노드 드래그는 stopPropagation 으로 분리.
+(function graphNav() { const svg = $('#graph'); if (!svg) return;
+  svg.addEventListener('wheel', (e) => { e.preventDefault(); const rc = svg.getBoundingClientRect(); const mx = e.clientX - rc.left, my = e.clientY - rc.top; const f = e.deltaY < 0 ? 1.12 : 1 / 1.12; const ns = Math.max(0.3, Math.min(4, gview.s * f)); const k = ns / gview.s; gview.ox = mx - (mx - gview.ox) * k; gview.oy = my - (my - gview.oy) * k; gview.s = ns; applyGView(); }, { passive: false });
+  let pan = null; svg.addEventListener('mousedown', (e) => { pan = { x: e.clientX, y: e.clientY }; svg.style.cursor = 'grabbing'; });
+  window.addEventListener('mouseup', () => { if (pan) { pan = null; svg.style.cursor = ''; } });
+  svg.addEventListener('mousemove', (e) => { if (!pan) return; gview.ox += e.clientX - pan.x; gview.oy += e.clientY - pan.y; pan = { x: e.clientX, y: e.clientY }; applyGView(); }); })();
 requestAnimationFrame(tick);
 window.RD = { closeModal, Views };
