@@ -19,7 +19,7 @@ import { loadPreflight } from './lib/preflight.js';
 import { loadSession, saveSession, loadHistory, pushHistory } from './lib/session.js';
 import { loadBaseline, saveBaseline, snapshot as snapProfile } from './lib/baseline.js';
 import { diagnose } from './lib/doctor.js';
-import { connectionsCmd, resourceCmd, tfTreeCmd, tfEchoCmd, bagRecordCmd, bagPlayCmd, bagCompareCmd, msgDefCmd, paramListCmd, paramGetCmd, paramSetCmd } from './lib/commands.js';
+import { makeBackend } from './lib/backend.js';
 import { useRosVersion } from './hooks/useRosVersion.js';
 import { useTopics } from './hooks/useTopics.js';
 import { useTermSize } from './hooks/useTermSize.js';
@@ -34,6 +34,7 @@ export const useDashboard = () => useContext(DashboardContext);
 export function StoreProvider({ children }) {
   const { exit } = useApp();
   const ver = useRosVersion();
+  const be = makeBackend(ver);   // ROS 명령은 백엔드 인터페이스로 통일(웹과 동일한 CliBackend)
   const sessRef = useRef(loadSession());                // 이전 세션(펼침/워치/모드/마지막 선택)
   const sess = sessRef.current;
   const [domain, setDomain] = useState(process.env.ROS_DOMAIN_ID ?? null);   // 컨테이너/도메인 전환
@@ -395,21 +396,21 @@ export function StoreProvider({ children }) {
   const closeInfo = () => { infoRef.current.alive = false; clearTimeout(infoRef.current.timer); setInfoView(null); };
   const openConnections = () => {
     if (!active) { setStatus('선택 항목 없음 (Enter 로 선택)'); return; }
-    openInfo(`🔗 ${active.name} [${active.kind}]`, connectionsCmd(ver, active.kind, active.name));
+    openInfo(`🔗 ${active.name} [${active.kind}]`, be.connections(active.kind, active.name));
   };
   const openResource = () => {
     const nodes = fullList.filter((i) => i.kind === 'node').map((i) => i.name);
     if (!nodes.length) { setStatus('노드 없음'); return; }
-    openInfo('📊 node resources (CPU%/RSS)', resourceCmd(nodes), 2000);   // 2초마다 갱신
+    openInfo('📊 node resources (CPU%/RSS)', be.resource(nodes), 2000);   // 2초마다 갱신
   };
-  const openTf = () => openInfo('🌳 TF tree (/tf 수집 중, ~3s)', tfTreeCmd(ver));
+  const openTf = () => openInfo('🌳 TF tree (/tf 수집 중, ~3s)', be.tfTree());
   // 노드 그래프 — 선택이 노드면 그 노드 중심, 아니면 전체 엣지.
   const graphFocusName = active && active.kind === 'node' ? active.name : null;
   const openGraph = () => setGraphOpen({ focus: graphFocusName, top: 0 });
   // 메시지 정의(타입 구조) — 선택 토픽/서비스의 필드.
   const openMsgDef = () => {
     if (!active || !active.ty) { setStatus('타입 있는 토픽을 선택하세요'); return; }
-    openInfo(`📄 ${active.ty}`, msgDefCmd(ver, active.ty));
+    openInfo(`📄 ${active.ty}`, be.msgDef(active.ty));
   };
   // QoS 뷰 — 선택 토픽만. 엣지(pubs/subs 의 reliability/durability)에서 계산.
   const openLog = () => setLogOpen({ min: 20, top: null, text: '', typing: false });
@@ -422,16 +423,16 @@ export function StoreProvider({ children }) {
     const node = active.name;
     setParamPanel({ node, rows: null, idx: 0, edit: null });
     setStatus(`⚙ ${node} 파라미터 조회 중…`);
-    runText(paramListCmd(node), (out) => {
+    runText(be.paramList(node), (out) => {
       const rows = out.split('\n').filter(Boolean).map((l) => { const i = l.indexOf('\t'); return { name: i < 0 ? l : l.slice(0, i), value: (i < 0 ? '' : l.slice(i + 1)).trim() }; });
       setParamPanel((p) => (p && p.node === node ? { ...p, rows } : p));
     });
   };
-  const refreshParam = (node, name) => runText(paramGetCmd(node, name), (nv) =>
+  const refreshParam = (node, name) => runText(be.paramGet(node, name), (nv) =>
     setParamPanel((p) => (p && p.node === node ? { ...p, rows: (p.rows || []).map((r) => (r.name === name ? { ...r, value: nv.trim() } : r)) } : p)));
   const setParam = (node, name, val) => {
     setStatus(`set ${name} = ${val} …`);
-    run(paramSetCmd(node, name, val), (o) => { setStatus(`${name} = ${val}  (${o})`); refreshParam(node, name); });
+    run(be.paramSet(node, name, val), (o) => { setStatus(`${name} = ${val}  (${o})`); refreshParam(node, name); });
   };
   const openQos = () => {
     if (!active || active.kind !== 'topic') { setStatus('토픽을 선택하세요'); return; }
@@ -447,11 +448,11 @@ export function StoreProvider({ children }) {
   };
   const submitTfEcho = (src, tgt) => {
     if (!src.trim() || !tgt.trim()) { setStatus('두 프레임 필요'); return; }
-    openInfo(`🧭 tf ${src} → ${tgt}`, tfEchoCmd(ver, src.trim(), tgt.trim()), 1500);   // 1.5s 주기 갱신
+    openInfo(`🧭 tf ${src} → ${tgt}`, be.tfEcho(src.trim(), tgt.trim()), 1500);   // 1.5s 주기 갱신
   };
   const submitBagCompare = (a, b) => {
     if (!a.trim() || !b.trim()) { setStatus('두 bag 경로 필요'); return; }
-    openInfo(`🔀 bag A/B  ${a} ↔ ${b}`, bagCompareCmd(ver, a.trim(), b.trim()));
+    openInfo(`🔀 bag A/B  ${a} ↔ ${b}`, be.bagCompare(a.trim(), b.trim()));
   };
   // ── rosbag 녹화/재생 ───────────────────────────────────────────────────────
   const toggleRec = () => {
@@ -459,7 +460,7 @@ export function StoreProvider({ children }) {
     // 우선순위: 표시(marked) 토픽 > 필터 결과 > 전체(-a).
     const recTopics = marked.size ? [...marked] : (filt ? list.filter((i) => i.kind === 'topic').map((i) => i.name) : null);
     const out = `rdash_rec_${Date.now()}`;
-    const id = spawnJob(`rosbag rec → ${out}`, bagRecordCmd(ver, recTopics, out));
+    const id = spawnJob(`rosbag rec → ${out}`, be.bagRecord(recTopics, out));
     setRec({ id, out, started: Date.now(), n: recTopics ? recTopics.length : 0 });
     setStatus(`● 녹화: ${recTopics ? recTopics.length + ' 토픽' + (marked.size ? '(표시)' : '(필터)') : '전체 -a'} → ${out}`);
   };
@@ -487,23 +488,19 @@ export function StoreProvider({ children }) {
     setLifeOpen({ node: active.name, idx: 0 });
   };
   const runLifecycle = (node, transition) => {
-    run(`ros2 lifecycle set ${shq(node)} ${transition} 2>&1`, (o) => setStatus(`lifecycle ${transition}: ${o}`));
+    run(be.lifecycle(node, transition), (o) => setStatus(`lifecycle ${transition}: ${o}`));
   };
   // Teleop — geometry_msgs/Twist 를 하나의 지속 퍼블리셔(-r 10 Hz)로. 방향 바뀔 때만 재기동, 정지 시 0 트위스트.
   const teleopChildRef = useRef(null);
   const teleopKill = () => { if (teleopChildRef.current) { try { killTree(teleopChildRef.current, 'SIGINT'); } catch { /* */ } teleopChildRef.current = null; } };
   const teleopStop = (topic) => {
     teleopKill();
-    const a = actionFor(ver, 'topic', topic, '{linear: {x: 0.0, y: 0.0, z: 0.0}, angular: {x: 0.0, y: 0.0, z: 0.0}}');
-    if (a && a.cmd) runAction(a.cmd, () => {});   // 0 트위스트 1회
+    const cmd = be.publish(topic, '{linear: {x: 0.0, y: 0.0, z: 0.0}, angular: {x: 0.0, y: 0.0, z: 0.0}}');
+    if (cmd) runAction(cmd, () => {});   // 0 트위스트 1회
   };
   const teleopDrive = (topic, lin, ang) => {
     teleopKill();
-    const yaml = `{linear: {x: ${lin}, y: 0.0, z: 0.0}, angular: {x: 0.0, y: 0.0, z: ${ang}}}`;
-    const cmd = ver === '2'
-      ? `ros2 topic pub -r 10 ${shq(topic)} geometry_msgs/msg/Twist ${shq(yaml)}`
-      : `rostopic pub -r 10 ${shq(topic)} geometry_msgs/Twist ${shq(yaml)}`;
-    teleopChildRef.current = rosSpawn(cmd, undefined, true);
+    teleopChildRef.current = rosSpawn(be.teleop(topic, lin, ang), undefined, true);
     teleopChildRef.current.on('error', () => {});
   };
   const openTeleop = () => setTeleopOpen({ topic: '/cmd_vel', lin: 0.5, ang: 1.0, dir: 'stop' });
@@ -517,7 +514,7 @@ export function StoreProvider({ children }) {
   const submitBagPlay = (path) => {
     const s = String(path).trim();
     if (!s) return;
-    spawnJob(`rosbag play ${s}`, bagPlayCmd(ver, s));
+    spawnJob(`rosbag play ${s}`, be.bagPlay(s));
     setStatus(`▶ play: ${s}`);
   };
   const submitDomain = (v) => {
