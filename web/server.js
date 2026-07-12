@@ -169,6 +169,8 @@ const server = http.createServer(async (req, res) => {
     if (p === '/echo') return q.get('topic') ? (be.kind === 'rosbridge' ? rbEcho(res, q.get('topic')) : echoStream(res, q.get('topic'))) : json(res, 400, { error: 'topic' });
     if (p === '/imgstream') { const t = q.get('topic'); if (!t) return json(res, 400, { error: 'topic' }); return streamLines(res, be.imgBridge(t)); }
     if (p === '/cloudstream') { const t = q.get('topic'); if (!t) return json(res, 400, { error: 'topic' }); return streamLines(res, be.cloudBridge(t)); }
+    if (p === '/markerstream') { const t = q.get('topic'); if (!t) return json(res, 400, { error: 'topic' }); return streamLines(res, be.markerBridge(t)); }
+    if (p === '/tfstream') return streamLines(res, be.tfDump());
     if (p === '/rosout') return be.kind === 'rosbridge' ? rbEcho(res, '/rosout') : (be.usesMux ? muxStream(res, '/rosout') : streamBlocks(res, be.rosout()));
     if (p === '/diagnostics') return be.kind === 'rosbridge' ? rbEcho(res, '/diagnostics') : (be.usesMux ? muxStream(res, '/diagnostics') : streamBlocks(res, be.diagnostics()));
 
