@@ -48,7 +48,8 @@ function ensureRosbridge() {
   if (VER !== '2' && !tcpOpen(11311)) return;       // ROS1: 마스터 없으면 대기(경쟁 마스터 방지)
   const cmd = VER === '2' ? 'ros2 launch rosbridge_server rosbridge_websocket_launch.xml'
                           : 'roslaunch rosbridge_server rosbridge_websocket.launch';
-  rbProc = spawn('bash', ['-lc', `source /opt/ros/*/setup.bash 2>/dev/null; exec ${cmd}`], { stdio: 'ignore' });
+  const ros1Net = VER === '2' ? '' : 'unset ROS_HOSTNAME; export ROS_IP=${ROS_IP:-127.0.0.1}; ';
+  rbProc = spawn('bash', ['-lc', `${ros1Net}source /opt/ros/*/setup.bash 2>/dev/null; exec ${cmd}`], { stdio: 'ignore' });
   rbProc.on('error', () => { rbProc = null; });
   rbProc.on('exit', () => { rbProc = null; });
 }
