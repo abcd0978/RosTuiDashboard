@@ -56,7 +56,8 @@ openStream('/events', (d) => { try { const o = JSON.parse(d); if (o.items) { ite
 const nodeName = (e) => (Array.isArray(e) ? e[0] : e);
 const byName = (n) => items.find((i) => i.name === n);
 const topics = () => items.filter((i) => i.kind === 'topic');
-const visible = () => items.filter((i) => !(i.name || '').includes('/_action/'));
+let hideAnon = true;   // 트리뷰어: CLI/도구 익명 노드·서비스·토픽(ros_tui*, rostopic_* 등) 숨김(기본)
+const visible = () => items.filter((i) => !(i.name || '').includes('/_action/') && (!hideAnon || !isAnon(i.name)));
 
 // ── 노드 그래프 — rqt_graph 스타일(노드/토픽 이분 그래프) + 서비스·액션 관계 ──────────
 let G = { ents: new Map(), edges: [] }, pos = new Map(), dragging = null;
@@ -217,6 +218,10 @@ function renderSidebar() {
     renderTree(k, buildPathTree(arr), 0, H);
   }
   const side = $('#side'); side.innerHTML = '';
+  // 필터 툴바 — CLI/도구 익명 항목(ros_tui*, rostopic_* 등) 숨김 토글.
+  const anonN = items.filter((i) => isAnon(i.name) && !(i.name || '').includes('/_action/')).length;
+  const cb = el('input', { type: 'checkbox' }); cb.checked = hideAnon; cb.onchange = () => { hideAnon = cb.checked; renderSidebar(); };
+  side.append(el('label', { style: 'display:flex;align-items:center;gap:5px;padding:5px 10px;font-size:11px;border-bottom:1px solid var(--line);cursor:pointer' }, cb, el('span', {}, `익명 노드/서비스 숨김${anonN ? ` (${anonN})` : ''}`)));
   if (!H.length) { side.append(items.length ? emptyState('🔍', '표시할 항목 없음', '필터를 확인하세요') : (everOpen ? emptyState('📡', 'ROS 그래프가 비어 있음', '실행 중인 노드/토픽이 없습니다') : spinner('그래프 수집 중…'))); return; }
   H.forEach((x) => side.append(x));
 }
