@@ -1149,6 +1149,19 @@ const Views = {
     topic.oninput = refreshTy; tySel.onchange = refreshTy; refreshTy();
     const lin = el('input', { type: 'number', value: '0.5', step: '0.1', style: 'width:64px' });
     const ang = el('input', { type: 'number', value: '1.0', step: '0.1', style: 'width:64px' });
+    // 프리셋 — 대상별 토픽·메시지·권장 속도를 한 번에. custom 은 아래 입력 그대로 사용.
+    const PRESETS = [
+      { id: 'turtle', label: 'turtlesim  ·  /turtle1/cmd_vel  ·  Twist', topic: '/turtle1/cmd_vel', ty: 'twist', lin: 2.0, ang: 2.0 },
+      { id: 'diff', label: '디프드라이브(turtlebot 등)  ·  /cmd_vel  ·  Twist', topic: '/cmd_vel', ty: 'twist', lin: 0.5, ang: 1.0 },
+      { id: 'mavros', label: 'MAVROS 속도  ·  /mavros/setpoint_velocity/cmd_vel  ·  TwistStamped', topic: '/mavros/setpoint_velocity/cmd_vel', ty: 'twiststamped', lin: 0.5, ang: 0.5 },
+      { id: 'custom', label: '직접 입력 (아래 토픽/타입 사용)', topic: null },
+    ];
+    const presetSel = el('select', { style: 'width:100%' });
+    PRESETS.forEach((p) => presetSel.append(el('option', { value: p.id }, p.label)));
+    const applyPreset = (pid) => { const p = PRESETS.find((x) => x.id === pid); if (!p || !p.topic) return; topic.value = p.topic; tySel.value = p.ty; lin.value = String(p.lin); ang.value = String(p.ang); refreshTy(); };
+    presetSel.onchange = () => applyPreset(presetSel.value);
+    const initId = (PRESETS.find((p) => p.topic === def) || { id: 'custom' }).id;   // 감지된 기본 토픽에 맞춰 초기 프리셋
+    presetSel.value = initId; if (initId !== 'custom') applyPreset(initId);
     const status = el('span', { class: 'hint' }, '■ 정지');
     let held = null;
     const send = (dx, dz) => { const dir = dx + ',' + dz; if (dir === held) return; held = dir; post('/api/teleop', { topic: topic.value, ty: msgTy(), lin: dx * (+lin.value || 0), ang: dz * (+ang.value || 0) }).then(() => { status.textContent = `▶ ${topic.value}  lin ${(dx * lin.value).toFixed(2)}  ang ${(dz * ang.value).toFixed(2)}`; }); };
@@ -1158,6 +1171,7 @@ const Views = {
     const grid = el('div', { style: 'display:grid;grid-template-columns:repeat(3,52px);gap:6px;justify-content:center;margin:12px 0' },
       el('span'), B('▲', 1, 0), el('span'), B('◀', 0, 1), stopBtn, B('▶', 0, -1), el('span'), B('▼', -1, 0), el('span'));
     openModal('🎮 Teleop (Twist)', el('div', {}, dl,
+      el('div', { class: 'hint', style: 'margin-bottom:6px' }, '프리셋 ', presetSel),
       el('div', { class: 'hint', style: 'margin-bottom:6px' }, '토픽 ', topic, ' ', tySel, ' ', tyLbl),
       el('div', { class: 'hint', style: 'margin-bottom:6px' }, '선속 ', lin, ' m/s  각속 ', ang, ' rad/s'),
       grid, el('div', { class: 'hint' }, '버튼/키를 누르는 동안 -r 10 Hz 발행 · 놓으면 정지 · W/A/S/D·↑←↓→, Space=정지'),
