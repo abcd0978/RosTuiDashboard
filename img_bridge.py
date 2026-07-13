@@ -9,9 +9,8 @@ import io
 
 def main():
     topic = sys.argv[1] if len(sys.argv) > 1 else '/camera/image_raw/compressed'
-    import rclpy
-    rclpy.init()
-    node = rclpy.create_node('rdash_img_bridge')
+    from ros_compat import Bridge
+    b = Bridge('rdash_img_bridge')
     out = sys.stdout
 
     def emit(jpeg_bytes):
@@ -23,7 +22,7 @@ def main():
 
     if 'compressed' in topic.lower():
         from sensor_msgs.msg import CompressedImage
-        node.create_subscription(CompressedImage, topic, lambda m: emit(bytes(m.data)), 10)
+        b.subscribe(CompressedImage, topic, lambda m: emit(bytes(m.data)))
     else:
         from sensor_msgs.msg import Image
         import numpy as np
@@ -47,9 +46,9 @@ def main():
                 emit(buf.getvalue())
             except Exception:
                 pass
-        node.create_subscription(Image, topic, cb, 10)
+        b.subscribe(Image, topic, cb)
 
-    rclpy.spin(node)
+    b.spin()
 
 
 if __name__ == '__main__':

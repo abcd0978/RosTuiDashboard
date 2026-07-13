@@ -261,16 +261,15 @@ def main():
             time.sleep(2.0)
         return
     # 토픽 /robot_description (std_msgs/String, latched) 구독.
-    import rclpy
     from std_msgs.msg import String
-    rclpy.init()
-    node = rclpy.create_node('rdash_urdf_bridge')
+    from ros_compat import Bridge
+    b = Bridge('rdash_urdf_bridge')
     state = {"m": []}
 
     def cb(msg):
         state["m"] = urdf_to_markers(msg.data)
         emit(state["m"])
-    node.create_subscription(String, '/robot_description', cb, 1)
+    b.subscribe(String, '/robot_description', cb, best_effort=False, transient_local=True, depth=1)
     import threading
 
     def repeat():
@@ -280,7 +279,7 @@ def main():
             if state["m"]:
                 emit(state["m"])
     threading.Thread(target=repeat, daemon=True).start()
-    rclpy.spin(node)
+    b.spin()
 
 
 if __name__ == '__main__':

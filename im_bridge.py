@@ -69,12 +69,11 @@ def emit(state):
 
 def main():
     topic = sys.argv[1] if len(sys.argv) > 1 else '/basic_controls'
-    import rclpy
+    from ros_compat import Bridge
     from visualization_msgs.msg import InteractiveMarkerUpdate, InteractiveMarkerFeedback
     from geometry_msgs.msg import Pose
     from std_msgs.msg import Header
-    rclpy.init()
-    node = rclpy.create_node('rdash_im_bridge')
+    b = Bridge('rdash_im_bridge')
     state = {}          # name → im_json
     frames = {}         # name → frame_id (피드백 헤더용)
 
@@ -98,29 +97,41 @@ def main():
         if changed:
             emit(state)
 
-    node.create_subscription(InteractiveMarkerUpdate, topic + '/update', apply_update, 10)
+    b.subscribe(InteractiveMarkerUpdate, topic + '/update', apply_update, best_effort=False)
 
     # 초기 전체 상태 — ROS2 는 get_interactive_markers 서비스로, 실패해도 /update 로 결국 채워짐.
-    def fetch_full():
-        try:
-            from visualization_msgs.srv import GetInteractiveMarkers
-            cli = node.create_client(GetInteractiveMarkers, topic + '/get_interactive_markers')
-            if cli.wait_for_service(timeout_sec=3.0):
-                fut = cli.call_async(GetInteractiveMarkers.Request())
-                rclpy.spin_until_future_complete(node, fut, timeout_sec=3.0)
-                res = fut.result()
-                if res is not None:
-                    for im in res.markers:
-                        j = im_json(im)
-                        state[j['name']] = j
-                        frames[j['name']] = j['frame_id']
-                    if state:
-                        emit(state)
-        except Exception:
-            pass
-    threading.Thread(target=fetch_full, daemon=True).start()
+    # ROS1 은 서비스가 없으므로 latched InteractiveMarkerInit(<topic>/update_full) 을 구독.
+    if b.v == 2:
+        def fetch_full():
+            try:
+                from visualization_msgs.srv import GetInteractiveMarkers
+                cli = b.node.create_client(GetInteractiveMarkers, topic + '/get_interactive_markers')
+                if cli.wait_for_service(timeout_sec=3.0):
+                    fut = cli.call_async(GetInteractiveMarkers.Request())
+                    b._rclpy.spin_until_future_complete(b.node, fut, timeout_sec=3.0)
+                    res = fut.result()
+                    if res is not None:
+                        for im in res.markers:
+                            j = im_json(im)
+                            state[j['name']] = j
+                            frames[j['name']] = j['frame_id']
+                        if state:
+                            emit(state)
+            except Exception:
+                pass
+        threading.Thread(target=fetch_full, daemon=True).start()
+    else:
+        from visualization_msgs.msg import InteractiveMarkerInit
 
-    fb_pub = node.create_publisher(InteractiveMarkerFeedback, topic + '/feedback', 10)
+        def apply_full(msg):
+            for im in msg.markers:
+                j = im_json(im)
+                state[j['name']] = j
+                frames[j['name']] = j['frame_id']
+            emit(state)
+        b.subscribe(InteractiveMarkerInit, topic + '/update_full', apply_full, best_effort=False, transient_local=True)
+
+    fb_pub = b.publisher(InteractiveMarkerFeedback, topic + '/feedback')
 
     def feedback_reader():
         for line in sys.stdin:
@@ -138,7 +149,7 @@ def main():
             fb = InteractiveMarkerFeedback()
             fb.header = Header()
             fb.header.frame_id = frames.get(name, '') or (state.get(name, {}).get('frame_id', ''))
-            fb.header.stamp = node.get_clock().now().to_msg()
+            fb.header.stamp = b.now_msg()
             fb.client_id = 'rdash'
             fb.marker_name = name or ''
             fb.control_name = d.get('control', '')
@@ -155,7 +166,7 @@ def main():
                 pass
     threading.Thread(target=feedback_reader, daemon=True).start()
 
-    rclpy.spin(node)
+    b.spin()
 
 
 if __name__ == '__main__':

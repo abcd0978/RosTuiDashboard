@@ -46,9 +46,8 @@ def fg_annotations(msg):
 
 def main():
     topic = sys.argv[1] if len(sys.argv) > 1 else '/detections'
-    import rclpy
-    rclpy.init()
-    node = rclpy.create_node('rdash_img_ann_bridge')
+    from ros_compat import Bridge
+    b = Bridge('rdash_img_ann_bridge')
 
     def emit(o):
         try:
@@ -58,19 +57,19 @@ def main():
             pass
 
     ty = None
-    for n, ts in node.get_topic_names_and_types():
+    for n, ts in b.topic_types():
         if n == topic and ts:
             ty = ts[0]
     if ty and 'ImageAnnotations' in ty:
         from foxglove_msgs.msg import ImageAnnotations
-        node.create_subscription(ImageAnnotations, topic,
-                                 lambda m: emit(dict(zip(("points", "circles", "texts"), fg_annotations(m)),
-                                                     boxes=[])), 10)
+        b.subscribe(ImageAnnotations, topic,
+                    lambda m: emit(dict(zip(("points", "circles", "texts"), fg_annotations(m)),
+                                         boxes=[])))
     else:
         from vision_msgs.msg import Detection2DArray
-        node.create_subscription(Detection2DArray, topic,
-                                 lambda m: emit({"boxes": det_boxes(m), "points": [], "circles": [], "texts": []}), 10)
-    rclpy.spin(node)
+        b.subscribe(Detection2DArray, topic,
+                    lambda m: emit({"boxes": det_boxes(m), "points": [], "circles": [], "texts": []}))
+    b.spin()
 
 
 if __name__ == '__main__':

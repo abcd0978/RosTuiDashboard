@@ -30,10 +30,9 @@ def voxel_downsample(pts, voxel, np):
 
 def main():
     topic = sys.argv[1] if len(sys.argv) > 1 else '/cloud_registered'
-    import rclpy
     import numpy as np
-    rclpy.init()
-    node = rclpy.create_node('rdash_cloud_bridge')
+    from ros_compat import Bridge
+    b = Bridge('rdash_cloud_bridge')
     from sensor_msgs.msg import PointCloud2
 
     def cb(msg):
@@ -81,8 +80,8 @@ def main():
         except Exception:
             pass
 
-    node.create_subscription(PointCloud2, topic, cb, 5)
-    rclpy.spin(node)
+    b.subscribe(PointCloud2, topic, cb)
+    b.spin()
 
 
 if __name__ == '__main__':

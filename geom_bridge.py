@@ -129,14 +129,13 @@ HANDLERS = [
 def main():
     topic = sys.argv[1] if len(sys.argv) > 1 else '/scan'
     tyarg = sys.argv[2] if len(sys.argv) > 2 else ''
-    import rclpy
     from importlib import import_module
-    rclpy.init()
-    node = rclpy.create_node('rdash_geom_bridge')
+    from ros_compat import Bridge
+    b = Bridge('rdash_geom_bridge')
 
     # 타입 결정: 인자 우선, 없으면 그래프에서 조회.
     if not tyarg:
-        for n, ts in node.get_topic_names_and_types():
+        for n, ts in b.topic_types():
             if n == topic and ts:
                 tyarg = ts[0]
     match = next((h for h in HANDLERS if h[0] in tyarg), None)
@@ -145,8 +144,8 @@ def main():
         return
     _, mod, cls, fn = match
     MsgType = getattr(import_module(mod), cls)
-    node.create_subscription(MsgType, topic, lambda m: emit(fn(m)), 10)
-    rclpy.spin(node)
+    b.subscribe(MsgType, topic, lambda m: emit(fn(m)))
+    b.spin()
 
 
 if __name__ == '__main__':

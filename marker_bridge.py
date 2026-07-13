@@ -21,9 +21,8 @@ def mk(m):
 
 def main():
     topic = sys.argv[1] if len(sys.argv) > 1 else '/visualization_marker_array'
-    import rclpy
-    rclpy.init()
-    node = rclpy.create_node('rdash_marker_bridge')
+    from ros_compat import Bridge
+    b = Bridge('rdash_marker_bridge')
 
     def emit(markers):
         try:
@@ -34,15 +33,15 @@ def main():
 
     # 타입 자동 감지: 토픽 타입으로 Marker / MarkerArray 결정.
     ty = None
-    for n, ts in node.get_topic_names_and_types():
+    for n, ts in b.topic_types():
         if n == topic and ts:
             ty = ts[0]
     from visualization_msgs.msg import Marker, MarkerArray
     if ty and 'MarkerArray' in ty or 'array' in topic:
-        node.create_subscription(MarkerArray, topic, lambda a: emit([mk(m) for m in a.markers]), 10)
+        b.subscribe(MarkerArray, topic, lambda a: emit([mk(m) for m in a.markers]))
     else:
-        node.create_subscription(Marker, topic, lambda m: emit([mk(m)]), 10)
-    rclpy.spin(node)
+        b.subscribe(Marker, topic, lambda m: emit([mk(m)]))
+    b.spin()
 
 
 if __name__ == '__main__':
