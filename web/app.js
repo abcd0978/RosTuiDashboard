@@ -60,6 +60,7 @@ const visible = () => items.filter((i) => !(i.name || '').includes('/_action/'))
 
 // ── 노드 그래프 — rqt_graph 스타일(노드/토픽 이분 그래프) + 서비스·액션 관계 ──────────
 let G = { ents: new Map(), edges: [] }, pos = new Map(), dragging = null;
+let gspread = 1;                        // 노드 간격 배수(슬라이더로 실시간 조절) — 척력·스프링·충돌 간격에 반영
 const gview = { s: 1, ox: 0, oy: 0 };   // 그래프 줌/팬(#edges·#nodes 그룹 transform)
 const applyGView = () => { const tr = `translate(${gview.ox},${gview.oy}) scale(${gview.s})`; const e = $('#edges'), n = $('#nodes'); if (e) e.setAttribute('transform', tr); if (n) n.setAttribute('transform', tr); };
 // 화면좌표 → 그래프좌표(줌/팬 역변환).
@@ -122,13 +123,15 @@ const halfW = (name) => entW(name) / 2;
 function borderPt(p, hw, hh, dx, dy) { const s = 1 / Math.max(Math.abs(dx) / hw, Math.abs(dy) / hh, 1e-6); return { x: p.x + dx * s, y: p.y + dy * s }; }
 function tick() {
   const W = $('#graph').clientWidth || 800, H = $('#graph').clientHeight || 600, ids = [...pos.keys()];
-  // 척력(Coulomb) — 넉넉하게 밀어 노드가 서로 안 겹치게.
-  for (const a of ids) { const pa = pos.get(a); for (const b of ids) { if (a === b) continue; const pb = pos.get(b); const dx = pa.x - pb.x, dy = pa.y - pb.y, d2 = dx * dx + dy * dy || 1, f = 95000 / d2, d = Math.sqrt(d2); pa.vx += dx / d * f * 0.02; pa.vy += dy / d * f * 0.02; } pa.vx += (W / 2 - pa.x) * 0.0012; pa.vy += (H / 2 - pa.y) * 0.0018; }
-  // 인력(스프링) — 연결 노드는 적당한 거리로, 토픽 수(가중치)가 많을수록 살짝 더 가깝게.
-  for (const e of G.edges) { const pa = pos.get(e.from), pb = pos.get(e.to); if (!pa || !pb) continue; const dx = pb.x - pa.x, dy = pb.y - pa.y, d = Math.hypot(dx, dy) || 1, wt = (e.labels ? e.labels.length : 1), ideal = 185 - Math.min(60, wt * 8), f = (d - ideal) * 0.009; pa.vx += dx / d * f; pa.vy += dy / d * f; pb.vx -= dx / d * f; pb.vy -= dy / d * f; }
+  const spread = gspread;
+  // 척력(Coulomb) — 넉넉하게 밀어 노드가 서로 안 겹치게. 간격 배수의 제곱으로 평형 거리 ∝ spread.
+  for (const a of ids) { const pa = pos.get(a); for (const b of ids) { if (a === b) continue; const pb = pos.get(b); const dx = pa.x - pb.x, dy = pa.y - pb.y, d2 = dx * dx + dy * dy || 1, f = 95000 * spread * spread / d2, d = Math.sqrt(d2); pa.vx += dx / d * f * 0.02; pa.vy += dy / d * f * 0.02; } pa.vx += (W / 2 - pa.x) * 0.0012; pa.vy += (H / 2 - pa.y) * 0.0018; }
+  // 인력(스프링) — 연결 노드는 적당한 거리로, 토픽 수(가중치)가 많을수록 살짝 더 가깝게. 이상 길이 ∝ spread.
+  for (const e of G.edges) { const pa = pos.get(e.from), pb = pos.get(e.to); if (!pa || !pb) continue; const dx = pb.x - pa.x, dy = pb.y - pa.y, d = Math.hypot(dx, dy) || 1, wt = (e.labels ? e.labels.length : 1), ideal = (185 - Math.min(60, wt * 8)) * spread, f = (d - ideal) * 0.009; pa.vx += dx / d * f; pa.vy += dy / d * f; pb.vx -= dx / d * f; pb.vy -= dy / d * f; }
   for (const id of ids) { const p = pos.get(id); if (dragging === id) continue; p.x += p.vx *= 0.82; p.y += p.vy *= 0.82; }
   // 충돌 해소(위치 직접 분리) — 겹치는 사각형을 침투 적은 축으로 밀어냄. 라벨 겹침도 크게 줄어듦.
-  for (let it = 0; it < 2; it++) for (const a of ids) { if (dragging === a) continue; const pa = pos.get(a); for (const b of ids) { if (a === b) continue; const pb = pos.get(b); const dx = pb.x - pa.x, dy = pb.y - pa.y; const minX = halfW(a) + halfW(b) + GAP, minY = 2 * HALF_H + GAP; const ox = minX - Math.abs(dx), oy = minY - Math.abs(dy); if (ox > 0 && oy > 0) { if (ox < oy) { const s = (dx >= 0 ? 1 : -1) * ox / 2; pa.x -= s; if (dragging !== b) pb.x += s; } else { const s = (dy >= 0 ? 1 : -1) * oy / 2; pa.y -= s; if (dragging !== b) pb.y += s; } } } }
+  const gap = GAP * spread;
+  for (let it = 0; it < 2; it++) for (const a of ids) { if (dragging === a) continue; const pa = pos.get(a); for (const b of ids) { if (a === b) continue; const pb = pos.get(b); const dx = pb.x - pa.x, dy = pb.y - pa.y; const minX = halfW(a) + halfW(b) + gap, minY = 2 * HALF_H + gap; const ox = minX - Math.abs(dx), oy = minY - Math.abs(dy); if (ox > 0 && oy > 0) { if (ox < oy) { const s = (dx >= 0 ? 1 : -1) * ox / 2; pa.x -= s; if (dragging !== b) pb.x += s; } else { const s = (dy >= 0 ? 1 : -1) * oy / 2; pa.y -= s; if (dragging !== b) pb.y += s; } } } }
   for (const id of ids) { const p = pos.get(id); p.x = Math.max(halfW(id) + 4, Math.min(W - halfW(id) - 4, p.x)); p.y = Math.max(HALF_H + 4, Math.min(H - HALF_H - 4, p.y)); }
   paint();
   if (!(SNAP && ++tick.n > 480)) requestAnimationFrame(tick);
@@ -160,22 +163,53 @@ function paint() {
 }
 function selectNode(id) { sel = id; const e = G.ents.get(id); selItem = byName(id) || { kind: e ? e.type : 'node', name: id }; renderSidebar(); renderValActs(); }
 
-// ── 사이드바 ────────────────────────────────────────────────────────────────
+// ── 사이드바 — TUI 식 접기/펼치기 트리(이름을 '/' 로 계층화) ──────────────────────
+const treeCollapsed = new Set();   // 접힌 경로(kind\0/a/b) — 렌더 사이 유지. kind\0 = 섹션 전체.
+const toggleCollapse = (key) => { treeCollapsed.has(key) ? treeCollapsed.delete(key) : treeCollapsed.add(key); renderSidebar(); };
+function buildPathTree(arr) {   // 이름 세그먼트로 중첩 트리. 폴더가 곧 항목일 수도 있음(item + children 동시).
+  const root = { children: new Map() };
+  for (const it of arr) { const segs = it.name.replace(/^\//, '').split('/'); let node = root, acc = '';
+    for (let i = 0; i < segs.length; i++) { acc += '/' + segs[i];
+      if (!node.children.has(segs[i])) node.children.set(segs[i], { children: new Map(), item: null, full: acc, seg: segs[i] });
+      node = node.children.get(segs[i]); if (i === segs.length - 1) node.item = it; } }
+  return root;
+}
+function leafCount(node) { let n = node.item ? 1 : 0; for (const c of node.children.values()) n += leafCount(c); return n; }
+function badge(it) {   // 토픽 hz 배지(라이브/정지)
+  if (it.kind !== 'topic') return el('span');
+  const live = it.hz > 0.1, stale = !live && it.age > 3;
+  return el('span', { class: 'hz ' + (live ? 'live' : stale ? 'stale' : '') }, String(it.hz ?? ''));
+}
+function deadMark(it) { return it.kind === 'topic' && it.pubs ? ((it.pubs.length && !(it.subs || []).length) ? ' ⇢' : (!it.pubs.length && (it.subs || []).length ? ' ⇠' : '')) : ''; }
+function renderTree(kind, node, depth, H) {
+  const kids = [...node.children.values()].sort((a, b) => a.seg.localeCompare(b.seg));
+  for (const c of kids) {
+    const hasKids = c.children.size > 0, key = kind + '\0' + c.full, collapsed = treeCollapsed.has(key), pad = 10 + depth * 13;
+    const caret = el('span', { class: 'tcaret' }, hasKids ? (collapsed ? '▸' : '▾') : '');
+    const nameCls = (hasKids && !c.item ? 'tdir' : 'k-' + kind) + ' tname';
+    const label = (c.item && marked.has(c.item.name) ? '*' : '') + c.seg + (c.item ? deadMark(c.item) : '');
+    const cnt = hasKids && collapsed ? el('span', { class: 'tcount' }, '(' + leafCount(c) + ')') : null;
+    const left = el('span', { style: 'display:flex;align-items:center;gap:2px;min-width:0;flex:1' }, caret, el('span', { class: nameCls }, label), ...(cnt ? [cnt] : []));
+    const isSel = c.item && sel === c.item.name;
+    const row = el('div', { class: 'row' + (isSel ? ' sel' : ''), style: 'padding-left:' + pad + 'px', title: c.full }, left, c.item ? badge(c.item) : el('span'));
+    if (hasKids) caret.onclick = (e) => { e.stopPropagation(); toggleCollapse(key); };
+    row.onclick = () => { if (c.item) onPick(c.item); else if (hasKids) toggleCollapse(key); };
+    H.push(row);
+    if (hasKids && !collapsed) renderTree(kind, c, depth + 1, H);
+  }
+}
 function renderSidebar() {
   const groups = {};
   for (const it of visible()) (groups[it.kind] || (groups[it.kind] = [])).push(it);
   const titles = { topic: '토픽', action: '액션', node: '노드', service: '서비스', param: '파라미터' };
   const H = [];
   for (const k of ['topic', 'action', 'node', 'service', 'param']) { const arr = (groups[k] || []); if (!arr.length) continue;
-    H.push(el('div', { class: 'sec' }, `${titles[k] || k} (${arr.length})`));
-    for (const it of arr.sort((a, b) => a.name.localeCompare(b.name))) {
-      const live = it.kind === 'topic' && (it.hz > 0.1); const stale = it.kind === 'topic' && !live && it.age > 3;
-      const dead = it.kind === 'topic' && it.pubs && ((it.pubs.length && !(it.subs || []).length) ? ' ⇢' : (!it.pubs.length && (it.subs || []).length ? ' ⇠' : ''));
-      const row = el('div', { class: 'row' + (sel === it.name ? ' sel' : '') },
-        el('span', { class: 'k-' + it.kind }, (marked.has(it.name) ? '*' : '') + it.name + (dead || '')),
-        it.kind === 'topic' ? el('span', { class: 'hz ' + (live ? 'live' : stale ? 'stale' : '') }, String(it.hz ?? '')) : el('span'));
-      row.onclick = () => onPick(it); H.push(row);
-    } }
+    const secKey = k + '\0', secCollapsed = treeCollapsed.has(secKey);
+    const sec = el('div', { class: 'sec', style: 'cursor:pointer;display:flex;align-items:center;gap:4px' }, el('span', { class: 'tcaret' }, secCollapsed ? '▸' : '▾'), `${titles[k] || k} (${arr.length})`);
+    sec.onclick = () => toggleCollapse(secKey); H.push(sec);
+    if (secCollapsed) continue;
+    renderTree(k, buildPathTree(arr), 0, H);
+  }
   const side = $('#side'); side.innerHTML = '';
   if (!H.length) { side.append(items.length ? emptyState('🔍', '표시할 항목 없음', '필터를 확인하세요') : (everOpen ? emptyState('📡', 'ROS 그래프가 비어 있음', '실행 중인 노드/토픽이 없습니다') : spinner('그래프 수집 중…'))); return; }
   H.forEach((x) => side.append(x));
@@ -201,6 +235,11 @@ let gMin = Infinity, gMax = -Infinity, gKey = null;   // 게이지 자동 레인
   bN.onclick = () => setMode('nodes'); bB.onclick = () => setMode('bipartite'); seg.append(bN, bB);
   const chk = (key, label, init) => { const c = el('input', { type: 'checkbox' }); c.checked = init; c.onchange = () => { GF[key] = c.checked; render(); }; return el('label', {}, c, label); };
   bar.append(seg, chk('services', '서비스', true), chk('actions', '액션', true), chk('tf', 'tf', true), chk('debug', 'debug', false), chk('leaves', 'dead-end', true));
+  // 노드 간격 슬라이더 — 실시간(척력/스프링/충돌 간격 배수). tick 루프가 매 프레임 gspread 를 읽어 즉시 반영.
+  const sp = el('input', { type: 'range', min: '0.5', max: '3', step: '0.05', value: '1', title: '노드 간격', style: 'vertical-align:middle;width:110px' });
+  const spVal = el('span', { class: 'hint', style: 'margin-left:4px;font-family:monospace' }, '1.0×');
+  sp.oninput = () => { gspread = +sp.value; spVal.textContent = gspread.toFixed(2) + '×'; };
+  bar.append(el('label', { style: 'display:inline-flex;align-items:center;gap:4px' }, el('span', {}, '간격'), sp, spVal));
   main.appendChild(bar);
 })();
 function drawGauge() {
