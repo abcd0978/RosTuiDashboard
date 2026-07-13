@@ -34,7 +34,7 @@ export const useDashboard = () => useContext(DashboardContext);
 export function StoreProvider({ children }) {
   const { exit } = useApp();
   const ver = useRosVersion();
-  const be = makeBackend(ver);   // ROS 명령은 백엔드 인터페이스로 통일(웹과 동일한 CliBackend)
+  const be = makeBackend(ver, process.env.RDASH_TUI_BACKEND || 'cli');   // TUI 는 ROS CLI 백엔드를 기본 사용
   const sessRef = useRef(loadSession());                // 이전 세션(펼침/워치/모드/마지막 선택)
   const sess = sessRef.current;
   const [domain, setDomain] = useState(process.env.ROS_DOMAIN_ID ?? null);   // 컨테이너/도메인 전환

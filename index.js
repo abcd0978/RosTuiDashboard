@@ -22,6 +22,10 @@ process.on('warning', () => {});
 
 ensurePyDeps();   // 플롯용 파이썬 패키지(numpy·matplotlib·PyYAML) 없으면 자동 설치 — 대체 화면 진입 전에.
 
+// TUI 는 ROS CLI 백엔드를 기본으로 유지한다. 웹 서버만 rosbridge 를 기본 백엔드로 띄운다.
+// RDASH_TUI_BACKEND / RDASH_WEB_BACKEND 로 각각 따로 덮어쓸 수 있다.
+if (!process.env.RDASH_TUI_BACKEND) process.env.RDASH_TUI_BACKEND = 'cli';
+
 // 웹 서버 동반 기동 — `npm start` 하나로 TUI + localhost 웹을 함께 띄운다.
 // 웹은 stdio 를 삼켜(대체 화면 오염 방지) 조용히 돌고, TUI 종료 시 함께 정리된다. RDASH_NO_WEB=1 로 끌 수 있다.
 if (process.env.RDASH_NO_WEB !== '1') {
@@ -29,8 +33,12 @@ if (process.env.RDASH_NO_WEB !== '1') {
   process.env.RDASH_WEB_ACTIVE = `localhost:${port}`;   // EnvBar 표시용
   try {
     const here = dirname(fileURLToPath(import.meta.url));
+    const webEnv = {
+      ...process.env,
+      RDASH_BACKEND: process.env.RDASH_WEB_BACKEND || 'rosbridge',
+    };
     const web = spawn(process.execPath, [join(here, 'web', 'server.js')],
-      { stdio: 'ignore', env: process.env });
+      { stdio: 'ignore', env: webEnv });
     web.on('error', () => { delete process.env.RDASH_WEB_ACTIVE; });
     const killWeb = () => { try { web.kill('SIGTERM'); } catch { /* */ } };
     process.on('exit', killWeb); process.on('SIGINT', killWeb); process.on('SIGTERM', killWeb);

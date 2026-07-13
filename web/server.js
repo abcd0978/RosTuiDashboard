@@ -6,7 +6,7 @@ import { WebSocketServer } from 'ws';
 import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join, extname } from 'path';
-import { spawnSync } from 'child_process';
+import { spawn, spawnSync } from 'child_process';
 import { rosSpawn } from '../src/lib/ros.js';
 import { flattenSkeleton, buildYaml } from '../src/lib/msgform.js';
 import { loadBookmarks, saveBookmarks, activePreset, presetNames, savePreset } from '../src/lib/bookmarks.js';
@@ -27,8 +27,35 @@ function detectVer() {
   return r.status === 0 ? '2' : '1';
 }
 const VER = detectVer();
-// 모든 ROS 조작은 이 백엔드 인터페이스를 통해서만. RDASH_BACKEND 로 구현체 교체(현재 cli).
-const be = makeBackend(VER);
+// 백엔드: RDASH_BACKEND 없으면 rosbridge 설치 시 rosbridge 사용(단, 연결 안 되면 CLI 로 폴백 — 아래 useRb).
+function rosbridgeInstalled() {
+  try {
+    const c = VER === '2' ? spawnSync('ros2', ['pkg', 'prefix', 'rosbridge_server'])
+                          : spawnSync('rospack', ['find', 'rosbridge_server']);
+    return c.status === 0;
+  } catch { return false; }
+}
+const BACKEND = process.env.RDASH_BACKEND || (rosbridgeInstalled() ? 'rosbridge' : 'cli');
+const be = makeBackend(VER, BACKEND);
+
+// rosbridge_server 자동 기동/유지(launch = websocket + rosapi). 로컬 URL 한정. ROS1 은 마스터 뜬 뒤에만.
+function tcpOpen(port) { try { return (spawnSync('bash', ['-c', `(exec 3<>/dev/tcp/127.0.0.1/${port}) 2>/dev/null && echo up`]).stdout || '').toString().includes('up'); } catch { return false; } }
+let rbProc = null;
+function ensureRosbridge() {
+  if (BACKEND !== 'rosbridge' || !/localhost|127\.0\.0\.1/.test(be.url)) return;
+  if (tcpOpen(9090)) return;                        // 이미 떠 있음(공유)
+  if (rbProc && rbProc.exitCode === null) return;   // 기동 중
+  if (VER !== '2' && !tcpOpen(11311)) return;       // ROS1: 마스터 없으면 대기(경쟁 마스터 방지)
+  const cmd = VER === '2' ? 'ros2 launch rosbridge_server rosbridge_websocket_launch.xml'
+                          : 'roslaunch rosbridge_server rosbridge_websocket.launch';
+  rbProc = spawn('bash', ['-lc', `source /opt/ros/*/setup.bash 2>/dev/null; exec ${cmd}`], { stdio: 'ignore' });
+  rbProc.on('error', () => { rbProc = null; });
+  rbProc.on('exit', () => { rbProc = null; });
+}
+ensureRosbridge();
+setInterval(ensureRosbridge, 5000);
+const killRb = () => { try { if (rbProc) rbProc.kill('SIGINT'); } catch { /* */ } };
+process.on('exit', killRb); process.on('SIGINT', killRb); process.on('SIGTERM', killRb);
 
 // ── 유틸 ──────────────────────────────────────────────────────────────────
 function sse(res) {
@@ -100,8 +127,23 @@ function muxStream(res, topic) { const send = sse(res); const off = muxAdd(topic
 const echoStream = (res, topic) => (be.usesMux ? muxStream(res, topic) : streamBlocks(res, be.echo(topic)));
 
 // ── rosbridge(원격 websocket) 백엔드 — 로컬 ROS 없이 원격 로봇의 rosbridge_suite 에 연결 ──
-let rb = null;
+let rb = null, rbCmd = null;
 function rbEnsure() { if (!rb) { rb = new RosbridgeClient(be.url); rb.connect(); } return rb; }
+function rbCmdEnsure() { if (!rbCmd) { rbCmd = new RosbridgeClient(be.url); rbCmd.connect(); } return rbCmd; }
+if (BACKEND === 'rosbridge') {
+  rbEnsure();   // 미리 연결 시작 — 연결되기 전/끊기면 useRb()=false → CLI 폴백
+  rbCmdEnsure();   // publish/service/teleop 전용 — telemetry rosapi 호출 backlog 와 분리
+  // Node20 undici WebSocket 은 최초 연결 거부(9090 미기동) 시 'close' 이벤트를 안 쏴 rosbridge.js 의 자동 재시도가 멈춘다.
+  // 9090 이 열려 있는데 rb 가 아직 연결 안 됐으면 여기서 재연결을 유도(연결되면 rb.ready=true → useRb()=true). rb.ready 면 tcpOpen 호출 안 함(short-circuit).
+  setInterval(() => {
+    if (tcpOpen(9090)) {
+      if (rb && !rb.ready) rb.connect();
+      if (rbCmd && !rbCmd.ready) rbCmd.connect();
+    }
+  }, 2000);
+}
+function useRb() { return be.kind === 'rosbridge' && rb && rb.ready; }
+function useRbCmd() { return be.kind === 'rosbridge' && rbCmd && rbCmd.ready; }
 async function rbTopicType(topic) { const r = await rbEnsure().call('/rosapi/topic_type', { topic }); return (r && r.type) || ''; }
 // 그래프+Hz 를 rosapi 로 폴링해 telemetry.py 와 같은 items 스트림 생성.
 function rbTelemetry(res) { const send = sse(res); const off = rbTelemetryCore(send); res.on('close', off); }
@@ -148,15 +190,31 @@ function spawnJob(label, cmd) {
 function jobView(r) { return { id: r.id, label: r.label, pid: r.pid, status: r.status, log: r.log.slice(-30) }; }
 
 // ── Teleop — geometry_msgs/Twist 지속 퍼블리셔 하나를 관리(Foxglove Teleop 패널 대응) ──
-let teleopId = null;
+let teleopId = null, teleopIv = null, teleopTy = 'twist';
+function twistMsg(lin, ang, ty) {
+  const twist = { linear: { x: lin, y: 0, z: 0 }, angular: { x: 0, y: 0, z: ang } };
+  const stamped = /stamped/i.test(ty || '');
+  return { type: stamped ? 'geometry_msgs/TwistStamped' : 'geometry_msgs/Twist',
+           msg: stamped ? { header: { frame_id: '' }, twist } : twist };
+}
 function teleopStop(topic) {
+  if (teleopIv) { clearInterval(teleopIv); teleopIv = null; }
   if (teleopId && jobs.has(teleopId)) { const r = jobs.get(teleopId); try { process.kill(-r.child.pid, 'SIGINT'); } catch { try { r.child.kill('SIGINT'); } catch { /* */ } } }
   teleopId = null;
-  if (topic) { const cmd = be.publish(topic, '{linear: {x: 0.0, y: 0.0, z: 0.0}, angular: {x: 0.0, y: 0.0, z: 0.0}}'); if (cmd) runOnce(cmd); }   // 정지 시 0 트위스트 1회
+  if (topic) {
+    if (useRbCmd()) { const { type, msg } = twistMsg(0, 0, teleopTy); rbCmdEnsure().publish(topic, type, msg); }
+    else { const cmd = be.publish(topic, '{linear: {x: 0.0, y: 0.0, z: 0.0}, angular: {x: 0.0, y: 0.0, z: 0.0}}'); if (cmd) runOnce(cmd); }
+  }
 }
 function teleopSet(topic, lin, ang, ty) {
-  teleopStop();   // 이전 퍼블리셔 정리(0 발행 없이)
-  teleopId = spawnJob(`teleop ${topic}`, be.teleop(topic, lin, ang, ty)).id;
+  teleopStop(); teleopTy = ty || 'twist';
+  if (useRbCmd()) {
+    const { type, msg } = twistMsg(lin, ang, ty); const rbc = rbCmdEnsure();
+    rbc.publish(topic, type, msg);
+    teleopIv = setInterval(() => rbc.publish(topic, type, msg), 100);
+  } else {
+    teleopId = spawnJob(`teleop ${topic}`, be.teleop(topic, lin, ang, ty)).id;
+  }
 }
 
 // ── 정적 파일 ─────────────────────────────────────────────────────────────
@@ -179,8 +237,8 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/preflight') return json(res, 200, { checks: loadPreflight() });
 
     // 스트림
-    if (p === '/events') return be.kind === 'rosbridge' ? rbTelemetry(res) : streamLines(res, 'python3 -', telemScript());
-    if (p === '/echo') return q.get('topic') ? (be.kind === 'rosbridge' ? rbEcho(res, q.get('topic')) : echoStream(res, q.get('topic'))) : json(res, 400, { error: 'topic' });
+    if (p === '/events') return useRb() ? rbTelemetry(res) : streamLines(res, 'python3 -', telemScript());
+    if (p === '/echo') return q.get('topic') ? (useRb() ? rbEcho(res, q.get('topic')) : echoStream(res, q.get('topic'))) : json(res, 400, { error: 'topic' });
     if (p === '/imgstream') { const t = q.get('topic'); if (!t) return json(res, 400, { error: 'topic' }); return streamLines(res, be.imgBridge(t)); }
     // /cloudstream 은 WS 전용(바이너리). SSE 로는 제공하지 않음.
     if (p === '/markerstream') { const t = q.get('topic'); if (!t) return json(res, 400, { error: 'topic' }); return streamLines(res, be.markerBridge(t)); }
@@ -189,8 +247,8 @@ const server = http.createServer(async (req, res) => {
     if (p === '/caminfostream') { const t = q.get('topic'); if (!t) return json(res, 400, { error: 'topic' }); return streamLines(res, be.camInfoBridge(t)); }
     if (p === '/geomstream') { const t = q.get('topic'); if (!t) return json(res, 400, { error: 'topic' }); return streamLines(res, be.geomBridge(t, q.get('type') || '')); }
     if (p === '/urdfstream') return streamLines(res, be.urdfBridge());
-    if (p === '/rosout') return be.kind === 'rosbridge' ? rbEcho(res, '/rosout') : (be.usesMux ? muxStream(res, '/rosout') : streamBlocks(res, be.rosout()));
-    if (p === '/diagnostics') return be.kind === 'rosbridge' ? rbEcho(res, '/diagnostics') : (be.usesMux ? muxStream(res, '/diagnostics') : streamBlocks(res, be.diagnostics()));
+    if (p === '/rosout') return useRb() ? rbEcho(res, '/rosout') : (be.usesMux ? muxStream(res, '/rosout') : streamBlocks(res, be.rosout()));
+    if (p === '/diagnostics') return useRb() ? rbEcho(res, '/diagnostics') : (be.usesMux ? muxStream(res, '/diagnostics') : streamBlocks(res, be.diagnostics()));
 
     // 조회(one-shot)
     if (p === '/api/msgdef') return json(res, 200, { out: await runOnce(be.msgDef(q.get('type'))) });
@@ -201,7 +259,7 @@ const server = http.createServer(async (req, res) => {
       catch { return json(res, 200, { yaml: '{}' }); }
     }
     if (p === '/api/bagdump') { const out = await runOnce(be.bagDump(q.get('path'), q.get('topics'))); try { return json(res, 200, JSON.parse(out)); } catch { return json(res, 200, { series: {}, error: out.slice(0, 300) }); } }
-    if (p === '/api/connections') { if (be.kind === 'rosbridge') { const kind = q.get('kind'), name = q.get('name'), rbc = rbEnsure();
+    if (p === '/api/connections') { if (useRb()) { const kind = q.get('kind'), name = q.get('name'), rbc = rbEnsure();
       if (kind === 'topic') { const [pu, su, ty] = await Promise.all([rbc.call('/rosapi/publishers', { topic: name }), rbc.call('/rosapi/subscribers', { topic: name }), rbc.call('/rosapi/topic_type', { topic: name })]);
         return json(res, 200, { out: `Type: ${(ty && ty.type) || '?'}\nPublishers:\n  ${(((pu && pu.publishers) || []).join('\n  ')) || '(none)'}\nSubscribers:\n  ${(((su && su.subscribers) || []).join('\n  ')) || '(none)'}` }); }
       const nd = await rbc.call('/rosapi/node_details', { node: name }); return json(res, 200, { out: nd ? JSON.stringify(nd, null, 2) : '(rosbridge: 조회 실패)' }); }
@@ -216,8 +274,8 @@ const server = http.createServer(async (req, res) => {
     // 액션(POST)
     if (p === '/api/run' && post) { const b = await readBody(req); return json(res, 200, { out: await runOnce(`${b.cmd} 2>&1`) }); }
     if (p === '/api/param/set' && post) { const b = await readBody(req); await runOnce(be.paramSet(b.node, b.name, b.value)); return json(res, 200, { value: (await runOnce(be.paramGet(b.node, b.name))).trim() }); }
-    if (p === '/api/publish' && post) { const b = await readBody(req); if (be.kind === 'rosbridge') { rbEnsure().publish(b.name, await rbTopicType(b.name), looseJson(b.msg)); return json(res, 200, { out: 'published (rosbridge)' }); } const cmd = be.publish(b.name, b.msg); return json(res, 200, { out: cmd ? await runOnce(cmd) : '(no cmd)' }); }
-    if (p === '/api/service' && post) { const b = await readBody(req); if (be.kind === 'rosbridge') { const v = await rbEnsure().call(b.name, looseJson(b.req)); return json(res, 200, { out: v == null ? '(no response)' : JSON.stringify(v, null, 2) }); } const cmd = be.serviceCall(b.name, b.req); return json(res, 200, { out: cmd ? await runOnce(cmd) : '(no cmd)' }); }
+    if (p === '/api/publish' && post) { const b = await readBody(req); if (useRbCmd()) { rbCmdEnsure().publish(b.name, await rbTopicType(b.name), looseJson(b.msg)); return json(res, 200, { out: 'published (rosbridge)' }); } const cmd = be.publish(b.name, b.msg); return json(res, 200, { out: cmd ? await runOnce(cmd) : '(no cmd)' }); }
+    if (p === '/api/service' && post) { const b = await readBody(req); if (useRbCmd()) { const v = await rbCmdEnsure().call(b.name, looseJson(b.req)); return json(res, 200, { out: v == null ? '(no response)' : JSON.stringify(v, null, 2) }); } const cmd = be.serviceCall(b.name, b.req); return json(res, 200, { out: cmd ? await runOnce(cmd) : '(no cmd)' }); }
     if (p === '/api/setparam1' && post) { const b = await readBody(req); const cmd = be.setParam1(b.name, b.value); return json(res, 200, { out: cmd ? await runOnce(cmd) : '(ROS2: per-node)' }); }
     if (p === '/api/killnode' && post) { const b = await readBody(req); const cmd = be.killNode(b.name); return json(res, 200, { out: cmd ? await runOnce(cmd) : '(no cmd)' }); }
     if (p === '/api/restart' && post) { const b = await readBody(req); const cmd = be.restartNode(b.name); return json(res, 200, { out: cmd ? await runOnce(cmd) : '(no cmd)' }); }
@@ -276,8 +334,8 @@ function wsStart(ws, m) {
     imstream: () => t && (child = pipeLines(be.imBridge(t), txt)),   // 인터랙티브 마커(양방향: feed→stdin)
     cloudstream: () => t && (child = pipeCloud(be.cloudBridge(t), bin)),
   };
-  if (stream === 'events') { if (be.kind === 'rosbridge') off = rbTelemetryCore(txt); else child = pipeLines('python3 -', txt, telemScript()); }
-  else if (stream === 'echo') { if (t) { if (be.kind === 'rosbridge') off = rbEchoOff(t, txt); else if (be.usesMux) off = muxAdd(t, txt); else child = pipeBlocks(be.echo(t), txt); } }
+  if (stream === 'events') { if (useRb()) off = rbTelemetryCore(txt); else child = pipeLines('python3 -', txt, telemScript()); }
+  else if (stream === 'echo') { if (t) { if (useRb()) off = rbEchoOff(t, txt); else if (be.usesMux) off = muxAdd(t, txt); else child = pipeBlocks(be.echo(t), txt); } }
   else if (map[stream]) map[stream]();
   return {
     off: () => { if (child) { try { child.kill(); } catch { /* */ } } if (off) { try { off(); } catch { /* */ } } },

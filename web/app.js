@@ -70,9 +70,15 @@ let GMODE = 'nodes';                                    // 'nodes'(노드만) | 
 const GF = { debug: false, tf: true, services: true, actions: true, leaves: true, anon: false };   // 표시 필터(anon=CLI/도구 노드 표시)
 const isDebug = (n) => n === '/rosout' || n === '/rosout_agg' || n === '/parameter_events';
 const isTf = (n) => n === '/tf' || n === '/tf_static';
-// CLI/도구가 만드는 익명 헬퍼 노드 — rostopic/rosservice/rosparam/rosnode/ros2cli/rqt, 그리고 RDash 텔레메트리(ros_tui).
-// echo·publish·hz·teleop 등을 돌릴 때마다 생겨서 그래프를 어지럽힌다 → 기본 숨김.
-const isAnon = (n) => /^\/(ros_tui|rostopic|rosservice|rosparam|rosnode|_ros2cli|rqt)/.test(n);
+// CLI/도구가 만드는 익명 헬퍼 노드/서비스 — rostopic/rosservice/rosparam/rosnode/ros2cli/rqt,
+// RDash 텔레메트리(ros_tui), rosbridge/rosapi, launch가 만든 docker_desktop pid suffix 노드.
+// echo·publish·hz·teleop·rosbridge 등을 돌릴 때 생겨서 그래프를 어지럽힌다 → 기본 숨김.
+const isAnon = (n) => {
+  const s = String(n || '');
+  const base = s.split('/').filter(Boolean)[0] || '';
+  return /^\/(ros_tui|rostopic|rosservice|rosparam|rosnode|rosbag|roslaunch|_?ros2cli|rosbridge_websocket|rosapi|rqt)(?:_|\/|$)/.test(s)
+    || /_(?:desktop|docker_desktop|[A-Za-z0-9-]+)_\d{3,}(?:_[A-Za-z0-9]+)?$/.test(base);
+};
 const keepNode = (n) => GF.anon || !isAnon(n);
 function actionGroups() {                               // 숨은 /_action/ 토픽 → 액션별 서버/클라이언트 노드
   const m = new Map();
