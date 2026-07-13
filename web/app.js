@@ -238,6 +238,10 @@ function nodeTopics(node) { const P = [], S = [];
     if ((it.pubs || []).some((e) => nodeName(e) === node)) P.push(it.name);
     if ((it.subs || []).some((e) => nodeName(e) === node)) S.push(it.name); }
   return { pubs: P.sort(), subs: S.sort() }; }
+// 파라미터 현재값 — 선택 시 1회 조회(ROS1 rosparam get). 캐시로 텔레메트리 갱신마다 재요청 방지.
+let paramVal = { name: null, text: '' };
+function fetchParamVal(name) { paramVal = { name, text: '조회 중…' };
+  api('/api/param/get1?name=' + encodeURIComponent(name)).then((r) => { if (selItem && selItem.name === name) { paramVal = { name, text: (r && r.out ? r.out : '(값 없음)') }; renderInfo(selItem); } }).catch(() => {}); }
 // 우측 '선택 값' 상단 정보 블록 — 토픽/노드/서비스/파라미터/액션 공통. 토픽은 rostopic info(타입·Hz·발행자·구독자).
 function renderInfo(it) {
   const box = $('#valinfo'); if (!box) return; box.innerHTML = ''; if (!it) return;
@@ -257,7 +261,10 @@ function renderInfo(it) {
   } else if (it.kind === 'service') { const s = byName(it.name) || it;
     box.append(line('서비스', it.name, 'imono')); if (s.ty) box.append(line('타입', s.ty, 'imono'));
     box.append(list('서버 노드', (s.server || []).map(nodeName), '—'));
-  } else if (it.kind === 'param') { box.append(line('파라미터', it.name, 'imono')); box.append(el('div', { class: 'hint' }, "‘set’ 으로 현재값 조회/변경"));
+  } else if (it.kind === 'param') { box.append(line('파라미터', it.name, 'imono'));
+    if (paramVal.name !== it.name) fetchParamVal(it.name);   // 선택 바뀔 때만 1회 조회(텔레메트리 갱신마다 재요청 방지)
+    box.append(line('값', paramVal.name === it.name ? paramVal.text : '조회 중…', 'imono'));
+    box.append(el('div', { class: 'hint', style: 'margin-top:2px' }, "‘set’ 으로 변경"));
   } else if (it.kind === 'action') { box.append(line('액션', it.name, 'imono')); }
 }
 

@@ -211,6 +211,7 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/tfecho') return json(res, 200, { out: await runOnce(be.tfEcho(q.get('src'), q.get('tgt'))) });
     if (p === '/api/bagcompare') return json(res, 200, { out: await runOnce(be.bagCompare(q.get('a'), q.get('b'))) });
     if (p === '/api/param/list') return json(res, 200, { rows: (await runOnce(be.paramList(q.get('node')))).split('\n').filter(Boolean).map((l) => { const i = l.indexOf('\t'); return { name: i < 0 ? l : l.slice(0, i), value: (i < 0 ? '' : l.slice(i + 1)).trim() }; }) });
+    if (p === '/api/param/get1') { const name = q.get('name'); const cmd = name && be.paramGet1(name); return json(res, 200, { out: cmd ? (await runOnce(cmd)).trim() : '(ROS2: 노드별 파라미터 — 노드의 params 에서 조회)' }); }
 
     // 액션(POST)
     if (p === '/api/run' && post) { const b = await readBody(req); return json(res, 200, { out: await runOnce(`${b.cmd} 2>&1`) }); }

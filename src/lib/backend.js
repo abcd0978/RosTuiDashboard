@@ -21,6 +21,7 @@ export class RosBackend {
   resource() { return NI('resource'); } tfTree() { return NI('tfTree'); } tfEcho() { return NI('tfEcho'); }
   bagCompare() { return NI('bagCompare'); } bagRecord() { return NI('bagRecord'); } bagPlay() { return NI('bagPlay'); }
   paramList() { return NI('paramList'); } paramGet() { return NI('paramGet'); } paramSet() { return NI('paramSet'); }
+  paramGet1() { return NI('paramGet1'); }
   publish() { return NI('publish'); } serviceCall() { return NI('serviceCall'); } setParam1() { return NI('setParam1'); }
   killNode() { return NI('killNode'); } restartNode() { return NI('restartNode'); } lifecycle() { return NI('lifecycle'); }
   actionGoal() { return NI('actionGoal'); } teleop() { return NI('teleop'); }
@@ -46,6 +47,7 @@ export class CliBackend extends RosBackend {
   bagPlay(path) { return bagPlayCmd(this.ver, path); }
   paramList(node) { return paramListCmd(node); }
   paramGet(node, name) { return paramGetCmd(node, name); }
+  paramGet1(name) { return this.ver === '2' ? null : `rosparam get ${shq(name)} 2>&1`; }   // ROS1 전역 파라미터 현재값
   paramSet(node, name, val) { return paramSetCmd(node, name, val); }
   publish(topic, msg) { const a = actionFor(this.ver, 'topic', topic, msg); return a && a.cmd; }
   serviceCall(name, req) { const a = actionFor(this.ver, 'service', name, req); return a && a.cmd; }
