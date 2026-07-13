@@ -154,9 +154,9 @@ function teleopStop(topic) {
   teleopId = null;
   if (topic) { const cmd = be.publish(topic, '{linear: {x: 0.0, y: 0.0, z: 0.0}, angular: {x: 0.0, y: 0.0, z: 0.0}}'); if (cmd) runOnce(cmd); }   // 정지 시 0 트위스트 1회
 }
-function teleopSet(topic, lin, ang) {
+function teleopSet(topic, lin, ang, ty) {
   teleopStop();   // 이전 퍼블리셔 정리(0 발행 없이)
-  teleopId = spawnJob(`teleop ${topic}`, be.teleop(topic, lin, ang)).id;
+  teleopId = spawnJob(`teleop ${topic}`, be.teleop(topic, lin, ang, ty)).id;
 }
 
 // ── 정적 파일 ─────────────────────────────────────────────────────────────
@@ -226,7 +226,7 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/jobs' && !post) return json(res, 200, { jobs: [...jobs.values()].map(jobView) });
     if (p === '/api/job' && post) { const b = await readBody(req); const r = spawnJob(b.label || b.cmd, b.cmd); return json(res, 200, jobView(r)); }
     if (p === '/api/action' && post) { const b = await readBody(req); const r = spawnJob(`action ${b.name}`, be.actionGoal(b.name, b.type, b.goal)); return json(res, 200, jobView(r)); }
-    if (p === '/api/teleop' && post) { const b = await readBody(req); const topic = b.topic || '/cmd_vel'; if (b.stop) teleopStop(topic); else teleopSet(topic, Number(b.lin) || 0, Number(b.ang) || 0); return json(res, 200, { ok: true }); }
+    if (p === '/api/teleop' && post) { const b = await readBody(req); const topic = b.topic || '/cmd_vel'; if (b.stop) teleopStop(topic); else teleopSet(topic, Number(b.lin) || 0, Number(b.ang) || 0, b.ty); return json(res, 200, { ok: true }); }
     if (p === '/api/record' && post) { const b = await readBody(req); const out = `rdash_rec_${Date.now()}`; const r = spawnJob(`rosbag rec → ${out}`, be.bagRecord(b.topics && b.topics.length ? b.topics : null, out)); return json(res, 200, jobView(r)); }
     if (p === '/api/play' && post) { const b = await readBody(req); const r = spawnJob(`rosbag play ${b.path}`, be.bagPlay(b.path)); return json(res, 200, jobView(r)); }
     if (p.startsWith('/api/job/') && p.endsWith('/kill') && post) { const id = Number(p.split('/')[3]); const r = jobs.get(id); if (r) { try { process.kill(-r.child.pid, 'SIGINT'); } catch { try { r.child.kill('SIGINT'); } catch { /* */ } } } return json(res, 200, { ok: true }); }

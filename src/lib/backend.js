@@ -54,7 +54,11 @@ export class CliBackend extends RosBackend {
   restartNode(name) { const a = restartFor('node', name); return a && a.cmd; }
   lifecycle(node, transition) { return `ros2 lifecycle set ${shq(node)} ${transition} 2>&1`; }
   actionGoal(name, type, goal) { return `ros2 action send_goal ${shq(name)} ${shq(type)} ${shq(goal)} --feedback 2>&1`; }
-  teleop(topic, lin, ang) { const y = `{linear: {x: ${lin}, y: 0.0, z: 0.0}, angular: {x: 0.0, y: 0.0, z: ${ang}}}`; return this.ver === '2' ? `ros2 topic pub -r 10 ${shq(topic)} geometry_msgs/msg/Twist ${shq(y)}` : `rostopic pub -r 10 ${shq(topic)} geometry_msgs/Twist ${shq(y)}`; }
+  teleop(topic, lin, ang, ty) {
+    const tw = `linear: {x: ${lin}, y: 0.0, z: 0.0}, angular: {x: 0.0, y: 0.0, z: ${ang}}`;
+    // TwistStamped(예: /mavros/setpoint_velocity/cmd_vel) 는 header + twist 로 감싼다. 그 외는 순수 Twist.
+    if (ty === 'twiststamped') { const y = `{header: {frame_id: ''}, twist: {${tw}}}`; return this.ver === '2' ? `ros2 topic pub -r 10 ${shq(topic)} geometry_msgs/msg/TwistStamped ${shq(y)}` : `rostopic pub -r 10 ${shq(topic)} geometry_msgs/TwistStamped ${shq(y)}`; }
+    const y = `{${tw}}`; return this.ver === '2' ? `ros2 topic pub -r 10 ${shq(topic)} geometry_msgs/msg/Twist ${shq(y)}` : `rostopic pub -r 10 ${shq(topic)} geometry_msgs/Twist ${shq(y)}`; }
   imgBridge(topic) { return `python3 ${shq(process.env.RDASH_IMG_BRIDGE || IMG_BRIDGE)} ${shq(topic)} 2>/dev/null`; }
   cloudBridge(topic) { return `python3 ${shq(process.env.RDASH_CLOUD_BRIDGE || CLOUD_BRIDGE)} ${shq(topic)} 2>/dev/null`; }
   bagDump(path, topics) { return `python3 ${shq(process.env.RDASH_BAG_DUMP || BAG_DUMP)} ${shq(path)} ${shq(topics || '')} 2>/dev/null`; }
