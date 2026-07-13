@@ -33,6 +33,13 @@
   .row:hover { background:var(--hover); } .row.sel { background:var(--sel); }
   .row .hz { color:var(--dim); } .row .hz.live { color:var(--green); } .row .hz.stale { color:var(--red); }
   .k-topic{color:var(--fg)} .k-node{color:var(--green)} .k-service{color:var(--blue)} .k-action{color:var(--cyan)} .k-param{color:var(--mag)}
+  #valinfo { margin:4px 0; font-size:12px; }
+  #valinfo .irow { display:flex; gap:8px; padding:1px 0; }
+  #valinfo .ilabel { color:var(--dim); min-width:76px; flex:0 0 auto; }
+  #valinfo .imono { font-family:monospace; color:var(--fg); word-break:break-all; }
+  #valinfo .ilist { margin:4px 0; } #valinfo .ilist .ilabel { display:block; margin-bottom:2px; }
+  #valinfo .ilink { color:var(--cyan); cursor:pointer; font-family:monospace; padding:1px 0; }
+  #valinfo .ilink:hover { text-decoration:underline; }
   .tcaret { display:inline-block; width:12px; color:var(--dim); flex:0 0 auto; text-align:center; }
   .tdir { color:var(--dim); } .tcount { color:var(--dim); font-size:10px; margin-left:4px; }
   .row .tname { overflow:hidden; text-overflow:ellipsis; }
@@ -137,7 +144,7 @@
   </main>
   <aside id="right">
     <div class="sec">선택 값</div>
-    <div class="box"><div id="valtitle" class="hint">토픽을 클릭하면 라이브 값·플롯</div><div class="actbtns" id="valacts"></div><div id="val"></div></div>
+    <div class="box"><div id="valtitle" class="hint">항목을 클릭하면 정보 표시</div><div class="actbtns" id="valacts"></div><div id="valinfo"></div><div id="val"></div></div>
     <div class="sec">플롯 (숫자 필드)</div>
     <div class="box"><div id="fields" class="fields"></div><canvas id="plot" width="300" height="150"></canvas></div>
   </aside>
