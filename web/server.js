@@ -9,7 +9,7 @@ import { dirname, join, extname } from 'path';
 import { spawnSync } from 'child_process';
 import { rosSpawn } from '../src/lib/ros.js';
 import { flattenSkeleton, buildYaml } from '../src/lib/msgform.js';
-import { loadBookmarks, saveBookmarks } from '../src/lib/bookmarks.js';
+import { loadBookmarks, saveBookmarks, activePreset, presetNames, savePreset } from '../src/lib/bookmarks.js';
 import { loadPreflight } from '../src/lib/preflight.js';
 import { loadBaseline, saveBaseline } from '../src/lib/baseline.js';
 import { makeBackend } from '../src/lib/backend.js';
@@ -236,8 +236,9 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/baseline' && post) { const b = await readBody(req); saveBaseline(b.profile || {}); return json(res, 200, { ok: true }); }
 
     // 북마크
-    if (p === '/api/bookmarks' && !post) return json(res, 200, { bookmarks: loadBookmarks() });
-    if (p === '/api/bookmarks' && post) { const b = await readBody(req); saveBookmarks(b.bookmarks || []); return json(res, 200, { ok: true }); }
+    if (p === '/api/bookmarks' && !post) return json(res, 200, { bookmarks: loadBookmarks(), preset: activePreset(), presets: presetNames() });
+    if (p === '/api/bookmarks' && post) { const b = await readBody(req); saveBookmarks(b.bookmarks || [], activePreset()); return json(res, 200, { ok: true }); }
+    if (p === '/api/preset' && post) { const b = await readBody(req); const names = presetNames(); let name = b.name; if (!name && names.length) { const cur = activePreset(); name = names[(names.indexOf(cur) + 1) % names.length]; } if (name) savePreset(name); return json(res, 200, { preset: activePreset(), presets: names, bookmarks: loadBookmarks() }); }
 
     res.writeHead(404); res.end('not found');
   } catch (e) { json(res, 500, { error: String(e && e.message || e) }); }

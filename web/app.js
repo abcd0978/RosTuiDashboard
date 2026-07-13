@@ -1181,7 +1181,18 @@ const Views = {
   },
   async bookmarks() {
     const wrap = el('div', {}); openModal('★ 북마크', wrap);
-    const draw = async () => { const r = await api('/api/bookmarks'); const list = r.bookmarks || []; wrap.innerHTML = '';
+    const draw = async () => {
+      const r = await api('/api/bookmarks'); const list = r.bookmarks || [];
+      const presets = r.presets || []; const cur = r.preset || '';
+      $('#mtitle').textContent = '★ 북마크' + (cur ? ' [' + cur + ']' : '');
+      wrap.innerHTML = '';
+      // 프리셋 스위처 — 클릭 또는 s 로 전환(TUI 와 동일)
+      if (presets.length > 1) {
+        const bar = el('div', { class: 'actbtns', style: 'margin-bottom:8px' }, el('span', { style: 'color:var(--dim)' }, '프리셋: '));
+        presets.forEach((nm) => { const on = nm === cur; bar.append(el('button', { class: 'act', style: on ? 'font-weight:700;color:var(--cyan)' : '', onclick: async () => { await post('/api/preset', { name: nm }); draw(); } }, nm)); });
+        bar.append(el('span', { style: 'color:var(--dim)' }, '  ·  s 로 전환'));
+        wrap.append(bar);
+      }
       const tbl = el('table', { class: 'tbl' });
       list.forEach((b, i) => { const run = el('button', { class: 'act', onclick: () => post('/api/job', { label: b.name, cmd: b.cmd }).then(() => toast('▶ ' + b.name)) }, '실행'); const del = el('button', { class: 'act', onclick: async () => { const nn = list.filter((_, j) => j !== i); await post('/api/bookmarks', { bookmarks: nn }); draw(); } }, '삭제'); tbl.append(el('tr', {}, el('td', {}, '[' + (b.key || '·') + ']'), el('td', {}, b.name), el('td', { style: 'color:var(--dim)' }, b.cmd), el('td', {}, run, ' ', del))); });
       wrap.append(tbl);
@@ -1189,6 +1200,10 @@ const Views = {
       const addb = el('button', { class: 'act', onclick: async () => { const key = String((list.length + 1) % 10); await post('/api/bookmarks', { bookmarks: [...list, { name: nm.value || cm.value, cmd: cm.value, key }] }); draw(); } }, '추가');
       wrap.append(el('div', { class: 'actbtns', style: 'margin-top:8px' }, nm, cm, addb));
     };
+    // s = 프리셋 순환(입력창 포커스 시 무시). 모달 닫힐 때 리스너 해제.
+    const onKey = async (e) => { if (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) return; if (e.key === 's') { e.preventDefault(); await post('/api/preset', {}); draw(); } };
+    window.addEventListener('keydown', onKey);
+    activeModal.close = () => window.removeEventListener('keydown', onKey);
     draw();
   },
   jobs() {
