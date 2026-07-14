@@ -35,9 +35,12 @@ if (process.env.RDASH_NO_WEB !== '1') {
     const here = dirname(fileURLToPath(import.meta.url));
     const webEnv = {
       ...process.env,
-      RDASH_BACKEND: process.env.RDASH_WEB_BACKEND || 'rosbridge',
+      RDASH_BACKEND: 'rosbridge',
+      ROS_IP: process.env.ROS_IP || '127.0.0.1',
     };
-    const web = spawn(process.execPath, [join(here, 'web', 'server.js')],
+    delete webEnv.ROS_HOSTNAME;
+    const webArgs = [...process.execArgv, join(here, 'web', 'server.js')];
+    const web = spawn(process.execPath, webArgs,
       { stdio: 'ignore', env: webEnv });
     web.on('error', () => { delete process.env.RDASH_WEB_ACTIVE; });
     const killWeb = () => { try { web.kill('SIGTERM'); } catch { /* */ } };

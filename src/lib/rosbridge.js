@@ -1,6 +1,8 @@
 // rosbridge_suite 클라이언트 — 원격 로봇의 ROS 를 websocket(rosbridge v2 프로토콜, 기본 9090)으로.
 // RDash 서버가 이 클라이언트로 붙어 그래프/스트림/액션을 받아 브라우저 SSE·JSON API 로 중계한다.
-// Node 22 내장 WebSocket 사용 → 무의존. 재연결·구독 ref-count·서비스 호출(promise) 지원.
+import WebSocket from 'ws';
+
+// ws WebSocket 사용. 재연결·구독 ref-count·서비스 호출(promise) 지원.
 export class RosbridgeClient {
   constructor(url) {
     this.url = url; this.ws = null; this.ready = false; this.idc = 0;

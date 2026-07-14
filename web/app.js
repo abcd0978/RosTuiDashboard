@@ -124,6 +124,20 @@ function render() {
   G = g; renderSidebar(); if (selItem && $('#valinfo')) renderInfo(byName(selItem.name) || selItem);   // 선택 정보 라이브 갱신(Hz·발행/구독자)
   if (activeModal) activeModal.refresh && activeModal.refresh();
 }
+async function refreshGraphNow() {
+  try {
+    const o = await api('/api/graph');
+    if (!o || !o.items) return false;
+    items = o.items;
+    if (selItem && !byName(selItem.name)) {
+      sel = null; selItem = null;
+      const vt = $('#valtitle'), vi = $('#valinfo'), vv = $('#val');
+      if (vt) vt.textContent = '선택 없음'; if (vi) vi.textContent = ''; if (vv) vv.textContent = '';
+    }
+    render();
+    return true;
+  } catch (_) { return false; }
+}
 function neighbors(id) { const s = new Set(); for (const e of G.edges) { if (e.from === id) s.add(e.to); if (e.to === id) s.add(e.from); } return s; }
 const HALF_H = 11, GAP = 18;
 function entW(name) { const e = G.ents.get(name); const base = name.replace(/^\//, '').length * 7 + 18;
@@ -1157,19 +1171,30 @@ const Views = {
   procmon() {
     const wrap = el('div', {}); openModal('📊 노드 프로세스 (CPU/RSS/스레드 · 라이브)', wrap, () => {});
     const nodes = () => items.filter((i) => i.kind === 'node').map((i) => i.name);
-    const draw = async () => {
+    const cleanRos = async () => {
+      if (!confirm('rosbridge/web/roscore를 제외한 ROS 노드와 Gazebo/PX4/Fast-LIO/Super/Turtlesim 프로세스를 정리합니다. 계속할까요?')) return;
+      wrap.innerHTML = '';
+      wrap.append(el('div', { class: 'hint' }, 'Clean ROS 실행 중…'));
+      const r = await post('/api/clean-ros', {});
+      await refreshGraphNow();
+      await draw(r.out || '(출력 없음)');
+    };
+    const draw = async (note = '') => {
       const r = await post('/api/resource', { nodes: nodes() });
       const lines = (r.out || '').split('\n').filter((l) => l.trim() && !l.startsWith('('));
       wrap.innerHTML = '';
-      wrap.append(el('div', { class: 'hint', style: 'margin-bottom:6px' }, 'CPU% 내림차순 · 2초 갱신 · 노드별 kill/restart (독립 프로세스 노드만 값 표시)'));
+      wrap.append(el('div', { class: 'actbtns', style: 'margin-bottom:6px' },
+        el('button', { class: 'act', style: 'color:var(--red);font-weight:700', onclick: cleanRos }, 'Clean ROS'),
+        el('span', { class: 'hint' }, 'CPU% 내림차순 · 2초 갱신 · 노드별 kill/restart (독립 프로세스 노드만 값 표시)')));
+      if (note) wrap.append(el('pre', { class: 'out', style: 'max-height:160px;margin-bottom:8px' }, note));
       const tbl = el('table', { class: 'tbl' }); tbl.append(el('tr', {}, el('th', {}, 'CPU%'), el('th', {}, '노드'), el('th', {}, 'PID'), el('th', {}, 'RSS'), el('th', {}, 'THR'), el('th', {}, '')));
       const seen = new Set();
       lines.forEach((l) => { const m = l.match(/^\s*(\S+)\s+(\S+)\s+pid\s+(\S+)\s+(\S+)\s*MB\s+(\S+)\s*thr/); if (!m) return; const [, cpu, name, pid, rss, thr] = m; seen.add(name);
-        const kill = el('button', { class: 'act', onclick: () => post('/api/killnode', { name }).then((rr) => toast('kill ' + name + ': ' + rr.out)) }, 'kill');
+        const kill = el('button', { class: 'act', onclick: async () => { const rr = await post('/api/killnode', { name }); toast('kill ' + name + ': ' + rr.out); await refreshGraphNow(); await draw(); setTimeout(refreshGraphNow, 800); } }, 'kill');
         const rest = el('button', { class: 'act', onclick: () => post('/api/restart', { name }).then((rr) => toast('restart ' + name)) }, 'restart');
         tbl.append(el('tr', {}, el('td', { style: 'color:' + (parseFloat(cpu) > 50 ? 'var(--red)' : parseFloat(cpu) > 20 ? 'var(--yellow)' : 'var(--fg)') }, cpu), el('td', { style: 'color:var(--green)' }, name), el('td', {}, pid), el('td', {}, rss + ' MB'), el('td', {}, thr), el('td', {}, kill, ' ', rest))); });
       // 프로세스를 못 찾은 노드도 표시(값 ?) + 액션 제공
-      nodes().filter((n) => !seen.has(n)).forEach((name) => { const kill = el('button', { class: 'act', onclick: () => post('/api/killnode', { name }).then((rr) => toast('kill ' + name)) }, 'kill'); const rest = el('button', { class: 'act', onclick: () => post('/api/restart', { name }).then(() => toast('restart ' + name)) }, 'restart'); tbl.append(el('tr', { style: 'opacity:.6' }, el('td', {}, '?'), el('td', { style: 'color:var(--green)' }, name), el('td', {}, '—'), el('td', {}, '—'), el('td', {}, '—'), el('td', {}, kill, ' ', rest))); });
+      nodes().filter((n) => !seen.has(n)).forEach((name) => { const kill = el('button', { class: 'act', onclick: async () => { await post('/api/killnode', { name }); toast('kill ' + name); await refreshGraphNow(); await draw(); setTimeout(refreshGraphNow, 800); } }, 'kill'); const rest = el('button', { class: 'act', onclick: () => post('/api/restart', { name }).then(() => toast('restart ' + name)) }, 'restart'); tbl.append(el('tr', { style: 'opacity:.6' }, el('td', {}, '?'), el('td', { style: 'color:var(--green)' }, name), el('td', {}, '—'), el('td', {}, '—'), el('td', {}, '—'), el('td', {}, kill, ' ', rest))); });
       wrap.append(tbl);
     };
     draw(); const iv = setInterval(() => { if (!$('#modal').classList.contains('on')) { clearInterval(iv); return; } draw(); }, 2000);
@@ -1232,10 +1257,17 @@ const Views = {
       el('div', { class: 'hint', style: 'margin-top:4px;line-height:1.5' }, 'turtlesim → /turtle1/cmd_vel · 디프드라이브 → /cmd_vel · MAVROS → /mavros/setpoint_velocity/cmd_vel (TwistStamped, OFFBOARD+ARM 필요).', el('br'), '⚠ 순수 PX4(px4_msgs)는 Twist 를 안 받음 — 오프보드 setpoint(TrajectorySetpoint+OffboardControlMode) 필요.'),
       status));
     const KM = { w: [1, 0], ArrowUp: [1, 0], s: [-1, 0], ArrowDown: [-1, 0], a: [0, 1], ArrowLeft: [0, 1], d: [0, -1], ArrowRight: [0, -1] };
-    const kd = (e) => { if (!$('#modal').classList.contains('on')) return; if (['INPUT'].includes(document.activeElement.tagName)) return; if (e.key === ' ') { e.preventDefault(); stop(); return; } const m = KM[e.key]; if (m) { e.preventDefault(); send(m[0], m[1]); } };
-    const ku = (e) => { if (KM[e.key]) stop(); };
-    window.addEventListener('keydown', kd); window.addEventListener('keyup', ku);
-    activeModal.close = () => { window.removeEventListener('keydown', kd); window.removeEventListener('keyup', ku); stop(); };
+    const teleopKey = (e) => KM[e.key] || KM[String(e.key || '').toLowerCase()];
+    const takeKey = (e) => { e.preventDefault(); e.stopImmediatePropagation(); };
+    const kd = (e) => {
+      if (!$('#modal').classList.contains('on')) return;
+      if (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) return;
+      if (e.key === ' ') { takeKey(e); stop(); return; }
+      const m = teleopKey(e); if (m) { takeKey(e); send(m[0], m[1]); }
+    };
+    const ku = (e) => { if (!$('#modal').classList.contains('on')) return; if (teleopKey(e)) { takeKey(e); stop(); } };
+    window.addEventListener('keydown', kd, true); window.addEventListener('keyup', ku, true);
+    activeModal.close = () => { window.removeEventListener('keydown', kd, true); window.removeEventListener('keyup', ku, true); stop(); };
   },
   states(it) {
     const sel = el('select', {}); const cv = el('canvas', { id: 'stcv', width: 900, height: 46, style: 'width:100%;height:52px;background:#0d1116;border:1px solid var(--line);border-radius:4px;margin:6px 0' });
@@ -1293,7 +1325,7 @@ const Views = {
     const wrap = el('div', {}); openModal('⚙ Jobs', wrap, () => {});
     const draw = async () => { const r = await api('/api/jobs'); wrap.innerHTML = '';
       const tbl = el('table', { class: 'tbl' });
-      (r.jobs || []).forEach((j) => { const kill = el('button', { class: 'act', onclick: () => post(`/api/job/${j.id}/kill`, {}).then(draw) }, 'kill'); tbl.append(el('tr', {}, el('td', {}, el('span', { class: 'badge ' + j.status }, j.status)), el('td', {}, '[' + (j.pid || '?') + '] ' + j.label), el('td', {}, kill))); tbl.append(el('tr', {}, el('td', { colspan: 3 }, el('pre', { class: 'out', style: 'color:var(--dim);max-height:80px' }, (j.log || []).join('\n'))))); });
+      (r.jobs || []).forEach((j) => { const kill = el('button', { class: 'act', onclick: async () => { kill.disabled = true; kill.textContent = 'stopping'; await post(`/api/job/${j.id}/kill`, {}); await refreshGraphNow(); await draw(); setTimeout(draw, 700); setTimeout(refreshGraphNow, 900); } }, 'kill'); tbl.append(el('tr', {}, el('td', {}, el('span', { class: 'badge ' + j.status }, j.status)), el('td', {}, '[' + (j.pid || '?') + '] ' + j.label), el('td', {}, kill))); tbl.append(el('tr', {}, el('td', { colspan: 3 }, el('pre', { class: 'out', style: 'color:var(--dim);max-height:80px' }, (j.log || []).join('\n'))))); });
       wrap.append(tbl); };
     draw(); const iv = setInterval(() => { if (!$('#modal').classList.contains('on')) { clearInterval(iv); return; } draw(); }, 1500);
   },
