@@ -47,7 +47,8 @@ export function jobs() {
     (r.jobs || []).forEach((j) => {
       const kill = el('button', { class: 'act', onclick: async () => { kill.disabled = true; kill.textContent = 'stopping'; await post(`/api/job/${j.id}/kill`, {}); await refreshGraphNow(); await draw(); setTimeout(draw, 700); setTimeout(refreshGraphNow, 900); } }, 'kill');
       tbl.append(el('tr', {}, el('td', {}, el('span', { class: 'badge ' + j.status }, j.status)), el('td', {}, '[' + (j.pid || '?') + '] ' + j.label), el('td', {}, kill)));
-      tbl.append(el('tr', {}, el('td', { colspan: 3 }, el('pre', { class: 'out', style: 'color:var(--dim);max-height:80px' }, (j.log || []).join('\n')))));
+      // overflow:auto 가 없으면 max-height 는 박스만 80px 로 줄일 뿐, 넘치는 로그는 그대로 테이블 밖으로 흘러나온다.
+      tbl.append(el('tr', {}, el('td', { colspan: 3 }, el('pre', { class: 'out', style: 'color:var(--dim);max-height:80px;overflow:auto;overflow-wrap:anywhere' }, (j.log || []).join('\n')))));
     });
     wrap.append(tbl);
   };

@@ -27,7 +27,6 @@ export function Jobs() {
 
   const sel = list[idx];
   const tail = (sel ? (d.jobLogsRef.current.get(sel.id) || []) : []).slice(-6);
-  const w = Math.max(30, (d.cols || 100) - 4);
   return h(OverlayFrame, { color: 'blue', title: `⚙ Jobs (${list.length})`, hint: 'k 종료 · K 강제 · d 제거(종료된 것만) · Esc' },
     h(List, {
       items: list, idx, visible: Math.max(3, (d.rows || 20) - 13), accent: 'blue',
@@ -36,5 +35,7 @@ export function Jobs() {
       emptyText: ' (실행한 작업 없음 — b 북마크나 R 녹화로 생성) ',
     }),
     sel ? h(Text, { dimColor: true }, ' ── output ──────────') : null,
-    ...tail.map((l, i) => h(Text, { key: 'o' + i, dimColor: true }, pad(' ' + l, w))));
+    // wrap='truncate-end' 없이 pad() 로 자르면 안 된다 — pad 는 문자 수로 세는데 한글·이모지는
+    // 터미널에서 2 칸이라, 잘라 낸 줄이 박스보다 넓어져 Ink 가 줄바꿈하고 프레임이 통째로 밀려 나간다.
+    ...tail.map((l, i) => h(Text, { key: 'o' + i, dimColor: true, wrap: 'truncate-end' }, ' ' + l)));
 }

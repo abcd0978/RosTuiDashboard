@@ -2,6 +2,19 @@
 import { rosSpawn } from '../shared/ros.js';
 import { useRbCmd, rbCmdEnsure } from './telemetry.js';
 
+// 자식 프로세스 출력은 '텍스트 줄'이 아니라 임의의 바이트다. 그대로 담아 두면 렌더러가 깨진다:
+//   CR   — 진행바(make, ros2 bag)가 커서를 줄 맨 앞으로 보낸다. TUI 에선 오버레이 테두리를 덮어쓴다.
+//   ANSI — roslaunch/ros2 는 색을 칠한다. 폭 계산이 어긋나고, 웹에선 이스케이프가 글자로 보인다.
+//   TAB  — 터미널은 8 칸으로 펴는데 폭 계산은 1 칸으로 세서 박스를 넘긴다.
+// 여기서 한 번 정규화한다 — TUI·웹 두 렌더러가 같은 log 배열을 쓰므로 고칠 곳은 여기 하나다.
+const ANSI_RE = /\x1b\[[0-9;?]*[ -\/]*[@-~]/g;                    // CSI 시퀀스
+const CTRL_RE = /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g;              // 남은 제어문자(ESC 단독 포함)
+export function splitLog(s) {   // export = test/test_joblog.mjs 가 검증한다
+  return String(s).split(/\r\n|[\r\n]/)
+    .map((ln) => ln.replace(ANSI_RE, '').replace(/\t/g, '    ').replace(CTRL_RE, ''))
+    .filter((ln) => ln !== '');
+}
+
 // ── 잡(Jobs) 레지스트리 — 웹에서 띄운 프로세스(북마크·rosbag·액션) 추적 ──
 let jobSeq = 0;
 export const jobs = new Map();   // id → {id,label,pid,status,log[]}
@@ -9,7 +22,7 @@ export function spawnJob(label, cmd) {
   const id = ++jobSeq;
   const child = rosSpawn(cmd, undefined, true);
   const rec = { id, label, pid: child.pid, status: 'run', log: [], child };
-  const push = (s) => { for (const ln of String(s).split('\n')) if (ln !== '') { rec.log.push(ln); if (rec.log.length > 400) rec.log.shift(); } };
+  const push = (s) => { for (const ln of splitLog(s)) { rec.log.push(ln); if (rec.log.length > 400) rec.log.shift(); } };
   if (child.stdout) child.stdout.on('data', (d) => push(d.toString()));
   if (child.stderr) child.stderr.on('data', (d) => push(d.toString()));
   child.on('close', (code) => { rec.status = code ? 'error' : 'done'; });

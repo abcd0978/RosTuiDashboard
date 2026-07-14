@@ -2,7 +2,7 @@
 import { h } from '../../react.js';
 import { Box, Text, useInput } from 'ink';
 import { useDashboard } from '../../store.js';
-import { clamp, pad } from '../../../../shared/util.js';
+import { clamp } from '../../../../shared/util.js';
 
 const H = 14;   // 오버레이에 보이는 최대 줄 수
 
@@ -25,5 +25,6 @@ export function InfoView() {
     h(Box, { justifyContent: 'space-between' },
       h(Text, { color: 'cyan', bold: true }, ` ${title} `),
       h(Text, { dimColor: true }, `${tag}  Esc 닫기 · ↑↓ 스크롤 `)),
-    ...Array.from({ length: Math.min(H, lines.length) }, (_, i) => h(Text, { key: i }, pad(lines[dtop + i] ?? '', w))));
+    // truncate-end 는 Ink 가 표시 폭(한글 2 칸)으로 자른다. pad 로 문자 수를 세면 박스를 넘겨 프레임이 깨진다.
+    ...Array.from({ length: Math.min(H, lines.length) }, (_, i) => h(Text, { key: i, wrap: 'truncate-end' }, lines[dtop + i] ?? '')));
 }
