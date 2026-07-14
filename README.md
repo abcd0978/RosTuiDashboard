@@ -166,20 +166,44 @@ The web UI has **full parity** with the TUI plus GUI-native views:
 
 ### Backends (`RDASH_BACKEND`)
 
-The web server talks to ROS through a swappable **`RosBackend`** interface, so
-the same UI runs against different data sources:
+RDash talks to ROS through a swappable **`RosBackend`** interface, so the same UI
+runs against different data sources:
 
-| `RDASH_BACKEND` | how it talks to ROS | when |
+| backend | how it talks to ROS | when |
 |---|---|---|
-| `cli` (default) | shells out to `ros2`/`ros` CLI (one process per stream) | local, simplest |
+| `cli` | shells out to `ros2`/`ros` CLI (one process per stream) | local, simplest |
 | `rcl` | a single **rclpy** node multiplexes all topic echoes into one process | local, many plotted topics — kills the `ros2 topic echo` process fan-out |
-| `rosbridge` | a **websocket** client to a remote robot's `rosbridge_suite` (`RDASH_ROSBRIDGE_URL=ws://robot:9090`) | remote browser, no local ROS install |
+| `rosbridge` | a **websocket** client to `rosbridge_suite` (`RDASH_ROSBRIDGE_URL=ws://robot:9090`) | remote robot, no local ROS install |
 
-Runs in a ROS-sourced shell like the TUI; `RDASH_TELEM=<file>` overrides the
-telemetry source. Sensor streams use small path-configurable bridges
-(`img_bridge.py`, `cloud_bridge.py`, `bag_dump.py`, `ros_echo_mux.py`,
-`marker_bridge.py`, `tf_dump.py`, `img_ann_bridge.py`, `caminfo_bridge.py`,
-`geom_bridge.py`, `urdf_bridge.py`).
+**The TUI and the web currently use different backends, on purpose:**
+
+| | default | override |
+|---|---|---|
+| TUI | `cli` — spawns ROS CLI processes | `RDASH_TUI_BACKEND` |
+| Web | `rosbridge` — auto-starts `rosbridge_server` on :9090 if it isn't up | `RDASH_WEB_BACKEND` |
+
+`npm start` sets both (see `index.js`). The TUI cannot use `rosbridge` yet —
+`store.js` runs every ROS action as a command string, so `RosbridgeBackend.publish()`
+still returns CLI text. Unifying them is tracked in `ROSBRIDGE_TUI_TODO.md`.
+
+Runs in a ROS-sourced shell like the TUI. Sensor streams use python bridges under
+`backend/python/` (`scene3d/`, `image/`, `stream/`, `tools/`); every path is
+declared in `shared/paths.js` and each is overridable by env (`RDASH_TELEM`,
+`RDASH_IMG_BRIDGE`, `RDASH_CLOUD_BRIDGE`, …).
+
+### Repo layout
+
+```
+index.js       TUI entry (also spawns the web server; RDASH_NO_WEB=1 to skip)
+shared/        used by BOTH the TUI and the web backend — ROS command builders,
+               rosbridge client, paths.js (the only place python paths are written)
+backend/       web backend (node backend/server.js) + python/ bridges by function
+frontend/tui/  React Ink TUI
+frontend/web/  browser — native ES modules, no bundler, no build step
+```
+
+See **ARCHITECTURE.md** for the full map, the rosbridge telemetry design (and why
+it must not be "simplified"), and the verification commands.
 
 ## Requirements
 - **Node.js ≥ 18**
@@ -255,8 +279,10 @@ node index.js             # TUI only (npm start also launches the web server)
 | `RDASH_CLOUD_VOXEL` | `0` | point-cloud voxel downsample size in metres (0 = off); e.g. `0.05` → one point per 5 cm cell |
 | `RDASH_CLOUD_MAXN` | `30000` | max points per cloud frame sent to the browser (uniform decimation past this) |
 | `RDASH_NO_WEB` | `0` | set `1` so `npm start` launches the TUI **without** the companion web server |
-| `RDASH_BACKEND` | `cli` | web data source: `cli` / `rcl` (single rclpy echo mux) / `rosbridge` (remote websocket) |
-| `RDASH_ROSBRIDGE_URL` | `ws://localhost:9090` | rosbridge endpoint when `RDASH_BACKEND=rosbridge` |
+| `RDASH_BACKEND` | `rosbridge` (web) | data source: `cli` / `rcl` (single rclpy echo mux) / `rosbridge` (websocket) |
+| `RDASH_TUI_BACKEND` | `cli` | TUI's backend, independent of the web's |
+| `RDASH_WEB_BACKEND` | `rosbridge` | web's backend, independent of the TUI's |
+| `RDASH_ROSBRIDGE_URL` | `ws://localhost:9090` | rosbridge endpoint when the backend is `rosbridge` |
 | `RDASH_TELEM` | — | override the telemetry script (web); `RDASH_IMG_BRIDGE`/`RDASH_CLOUD_BRIDGE`/`RDASH_BAG_DUMP`/`RDASH_ECHO_MUX`/`RDASH_MARKER_BRIDGE`/`RDASH_TF_DUMP`/`RDASH_IMG_ANN_BRIDGE`/`RDASH_CAMINFO_BRIDGE` override the sensor/echo bridges |
 
 ### Files
@@ -277,6 +303,30 @@ bash test/test_turtlesim.sh
 # ROS2 (turtlesim if X11 available, else headless demo nodes)
 bash test/test_ros2.sh
 ```
+
+### Verifying a change
+
+There is no test runner. Before claiming a change works — especially in
+`frontend/web/`, where a broken module fails **silently** (blank panel, no visible
+stack trace):
+
+```bash
+# syntax, everything
+for f in $(find . -name '*.js' -not -path './node_modules/*'); do node --check "$f"; done
+
+# does the browser module graph resolve? (missing export → SyntaxError at link time)
+node --input-type=module -e "import('./frontend/web/main.js').catch(e => console.log(e.constructor.name + ': ' + e.message))"
+#   "ReferenceError: location is not defined" is the GOOD answer — it linked, then hit a browser global.
+
+# the graph stream: node/service counts must stay STEADY, never oscillate
+curl -sN localhost:8080/events
+
+# prove the UI actually boots (look at the PNG — a blank sidebar means a module threw)
+msedge --headless=new --disable-gpu --screenshot=out.png --virtual-time-budget=12000 http://localhost:8080
+```
+
+ARCHITECTURE.md has the full list, plus the traps (`pgrep -f` matching its own
+shell, `PYTHONPATH` for the python bridges, `hz: null` ≠ `hz: 0`).
 
 ## Notes
 - ROS2 params are per-node (no global param server), so a `params/` category only appears on ROS1.
