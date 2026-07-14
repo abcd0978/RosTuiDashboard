@@ -25,6 +25,31 @@ export const bwCmd = (ver, name) => ver === '2'
   ? `PYTHONUNBUFFERED=1 stdbuf -oL ros2 topic bw '${name}' 2>&1`
   : `PYTHONUNBUFFERED=1 stdbuf -oL rostopic bw '${name}' 2>&1`;
 
+// ── 노드 이름으로 프로세스 찾기 (kill/restart 공용) ──────────────────────────
+//
+// 예전엔 `pgrep -f "$TOK"` 였다. 이건 **명령줄 어디에든** 토큰이 있으면 잡는다. 노드 이름이
+// talker·map·test 같은 흔한 단어면 무관한 프로세스까지 죽인다. 실제로 이 코드가
+// `curl -d '{"name":"/talker"}'` 를 보낸 curl 자신에게 SIGINT 를 쐈다(ROS2 검증 중 확인).
+//
+// 그래서 두 가지만 본다:
+//   (a) argv[0](실행 파일 경로)에 노드명이 경로 요소나 파일명 접두로 들어 있는가
+//       — ROS2 turtlesim 은 노드 /turtlesim, 실행파일 .../turtlesim/turtlesim_node 라 둘 다 걸린다.
+//   (b) 리매핑 인자 __name:=TOK (ROS1) / __node:=TOK (ROS2)
+// 뒤쪽 인자에 이름이 우연히 들어간 프로세스(우리 curl 같은)는 (a)(b) 어디에도 안 걸린다.
+//
+// 못 찾으면 조용히 아무것도 안 죽인다(오검출로 남의 프로세스를 죽이는 것보다 낫다).
+// 리매핑도 없고 실행파일 이름도 노드명과 무관한 노드(플러그인/컴포넌트)는 못 잡는다 — best-effort.
+const NODE_PIDS_SH = `PIDS=""; SELF=$$; `
+  + `for p in $(pgrep -f -- "$TOK" 2>/dev/null); do `
+  + `[ "$p" = "$SELF" ] && continue; `
+  + `[ -r /proc/$p/cmdline ] || continue; `   // pgrep 직후 사라진 pid — 리다이렉트 실패 메시지가 out 에 섞이는 걸 막는다
+  + `ARGS=$(tr '\\0' ' ' < /proc/$p/cmdline); A0=\${ARGS%% *}; `
+  + `HIT=0; `
+  + `case "$A0" in *"/$TOK"|*"/$TOK"_*|*"/$TOK"/*) HIT=1;; esac; `
+  + `case " $ARGS " in *" __name:=$TOK "*|*" __node:=$TOK "*) HIT=1;; esac; `
+  + `[ "$HIT" = 1 ] && PIDS="$PIDS $p"; done; `
+  + `PIDS=$(echo $PIDS); `;
+
 // ── 제어 액션 (RViz 와의 차별점) — 선택 항목에 x 로 실행 ──────────────────────
 //   node: 죽이기 / service: 호출 / param: 값 설정(needsInput). 반환 {label, cmd} 또는 null.
 export function actionFor(ver, kind, name, arg) {
@@ -44,17 +69,13 @@ export function actionFor(ver, kind, name, arg) {
   }
   if (kind === 'node') {
     if (ver === '2') {
-      // ROS2 엔 `rosnode kill` 이 없음 → 노드명 토큰으로 프로세스를 찾아 SIGINT (best-effort).
-      // cmdline 에 우리 표식 "TOK=" 가 든 프로세스(=이 kill 셸)는 제외 → 자기 자신을 오검출/자살하지 않음.
-      const cmd = `NODE='${name}'; TOK=$(basename "$NODE"); PIDS=""; `
-        + `for p in $(pgrep -f -- "$TOK"); do `
-        + `grep -qa "TOK=" /proc/$p/cmdline 2>/dev/null || PIDS="$PIDS $p"; done; `
-        + `PIDS=$(echo $PIDS); `
-        + `if [ -z "$PIDS" ]; then echo "no proc for $TOK (plugin/component node?)"; `
+      // ROS2 엔 `rosnode kill` 이 없다 → 프로세스를 찾아 SIGINT (best-effort). 매칭 규칙은 NODE_PIDS_SH 참조.
+      const cmd = `NODE='${name}'; TOK=$(basename "$NODE"); ${NODE_PIDS_SH}`
+        + `if [ -z "$PIDS" ]; then echo "no proc for $TOK (플러그인/컴포넌트 노드거나 실행파일 이름이 노드명과 무관)"; `
         + `else kill -INT $PIDS 2>/dev/null; echo "SIGINT -> $PIDS"; fi`;
       return { label: 'kill node (ROS2 SIGINT, best-effort)', cmd };
     }
-    return { label: 'kill node', cmd: `rosnode kill '${name}'` };
+    return { label: 'kill node', cmd: `rosnode kill '${name}'` };   // ROS1 은 마스터가 정상 등록 해제까지 해준다
   }
   if (kind === 'topic') {
     // 토픽 publish(1회) — arm/disarm, 테스트 메시지 등. 연속 스트림은 북마크/launch 로.
@@ -69,14 +90,13 @@ export function actionFor(ver, kind, name, arg) {
 }
 
 // r 키: 노드 재시작 — 죽이기 전에 /proc/PID/cmdline 캡처 후 SIGINT, 같은 명령을 setsid 로 detach 재실행.
+// 프로세스 찾기는 kill 과 같은 규칙(NODE_PIDS_SH) — 예전엔 pgrep -f 로 아무 프로세스나 잡아서
+// 죽이고 "재실행"까지 했다. kill 보다 더 위험했다.
 export function restartFor(kind, name) {
   if (kind !== 'node') return null;
-  const cmd = `NODE='${name}'; TOK=$(basename "$NODE"); C15=$(printf %.15s "$TOK"); PIDS=""; TGT=""; `
-    + `for p in $(pgrep -f -- "$TOK"); do grep -qa "TOK=" /proc/$p/cmdline 2>/dev/null && continue; `
-    + `[ -z "$(tr -d '\\0' < /proc/$p/cmdline 2>/dev/null)" ] && continue; `
-    + `PIDS="$PIDS $p"; [ "$(cat /proc/$p/comm 2>/dev/null)" = "$C15" ] && TGT=$p; done; `
-    + `if [ -z "$PIDS" ]; then echo "no proc for $TOK (restart 불가: 플러그인/launch 노드)"; `
-    + `else [ -z "$TGT" ] && TGT=$(echo $PIDS | awk '{print $1}'); `
+  const cmd = `NODE='${name}'; TOK=$(basename "$NODE"); ${NODE_PIDS_SH}`
+    + `if [ -z "$PIDS" ]; then echo "no proc for $TOK (restart 불가: 플러그인/launch 노드거나 실행파일 이름이 노드명과 무관)"; `
+    + `else TGT=$(echo $PIDS | awk '{print $1}'); `
     + `CMD=$(tr '\\0' ' ' < /proc/$TGT/cmdline); kill -INT $PIDS 2>/dev/null; `
     + `setsid bash -c "sleep 1; exec $CMD" >/dev/null 2>&1 </dev/null & echo "restart: $TOK (was $PIDS)"; fi`;
   return { label: 'restart node', cmd };

@@ -8,10 +8,24 @@ export const msgDefCmd = (ver, ty) => ver === '2'
   : `rosmsg show ${shq(ty)} 2>&1`;
 
 // ROS2 노드 파라미터: 이름<TAB>값 목록 / 값 설정 / 단일 값 조회.
+//
+// `ros2 param dump` 로 한 번에 다 받는다. 예전엔 `ros2 param list` 후 파라미터마다 `ros2 param get` 을
+// 돌렸는데, ros2 CLI 한 번이 ~1.2 초(파이썬 기동 + 디스커버리)라 파라미터 8 개짜리 turtlesim 에도
+// 10 초가 걸렸다(50 개면 1 분). dump 는 호출 1 번, 1.2 초 — 파라미터 개수와 무관하다.
+// dump 는 중첩 YAML 을 뱉으므로 점(.)으로 이어 붙여 `ros2 param list` 와 같은 평평한 이름으로 되돌린다
+// (예: qos_overrides./parameter_events.publisher.depth).
+const PARAM_FLATTEN_PY = `python3 -c '
+import sys, yaml
+d = yaml.safe_load(sys.stdin) or {}
+p = (next(iter(d.values()), {}) or {}).get("ros__parameters", {}) or {}
+def walk(o, pre=""):
+    for k, v in o.items():
+        n = pre + str(k)
+        if isinstance(v, dict): walk(v, n + ".")
+        else: sys.stdout.write("%s\\t%s\\n" % (n, v))
+walk(p)'`;
 export const paramListCmd = (node) =>
-  `NODE=${shq(node)}; for p in $(ros2 param list "$NODE" 2>/dev/null); do `
-  + `v=$(ros2 param get "$NODE" "$p" 2>/dev/null | sed -n 's/.*value is: //p'); `
-  + `printf '%s\\t%s\\n' "$p" "$v"; done`;
+  `ros2 param dump ${shq(node)} 2>/dev/null | ${PARAM_FLATTEN_PY}`;
 export const paramGetCmd = (node, name) =>
   `ros2 param get ${shq(node)} ${shq(name)} 2>/dev/null | sed -n 's/.*value is: //p'`;
 export const paramSetCmd = (node, name, val) =>
