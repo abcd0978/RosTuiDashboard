@@ -3,6 +3,7 @@
 import { $, el, api } from '../lib/dom.js';
 import { state, byName, nodeName } from '../lib/state.js';
 import { onPick } from './sidebar.js';
+import { setGraphHover } from '../views/graph.js';
 
 export const kindIcon = (k) => ({ topic: '📩', node: '🔩', service: '🔧', param: '⚙', action: '🎬' })[k] || '•';
 
@@ -31,26 +32,32 @@ export function renderInfo(it) {
   const box = $('#valinfo');
   if (!box) return;
   box.innerHTML = '';
+  box.onmouseleave = () => setGraphHover(null);   // 텔레메트리 갱신이 호버 중인 .ilink 를 갈아끼워 개별 mouseleave 가 유실될 수 있다 — 컨테이너에서 확실히 해제(컨테이너는 재생성 안 됨)
   if (!it) return;
   const line = (label, val, cls) => el('div', { class: 'irow' }, el('span', { class: 'ilabel' }, label), el('span', { class: cls || '' }, val));
-  const list = (label, arr, empty) => {
+  const list = (label, arr, empty, hoverKind) => {
     const wrap = el('div', { class: 'ilist' });
     wrap.append(el('span', { class: 'ilabel' }, `${label} (${arr.length})`));
     if (!arr.length) wrap.append(el('div', { class: 'hint', style: 'padding-left:8px' }, empty));
-    else arr.forEach((n) => { const r = el('div', { class: 'ilink', style: 'padding-left:8px' }, n); r.onclick = () => { const t = byName(n) || { kind: 'node', name: n }; onPick(t); }; wrap.append(r); });
+    else arr.forEach((n) => {
+      const r = el('div', { class: 'ilink', style: 'padding-left:8px' }, n);
+      r.onclick = () => { const t = byName(n) || { kind: 'node', name: n }; onPick(t); };
+      if (hoverKind) { r.onmouseenter = () => setGraphHover(hoverKind, n); r.onmouseleave = () => setGraphHover(null); }
+      wrap.append(r);
+    });
     return wrap;
   };
   if (it.kind === 'topic') {
     const t = byName(it.name) || it;
     box.append(line('타입', t.ty || '?', 'imono'));
     box.append(line('Hz', `${t.hz != null ? t.hz : '—'}${t.age != null ? `   · age ${t.age}s` : ''}`, 'imono'));
-    box.append(list('발행자 Publishers', (t.pubs || []).map(nodeName), '없음'));
-    box.append(list('구독자 Subscribers', (t.subs || []).map(nodeName), '없음'));
+    box.append(list('발행자 Publishers', (t.pubs || []).map(nodeName), '없음', 'node'));
+    box.append(list('구독자 Subscribers', (t.subs || []).map(nodeName), '없음', 'node'));
   } else if (it.kind === 'node') {
     const nt = nodeTopics(it.name);
     box.append(line('노드', it.name, 'imono'));
-    box.append(list('발행 Publications', nt.pubs, '없음'));
-    box.append(list('구독 Subscriptions', nt.subs, '없음'));
+    box.append(list('발행 Publications', nt.pubs, '없음', 'topic'));
+    box.append(list('구독 Subscriptions', nt.subs, '없음', 'topic'));
   } else if (it.kind === 'service') {
     const s = byName(it.name) || it;
     box.append(line('서비스', it.name, 'imono'));

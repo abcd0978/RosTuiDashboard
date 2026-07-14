@@ -45,12 +45,12 @@
   .row .tname { overflow:hidden; text-overflow:ellipsis; }
   .mark{color:var(--yellow)} .edgemark{color:var(--dim)}
   main { position:relative; background:radial-gradient(circle at 50% 42%, var(--grad1), var(--grad2)); }
-  svg { width:100%; height:100%; display:block; }
+  svg { width:100%; height:100%; display:block; } #graph.edge-hover { cursor:pointer; }
   .edge { stroke:#3a4658; stroke-width:1.2; marker-end:url(#arrow); }
-  .edge.hi { stroke:var(--cyan); stroke-width:2; }
-  .elabel { fill:#9aa7b8; font-size:11px; font-weight:600; paint-order:stroke; stroke:#0d1116; stroke-width:3px; stroke-linejoin:round; } .elabel.hi { fill:var(--cyan); }
+  .edge.hi { stroke:var(--cyan); stroke-width:2; } .edge.hv:not(.hi) { stroke:var(--fg); } .edge.rel { stroke:var(--yellow); stroke-width:2; } .edge.hv.rel:not(.hi) { stroke:var(--yellow); }
+  .elabel { fill:#9aa7b8; font-size:11px; font-weight:600; paint-order:stroke; stroke:#0d1116; stroke-width:3px; stroke-linejoin:round; } .elabel.hi { fill:var(--cyan); } .elabel.hv { font-size:13px; } .elabel.hv:not(.hi) { fill:var(--fg); } .elabel.rel { fill:var(--yellow); } .elabel.hv.rel:not(.hi) { fill:var(--yellow); }
   .gnode { cursor:grab; } .gnode.dim { opacity:.24; } .gnode text { fill:var(--fg); font-size:11px; pointer-events:none; }
-  .gnode.node rect { fill:var(--btn); stroke:#3a4658; rx:5; } .gnode.node.hi rect { stroke:var(--cyan); fill:var(--sel); }
+  .gnode.node rect { fill:var(--btn); stroke:#3a4658; rx:5; } .gnode.node.hi rect { stroke:var(--cyan); fill:var(--sel); } .gnode.node.rel-pub rect { stroke:var(--green); fill:var(--sel); } .gnode.node.rel-sub rect { stroke:var(--cyan); fill:var(--sel); }
   .gnode.topic ellipse { fill:#14202b; stroke:#3f5266; } .gnode.topic.hi ellipse { stroke:var(--cyan); fill:#1d2f3f; } .gnode.topic text { fill:var(--cyan); font-size:10px; }
   .gnode.service polygon { fill:#141d2b; stroke:var(--blue); } .gnode.service.hi polygon { fill:#1d2740; stroke:var(--cyan); } .gnode.service text { fill:var(--blue); font-size:10px; }
   .gnode.action polygon { fill:#231a2b; stroke:var(--mag); } .gnode.action.hi polygon { fill:#2e2140; stroke:var(--cyan); } .gnode.action text { fill:var(--mag); font-size:10px; }

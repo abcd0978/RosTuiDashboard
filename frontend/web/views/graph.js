@@ -6,9 +6,14 @@ import { getActiveModal } from '../lib/modal.js';
 import { renderSidebar } from '../panels/sidebar.js';
 import { renderInfo } from '../panels/info.js';
 import { renderValActs, clearNonTopicSelection, selectTopic } from '../panels/value.js';
+import { openEdgeModal } from './edge.js';
 
-let G = { ents: new Map(), edges: [] }, pos = new Map(), dragging = null;
+let G = { ents: new Map(), edges: [] }, pos = new Map(), dragging = null, hoverEdge = null;
 let gspread = 1;                        // 노드 간격 배수(슬라이더로 실시간 조절) — 척력·스프링·충돌 간격에 반영
+let hoverTarget = null;                 // { kind:'topic'|'node', name } | null — 정보 패널 호버로 그래프에 임시 하이라이트(state.sel은 안 건드림)
+
+// 정보 패널에서 토픽/노드 이름에 마우스를 올리면 그래프에 임시로 하이라이트한다. setGraphHover(null) 로 해제.
+export function setGraphHover(kind, name) { hoverTarget = kind ? { kind, name } : null; }
 
 export const gview = { s: 1, ox: 0, oy: 0 };   // 그래프 줌/팬(#edges·#nodes 그룹 transform)
 
@@ -125,6 +130,20 @@ function neighbors(id) {
   return s;
 }
 
+// 유효 하이라이트 결정: 호버 > 선택된 토픽(state.selItem.kind==='topic') > 기본(state.sel + neighbors, 기존 동작)
+function effectiveHi() {
+  if (hoverTarget) return hoverTarget;
+  if (state.selItem && state.selItem.kind === 'topic') return { kind: 'topic', name: state.selItem.name };
+  return null;
+}
+
+// 토픽 T 의 발행/구독 노드 집합 — T.pubs/T.subs 를 nodeName 으로 정규화
+function topicHiSets(name) {
+  const t = byName(name);
+  if (!t) return null;
+  return { name, pubs: new Set((t.pubs || []).map(nodeName)), subs: new Set((t.subs || []).map(nodeName)) };
+}
+
 const HALF_H = 11, GAP = 18;
 
 function entW(name) {
@@ -192,24 +211,30 @@ const EC = { pub: '#6fd08c', sub: '#57c7d4', service: '#6f9be0', action: '#c78ad
 
 export function paint() {
   const eg = $('#edges'), ng = $('#nodes');
-  const nb = state.sel ? neighbors(state.sel) : null;
+  const hiT = effectiveHi();
+  let topicHi = null, hiId = state.sel;
+  if (hiT && hiT.kind === 'topic') topicHi = topicHiSets(hiT.name);
+  else if (hiT && hiT.kind === 'node') hiId = hiT.name;
+  const nb = (!topicHi && hiId) ? neighbors(hiId) : null;
   eg.innerHTML = '';
   ng.innerHTML = '';
   for (const e of G.edges) {
     const pa = pos.get(e.from), pb = pos.get(e.to);
     if (!pa || !pb) continue;
-    const hi = state.sel && (e.from === state.sel || e.to === state.sel);
+    const rel = topicHi ? (GMODE === 'bipartite' ? (e.from === topicHi.name || e.to === topicHi.name) : (e.kind === 'topic' && e.labels.includes(topicHi.name))) : false;
+    const hi = !topicHi && hiId && (e.from === hiId || e.to === hiId);
+    const hv = hoverEdge === edgeKey(e);
     const dx = pb.x - pa.x, dy = pb.y - pa.y;
     const s = borderPt(pa, halfW(e.from) + 3, HALF_H + 3, dx, dy), t = borderPt(pb, halfW(e.to) + 8, HALF_H + 8, -dx, -dy);
-    const ln = mkSVG('line', { x1: s.x, y1: s.y, x2: t.x, y2: t.y, class: 'edge' + (hi ? ' hi' : '') });
-    if (hi) { ln.style.strokeWidth = 2.4; } else { ln.style.stroke = EC[e.kind] || '#3a4658'; ln.style.strokeWidth = e.kind === 'topic' ? Math.min(5, 1.1 + e.labels.length * 0.7) : 1.5; if (e.kind === 'service') ln.style.strokeDasharray = '4 3'; }
+    const ln = mkSVG('line', { x1: s.x, y1: s.y, x2: t.x, y2: t.y, class: 'edge' + (hi ? ' hi' : '') + (rel ? ' rel' : '') + (hv ? ' hv' : '') });
+    if (hi || rel) { ln.style.strokeWidth = hv ? 3.2 : 2.4; } else { if (!hv) ln.style.stroke = EC[e.kind] || '#3a4658'; ln.style.strokeWidth = (e.kind === 'topic' ? Math.min(5, 1.1 + e.labels.length * 0.7) : 1.5) + (hv ? 1.3 : 0); if (e.kind === 'service') ln.style.strokeDasharray = '4 3'; }
     const ti = mkSVG('title', {});
     ti.textContent = e.labels ? e.labels.join('\n') : e.kind;
     ln.appendChild(ti);
     eg.appendChild(ln);
     if (e.kind === 'topic') {
       const d = Math.hypot(dx, dy) || 1, mx = (s.x + t.x) / 2 - dy / d * 7, my = (s.y + t.y) / 2 + dx / d * 7;
-      const tx = mkSVG('text', { x: mx, y: my + 3, 'text-anchor': 'middle', class: 'elabel' + (hi ? ' hi' : '') });
+      const tx = mkSVG('text', { x: mx, y: my + 3, 'text-anchor': 'middle', class: 'elabel' + (hi ? ' hi' : '') + (rel ? ' rel' : '') + (hv ? ' hv' : '') });
       tx.textContent = e.labels.length;
       const t2 = mkSVG('title', {});
       t2.textContent = e.labels.join('\n');
@@ -220,8 +245,18 @@ export function paint() {
   for (const id of pos.keys()) {
     const p = pos.get(id);
     const e = G.ents.get(id) || { type: 'node' };
-    const dim = state.sel && id !== state.sel && nb && !nb.has(id);
-    const g = mkSVG('g', { class: 'gnode ' + e.type + (id === state.sel ? ' hi' : '') + (dim ? ' dim' : ''), transform: `translate(${p.x},${p.y})` });
+    let isHi = false, relCls = '', dim = false;
+    if (topicHi) {
+      const isTopicEnt = GMODE === 'bipartite' && id === topicHi.name;
+      if (isTopicEnt) isHi = true;
+      else if (topicHi.pubs.has(id)) relCls = ' rel-pub';
+      else if (topicHi.subs.has(id)) relCls = ' rel-sub';
+      dim = !isTopicEnt && !relCls;
+    } else {
+      isHi = hiId && id === hiId;
+      dim = hiId && id !== hiId && nb && !nb.has(id);
+    }
+    const g = mkSVG('g', { class: 'gnode ' + e.type + (isHi ? ' hi' : '') + relCls + (dim ? ' dim' : ''), transform: `translate(${p.x},${p.y})` });
     const label = id.replace(/^\//, ''); const w = entW(id), hw = w / 2;
     if (e.type === 'topic') g.appendChild(mkSVG('ellipse', { cx: 0, cy: 0, rx: hw, ry: 12 }));
     else if (e.type === 'service') g.appendChild(mkSVG('polygon', { points: `0,-13 ${hw},0 0,13 ${-hw},0` }));
@@ -253,6 +288,45 @@ function selectNode(id) {
   renderInfo(state.selItem);
   if (state.selItem.kind !== 'topic') clearNonTopicSelection(state.selItem);
 }
+
+// 엣지 호버/클릭 — paint()가 60fps로 DOM을 통째로 새로 그려서 엣지 DOM에 리스너를 못 붙인다.
+// #graph에 리스너 하나만 붙이고 매 mousemove마다 좌표→모든 엣지까지 최근접 거리로 히트테스트한다(엣지가 수십 개라 매 프레임 스캔해도 무리 없음).
+const edgeKey = (e) => e.from + '\0' + e.to + '\0' + e.kind;
+
+function distToSeg(px, py, ax, ay, bx, by) {
+  const dx = bx - ax, dy = by - ay, len2 = dx * dx + dy * dy || 1e-9;
+  const t = Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / len2));
+  return Math.hypot(px - (ax + dx * t), py - (ay + dy * t));
+}
+
+(function initEdgeHover() {
+  const svg = $('#graph');
+  if (!svg) return;
+  let down = null;
+  svg.addEventListener('mousemove', (ev) => {
+    if (dragging) return;
+    const gp = toGraph(ev.clientX, ev.clientY), th = 8 / gview.s;
+    let best = null, bestD = th;
+    for (const e of G.edges) {
+      const pa = pos.get(e.from), pb = pos.get(e.to);
+      if (!pa || !pb) continue;
+      const d = distToSeg(gp.x, gp.y, pa.x, pa.y, pb.x, pb.y);
+      if (d < bestD) { bestD = d; best = e; }
+    }
+    hoverEdge = best ? edgeKey(best) : null;
+    svg.classList.toggle('edge-hover', !!best);
+  });
+  svg.addEventListener('mousedown', (ev) => { down = { x: ev.clientX, y: ev.clientY }; });
+  svg.addEventListener('mouseup', (ev) => {
+    if (!down) return;
+    const moved = Math.hypot(ev.clientX - down.x, ev.clientY - down.y);
+    down = null;
+    if (moved < 4 && hoverEdge) {
+      const e = G.edges.find((x) => edgeKey(x) === hoverEdge);
+      if (e) openEdgeModal(e);
+    }
+  });
+})();
 
 // 그래프 컨트롤 바(rqt_graph 스타일 옵션) — 뷰 모드 토글 + 표시 필터.
 (function injectGraphControls() {
