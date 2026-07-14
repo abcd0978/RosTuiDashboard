@@ -287,6 +287,32 @@ actually drawn on screen, and only those get subscribed. Everything else reports
 measured", NOT "0 Hz"**. `snapProfile`/`diffBaseline` must keep skipping nulls or
 Baseline reports a false `12.0→0.0 (-100%)` regression for every off-screen topic.
 
+### `RosbridgeClient` reconnect invariants (`shared/rosbridge.js`)
+
+`ensureRosbridge` restarts rosbridge_server whenever it dies, so **the client must
+survive its server vanishing mid-flight**. It did not, and the failure was silent
+and permanent (the backend froze; only a process restart recovered it). Three rules
+keep it working — do not remove them:
+
+1. **`connect()` is guarded.** Two things call it: the client's own `_retry()`
+   (1.5 s) and the watchdog in `backend/telemetry.js` (2 s). Without a
+   `readyState`-based guard both open sockets, and then **an old socket's `close`
+   handler sets `ready = false` on a perfectly good new socket**. Once `ready` is
+   false, `_send()` only queues, so every service call sits there and times out
+   after 4 s — the process looks alive, rosapi looks idle, and nothing works.
+2. **Every listener checks `this.ws !== sock` and bails.** A stale socket's events
+   must never touch shared state.
+3. **`open` re-subscribes.** rosbridge forgets our subscriptions when it restarts;
+   the client still holds the callbacks, so nothing errors — the data just stops.
+   `subscribe()` therefore remembers the message type (`topicTypes`) and `open`
+   re-sends every `subscribe`, and clears `_advertised` so the next `publish()`
+   re-advertises.
+
+The regression test that proves this: start a fake rosbridge, subscribe, kill it,
+restart it on the same port, then assert the server sees the `subscribe` again,
+exactly one connection, and that `call()` still resolves. Against the pre-fix code
+that test fails on re-subscribe (0) and connection count (2).
+
 ### Browser state (`frontend/web/lib/state.js`)
 
 ES module imports are read-only bindings: `import { items }` then `items = …` is a
