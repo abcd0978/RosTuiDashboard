@@ -11,10 +11,11 @@ function needRb(req, res, next) { if (rbRequired(res)) return; next(); }
 
 router.get('/api/msgdef', async (req, res) => res.json({ out: await runOnce(be.msgDef(req.query.type)) }));
 
-// 발행 폼 프리필: 타입 스켈레톤 → flow-style YAML 한 줄 + 스켈레톤 자체
+// 발행/호출 폼 프리필: 타입 스켈레톤 → flow-style YAML 한 줄 + 스켈레톤 자체
 // 웹은 yaml 만 쓰지만(textarea 프리필), TUI 는 필드별 입력 폼을 그리므로 skel 이 필요하다.
+// kind 생략 시 topic(기존 클라이언트 호환) — service 는 그래프 스냅샷에 ty 가 없어 이름으로 타입을 조회한다.
 router.get('/api/proto', async (req, res) => {
-  const cmd = be.proto(req.query.name, req.query.type);
+  const cmd = be.proto(req.query.kind || 'topic', req.query.name, req.query.type);
   if (!cmd) return res.json({ yaml: '{}', skel: null, type: '' });
   try {
     const parsed = JSON.parse((await runOnce(cmd)).trim() || '{}');

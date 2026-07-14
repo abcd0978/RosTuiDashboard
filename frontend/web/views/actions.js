@@ -9,7 +9,7 @@ export function publish(it) {
 }
 
 export function service(it) {
-  msgForm('call service — ' + it.name, '/api/service', { name: it.name }, 'req');
+  msgForm('call service — ' + it.name, '/api/service', { name: it.name }, 'req', '/api/proto?kind=service&name=' + encodeURIComponent(it.name));
 }
 
 export function action(it) {

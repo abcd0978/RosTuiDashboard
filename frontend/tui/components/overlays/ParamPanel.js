@@ -14,8 +14,9 @@ export function ParamPanel() {
   const idx = clamp(pp.idx, 0, Math.max(0, rows.length - 1));
   const cur = rows[idx];
 
-  // 편집은 빈 값으로 시작(현재값은 목록에 보임) — 기존값에 이어붙는 문제 방지.
-  const startEdit = () => cur && d.setParamPanel((p) => p && ({ ...p, edit: { name: cur.name, value: '', old: cur.value } }));
+  // 편집은 현재값으로 시작(수정이지 새로 짓는 게 아니다) — 지우고 다시 치면 된다.
+  // 현재값으로 미리 채워 연다(fresh=true → 첫 글자는 대체, 백스페이스는 편집. ParamEdit 와 같은 규칙).
+  const startEdit = () => cur && d.setParamPanel((p) => p && ({ ...p, edit: { name: cur.name, value: cur.value != null ? cur.value : '', old: cur.value, fresh: true } }));
   const nudge = (dir) => {
     if (!cur) return;
     const num = parseFloat(cur.value);
@@ -29,8 +30,8 @@ export function ParamPanel() {
     if (pp.edit) {
       if (key.escape) d.setParamPanel((p) => p && ({ ...p, edit: null }));
       else if (key.return) { d.setParam(pp.node, pp.edit.name, pp.edit.value.trim()); d.setParamPanel((p) => p && ({ ...p, edit: null })); }
-      else if (key.backspace || key.delete) d.setParamPanel((p) => p && ({ ...p, edit: { ...p.edit, value: p.edit.value.slice(0, -1) } }));
-      else if (typable(ch, key)) d.setParamPanel((p) => p && ({ ...p, edit: { ...p.edit, value: p.edit.value + ch } }));
+      else if (key.backspace || key.delete) d.setParamPanel((p) => p && ({ ...p, edit: { ...p.edit, value: p.edit.value.slice(0, -1), fresh: false } }));
+      else if (typable(ch, key)) d.setParamPanel((p) => p && ({ ...p, edit: { ...p.edit, value: (p.edit.fresh ? '' : p.edit.value) + ch, fresh: false } }));
       return;
     }
     if (key.escape || ch === 'q') d.setParamPanel(null);

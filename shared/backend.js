@@ -25,7 +25,7 @@ export class Backend {
   rosout() { return this.ver === '2' ? 'stdbuf -oL ros2 topic echo /rosout 2>/dev/null' : 'stdbuf -oL rostopic echo /rosout 2>/dev/null'; }
   diagnostics() { return this.ver === '2' ? 'stdbuf -oL ros2 topic echo /diagnostics 2>/dev/null' : 'stdbuf -oL rostopic echo /diagnostics 2>/dev/null'; }
   msgDef(ty) { return msgDefCmd(this.ver, ty); }
-  proto(topic, ty) { return protoCmd(this.ver, 'topic', topic, ty); }
+  proto(kind, name, ty) { return protoCmd(this.ver, kind, name, ty); }   // kind: 'topic'|'service' — 호출측이 지정
   resource(nodes) { return resourceCmd(nodes); }
   tfTree() { return tfTreeCmd(this.ver); }
   tfEcho(src, tgt) { return tfEchoCmd(this.ver, src, tgt); }

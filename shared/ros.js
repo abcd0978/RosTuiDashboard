@@ -89,11 +89,12 @@ export function restartFor(kind, name) {
 //   ROS1: roslib 로 메시지 클래스를 인트로스펙트해 필드 기본값 트리를 만든다.
 // stdout 은 JSON 한 줄 {type, skel} — 폼(필드명↦기본값)으로 펼치고 다시 YAML 로 조립하기 쉽게.
 const PROTO_PY2 = `python3 -c 'import sys,yaml,json
-s=sys.stdin.read().strip()
+s=sys.stdin.read().split(chr(10)+"---")[0].strip()
 if len(s)>1 and s[0]=="\\"" and s[-1]=="\\"": s=s[1:-1]
 print(json.dumps({"type":sys.argv[1],"skel":yaml.safe_load(s) or {}}))'`;
 
-const PROTO_PY1 = `python3 -c 'import sys,json,roslib.message
+// ROS1 인트로스펙션 공용 헬퍼(메시지/서비스 요청 둘 다 sk()로 스켈레톤화) — 토픽·서비스 명령이 공유.
+const PY1_HELPERS = `import sys,json,roslib.message
 def sk(cls):
     if cls is None: return {}
     m=cls(); o={}
@@ -106,18 +107,28 @@ def fld(t):
     if t=="bool": return False
     if t=="string": return ""
     if t in ("time","duration"): return {"secs":0,"nsecs":0}
-    return sk(roslib.message.get_message_class(t))
+    return sk(roslib.message.get_message_class(t))`;
+
+const PROTO_PY1 = `python3 -c '${PY1_HELPERS}
 print(json.dumps({"type":sys.argv[1],"skel":sk(roslib.message.get_message_class(sys.argv[1]))}))'`;
 
-// 발행 폼 스켈레톤 명령 — 토픽만. 타입을 알면(ty) 조회를 건너뛴다. stdout: JSON {type, skel}.
+// 서비스 요청 스켈레톤 — get_service_class(TYPE)._request_class 를 같은 sk()로 펼친다.
+const PROTO_PY1_SRV = `python3 -c '${PY1_HELPERS}
+srv=roslib.message.get_service_class(sys.argv[1])
+print(json.dumps({"type":sys.argv[1],"skel":sk(srv._request_class if srv else None)}))'`;
+
+// 발행/호출 폼 스켈레톤 명령 — 토픽·서비스 공용. 타입을 알면(ty) 조회를 건너뛴다. stdout: JSON {type, skel}.
+//   서비스는 그래프 스냅샷에 ty 가 없어(API.md) ty 미지정이 기본 — 이름으로 타입을 조회해야 한다.
 export function protoCmd(ver, kind, name, ty) {
-  if (kind !== 'topic') return null;
+  if (kind !== 'topic' && kind !== 'service') return null;
   if (ver === '2') {
-    const t = ty ? `T=${shq(ty)}` : `T=$(ros2 topic type ${shq(name)} 2>/dev/null | head -1)`;
+    const typeCmd = kind === 'service' ? `ros2 service type ${shq(name)}` : `ros2 topic type ${shq(name)}`;
+    const t = ty ? `T=${shq(ty)}` : `T=$(${typeCmd} 2>/dev/null | head -1)`;
     return `${t}; [ -z "$T" ] && exit 0; ros2 interface proto "$T" 2>/dev/null | ${PROTO_PY2} "$T"`;
   }
-  const t = ty ? `T=${shq(ty)}` : `T=$(rostopic type ${shq(name)} 2>/dev/null | head -1)`;
-  return `${t}; [ -z "$T" ] && exit 0; ${PROTO_PY1} "$T"`;
+  const typeCmd = kind === 'service' ? `rosservice type ${shq(name)}` : `rostopic type ${shq(name)}`;
+  const t = ty ? `T=${shq(ty)}` : `T=$(${typeCmd} 2>/dev/null | head -1)`;
+  return `${t}; [ -z "$T" ] && exit 0; ${kind === 'service' ? PROTO_PY1_SRV : PROTO_PY1} "$T"`;
 }
 
 // echo YAML 텍스트에서 지정 점(.) 경로의 값 문자열을 추출(워치리스트용). 없으면 undefined.

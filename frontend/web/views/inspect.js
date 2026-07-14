@@ -44,9 +44,12 @@ export async function tftree() {
 }
 
 export function setparam(it) {
-  const inp = el('input', { style: 'width:100%', value: '' });
+  const inp = el('input', { style: 'width:100%', value: '', placeholder: '조회 중…' });
   const out = el('pre', { class: 'out' });
   openModal('set param — ' + it.name, el('div', {}, inp, el('div', { class: 'actbtns' }, el('button', { class: 'act', onclick: async () => { const r = await post('/api/setparam1', { name: it.name, value: inp.value }); out.textContent = r.out; } }, '적용')), out));
+  // 현재값 프리필 — 파라미터는 수정이지 새로 짓는 게 아니다(실패해도 입력은 막지 않음)
+  const done = () => { inp.placeholder = ''; };
+  api('/api/param/get1?name=' + encodeURIComponent(it.name)).then((r) => { if (r && typeof r.out === 'string' && !inp.value) inp.value = r.out.trim(); done(); }).catch(done);
 }
 
 export async function params(it) {

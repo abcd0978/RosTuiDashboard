@@ -31,9 +31,12 @@ export function PublishForm() {
 
   const w = Math.max(30, (d.cols || 100) - 4);
   const nameW = Math.min(28, fields.reduce((m, x) => Math.max(m, x.path.length), 4) + 1);
+  const isSvc = f.kind === 'service';   // 서비스 호출도 같은 폼을 쓴다 — 제목/Enter 힌트만 바꾼다
+  const titleTxt = isSvc ? `call service  ${f.name}` : `▲ publish  ${f.name}`;
+  const enterHint = isSvc ? 'Enter=호출' : 'Enter=발행(1회)';
   return h(Box, { flexDirection: 'column', borderStyle: 'round', borderColor: 'yellow', paddingX: 1, width: w + 2 },
-    h(Text, { color: 'yellow', bold: true }, ` ▲ publish  ${f.name} `),
-    h(Text, { dimColor: true }, ` type: ${f.type}   ↑↓ 필드 · 입력=값 · Enter=발행(1회) · Esc=취소`),
+    h(Text, { color: 'yellow', bold: true }, ` ${titleTxt} `),
+    h(Text, { dimColor: true }, ` type: ${f.type}   ↑↓ 필드 · 입력=값 · ${enterHint} · Esc=취소`),
     ...(fields.length
       ? fields.map((x, i) => {
           const on = i === idx;

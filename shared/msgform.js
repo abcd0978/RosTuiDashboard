@@ -9,7 +9,9 @@ export function flattenSkeleton(obj) {
   const walk = (node, keys) => {
     if (node !== null && typeof node === 'object' && !Array.isArray(node)) {
       const ks = Object.keys(node);
-      if (ks.length === 0) { out.push(leaf(keys, node, 'raw')); return; }   // 빈 메시지
+      // 빈 중첩 서브메시지는 그대로 raw 리프. 루트가 비면(std_srvs/Empty·Trigger 요청 등) 필드 0개다
+      // — 이름 없는 리프를 만들면 buildYaml 이 {undefined: …} 를 뱉는다.
+      if (ks.length === 0) { if (keys.length) out.push(leaf(keys, node, 'raw')); return; }
       for (const k of ks) walk(node[k], [...keys, k]);
       return;
     }

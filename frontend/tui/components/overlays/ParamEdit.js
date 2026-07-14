@@ -14,11 +14,15 @@ const LABELS = {
 export function ParamEdit() {
   const d = useDashboard();
   const [verb, field, hint] = LABELS[d.edit.kind] || LABELS.param;
+  // 입력창은 현재값/스켈레톤으로 미리 채워져 열린다(fresh=true). 텍스트 필드가 전체 선택된 상태처럼 굴어야 한다:
+  //   첫 글자를 치면 → 기존 값을 "대체"(새 값을 넣으려는 것)
+  //   백스페이스를 치면 → 기존 값을 "편집"(끝 글자만 지움)
+  // 이게 없으면 프리필 값 뒤에 이어붙어 "1.0" + "2" = "1.02" 가 된다.
   useInput((ch, key) => {
     if (key.return) { d.submitEdit(d.edit.kind, d.edit.name, d.edit.value); d.setEdit(null); }
     else if (key.escape) d.setEdit(null);
-    else if (key.backspace || key.delete) d.setEdit((e) => e && ({ ...e, value: e.value.slice(0, -1) }));
-    else if (typable(ch, key)) d.setEdit((e) => e && ({ ...e, value: e.value + ch }));
+    else if (key.backspace || key.delete) d.setEdit((e) => e && ({ ...e, value: e.value.slice(0, -1), fresh: false }));
+    else if (typable(ch, key)) d.setEdit((e) => e && ({ ...e, value: (e.fresh ? '' : e.value) + ch, fresh: false }));
   }, { isActive: !!process.stdin.isTTY });
 
   return h(Box, null,

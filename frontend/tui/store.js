@@ -47,7 +47,7 @@ export function StoreProvider({ children }) {
   const [bagPlay, setBagPlay] = useState(null);         // rosbag 재생 경로 입력 {value} 또는 null
   const [tfEcho, setTfEcho] = useState(null);           // tf echo 프레임 입력 {step,src,tgt} 또는 null
   const [bagCmp, setBagCmp] = useState(null);           // A/B bag 비교 경로 입력 {step,a,b} 또는 null
-  const [pubForm, setPubForm] = useState(null);         // 토픽 발행 폼 {name,type,fields,idx} 또는 null
+  const [pubForm, setPubForm] = useState(null);         // 발행/서비스 호출 폼 {name,type,fields,idx,kind} 또는 null
   const [graphOpen, setGraphOpen] = useState(null);     // 노드 그래프 오버레이 {focus,top} 또는 null
   const [qosOpen, setQosOpen] = useState(null);         // QoS 오버레이 {name} 또는 null
   const [logOpen, setLogOpen] = useState(null);         // 로그 뷰어 {min,top,text,typing} 또는 null
@@ -229,19 +229,34 @@ export function StoreProvider({ children }) {
     const o = await api(`/api/proto?name=${encodeURIComponent(nm)}&type=${encodeURIComponent(active.ty || '')}`);
     const skel = o && o.skel;
     if (!skel || typeof skel !== 'object') {
-      setEdit({ name: nm, value: (o && o.yaml) || '{}', kind: 'topic' });   // 스켈레톤 실패 → YAML 자유 입력 폴백
+      setEdit({ name: nm, value: (o && o.yaml) || '{}', kind: 'topic', fresh: true });   // 스켈레톤 실패 → YAML 자유 입력 폴백
       setStatus('타입 필드 조회 실패 — YAML 직접 입력');
       return;
     }
     const fields = flattenSkeleton(skel);
-    setPubForm({ name: nm, type: (o.type || active.ty || '?'), fields, idx: 0 });
+    setPubForm({ name: nm, type: (o.type || active.ty || '?'), fields, idx: 0, kind: 'topic' });
     setStatus(`▲ publish ${nm} — 필드 ${fields.length}개`);
+  };
+  // 서비스 호출 폼 — topic 과 같은 패턴(스켈레톤 → 필드 펼침), kind 만 다르다.
+  const openServiceForm = async (nm) => {
+    setStatus('서비스 요청 필드 조회 중…');
+    const o = await api(`/api/proto?kind=service&name=${encodeURIComponent(nm)}`);
+    const skel = o && o.skel;
+    if (!skel || typeof skel !== 'object') {
+      setEdit({ name: nm, value: (o && o.yaml) || '{}', kind: 'service', fresh: true });   // 스켈레톤 실패 → YAML 자유 입력 폴백
+      setStatus('서비스 타입 조회 실패 — YAML 직접 입력');
+      return;
+    }
+    const fields = flattenSkeleton(skel);
+    setPubForm({ name: nm, type: (o.type || '?'), fields, idx: 0, kind: 'service' });
+    setStatus(`call service ${nm} — 필드 ${fields.length}개`);
   };
   const submitPubForm = () => {
     const f = pubForm; if (!f) return;
     const msg = buildYaml(f.fields);
     setPubForm(null);
-    submitPublish(f.name, msg);
+    if (f.kind === 'service') submitServiceCall(f.name, msg);
+    else submitPublish(f.name, msg);
   };
 
   // x 키 — 선택 항목별 기본 액션. 노드는 죽이기(즉시), 나머지는 입력창/폼.
@@ -250,9 +265,13 @@ export function StoreProvider({ children }) {
     if (!active) { setStatus('선택된 항목 없음 (Enter 로 선택)'); return; }
     const k = active.kind, nm = active.name;
     if (k === 'topic') { openPublishForm(); return; }                                          // 발행은 폼으로
-    if (k === 'action') { setEdit({ name: nm, value: '{}', kind: 'action' }); return; }         // 액션 goal 입력
-    if (k === 'service') { setEdit({ name: nm, value: '{}', kind: 'service' }); return; }       // 서비스 요청 입력
-    if (k === 'param') { setEdit({ name: nm, value: '', kind: 'param' }); return; }             // 파라미터 값 입력
+    if (k === 'action') { setEdit({ name: nm, value: '{}', kind: 'action', fresh: true }); return; }         // 액션 goal 입력
+    if (k === 'service') { openServiceForm(nm); return; }                                       // 서비스 호출도 폼으로
+    if (k === 'param') {                                                                        // 파라미터: 현재값으로 프리필
+      const o = await api(`/api/param/get1?name=${encodeURIComponent(nm)}`);
+      setEdit({ name: nm, value: (o && typeof o.out === 'string') ? o.out.trim() : '', kind: 'param', fresh: true });
+      return;
+    }
     if (k === 'node') {
       setStatus(`💀 kill ${nm} …`);
       setStatus(`${nm}: ${outOf(await post('/api/killnode', { name: nm })) || '(응답 없음)'}`);
