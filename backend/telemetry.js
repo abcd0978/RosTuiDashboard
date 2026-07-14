@@ -1,7 +1,7 @@
 // rosbridge 클라이언트 · 텔레메트리 폴링 싱글톤 · 그래프 스냅샷 · echo.
 import { RosbridgeClient, msgToYaml } from '../shared/rosbridge.js';
 import { be } from './ros.js';
-import { sse, json } from './http.js';
+import { sse } from './http.js';
 
 // 연결 두 개를 쓴다: rb 는 그래프/echo(rosapi 호출이 몰린다), rbCmd 는 publish/service/teleop.
 // 한 소켓에 섞으면 rosapi backlog 뒤에 명령이 줄을 서서 조작이 몇 초씩 밀린다.
@@ -16,7 +16,7 @@ rbEnsure();      // 미리 연결 시작 — 연결 전/끊김 동안 rosbridge 
 rbCmdEnsure();
 export function useRb() { return !!(rb && rb.ready); }
 export function useRbCmd() { return !!(rbCmd && rbCmd.ready); }
-function rbUnavailable(res) { json(res, 503, { error: `rosbridge unavailable: ${be.url}` }); return true; }
+function rbUnavailable(res) { res.status(503).json({ error: `rosbridge unavailable: ${be.url}` }); return true; }
 export function rbRequired(res) { return useRb() ? null : rbUnavailable(res); }
 export function rbCmdRequired(res) { return useRbCmd() ? null : rbUnavailable(res); }
 export async function rbTopicType(topic) {

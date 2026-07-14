@@ -41,15 +41,21 @@ shared/                # used by BOTH the TUI and the web backend. No React, no 
   preflight.js         #   load ~/.rdash_preflight.json + evaluate checks vs graph
   util.js              #   clamp, pad/padL, sparkline, fuzzy, shq, typable/editable, constants (LEFT_W, RATES, MIN_COLS/ROWS)
 
-backend/               # the web backend (Node). Entry: `npm run web` → node backend/server.js
-  server.js            #   34 lines: create http server, wire router + /ws, listen, banner
-  ros.js               #   ROS1/2 detection (VER), backend selection (BACKEND/be), tcpOpen, ensureRosbridge, cleanRosCmd
-  http.js              #   sse / json / readBody / runOnce / streamLines / streamBlocks / serveFile (serves ../frontend/web)
+backend/               # the backend (Node + Express 5). Entry: `npm run web` → node backend/server.js
+  server.js            #   thin: express app → http.createServer → attach /ws → listen + banner
+  app.js               #   express assembly: express.json → routers → express.static → 404 → error handler
+  routes/              #   one Router per domain — 48 routes total, contract in API.md
+    graph.js           #     /api/ver /api/env /api/graph /api/preflight
+    streams.js         #     /events /echo /rosout /diagnostics /api/bw + the sensor bridges
+    inspect.js         #     msgdef / proto / connections / tf / bag / param queries / resource
+    actions.js         #     publish / service / teleop / param set / kill / restart / lifecycle / run / measure
+    jobs.js            #     /api/jobs /api/job /api/action /api/record /api/play /api/job/:id/kill
+    config.js          #     /api/baseline /api/bookmarks /api/preset
+  ros.js               #   ROS1/2 detection (VER), the Backend facade (be), ensureRosbridge, cleanRosCmd
+  http.js              #   only what Express does NOT do: sse(), runOnce(), the child-process pipe helpers
   telemetry.js         #   rosbridge clients, rbGraphSnapshot, the telemetry SINGLETON, rbEcho, the `measure` set
-  mux.js               #   echo multiplexer: one child process fanning out N topic echoes
   jobs.js              #   jobs registry (bookmarks / rosbag / action goals) + the persistent teleop publisher
   ws.js                #   /ws — one websocket multiplexing every browser stream (events/echo/img/cloud/…)
-  routes.js            #   every HTTP route (49 of them)
   python/              #   see "Python bridges" below
 
 frontend/
@@ -540,12 +546,38 @@ multiplex for streams. Consequences worth knowing:
 - Local-only work (node CPU/RSS, rosbag, process kill, arbitrary commands) still
   happens — on **the backend's** host, which is where you want it: next to the robot.
 
+### Express, and what it is NOT allowed to touch
+
+The backend is Express 5. Three things it gives us that were hand-rolled before, and must stay
+its job: `express.json()` (body parsing), `express.static()` (the browser files, including the
+traversal guard), and **automatic forwarding of rejected promises from `async` handlers to the
+error middleware** — which is why no route has a `try/catch`.
+
+Two things Express must **not** get near:
+
+- **SSE.** The stream routes write raw `data: …\n\n` frames through `sse(res)` in `http.js`.
+  Do not add `compression` (or any buffering middleware) — it would hold frames back and the
+  graph would arrive in bursts, or not at all.
+- **`/ws`.** The multiplex attaches to the raw `http.Server` upgrade event, not to Express.
+  `http.createServer(app)` then `attachWebSocket(server)` — keep that order.
+
+`rbRequired` / `rbCmdRequired` are per-route middleware: they either `next()` or reply
+`503 {error: "rosbridge unavailable: <url>"}`. Every route that needs the rosbridge connection
+declares that dependency in its own definition; it is not a global check.
+
 ## Development & verification
 
 There is no test runner, no bundler, and no linter checked in. What there *is* is a
 set of cheap checks that catch the mistakes this codebase actually makes. Run them
 before you claim something works — especially on the browser side, where a broken
 module fails **silently** (blank panel, no stack trace anywhere you'd look).
+
+**The API contract is a test.** `API.md` documents 48 routes; there is a probe script pattern that
+fires every one of them at a running backend and records `(status code, response key shape,
+SSE frames yes/no)`. Snapshot it before a backend change, snapshot it after, diff. That is how the
+Express migration was verified — the only diffs were live data (a clock value) and the probe's own
+side effect (a `POST /api/baseline` it made itself). Keep doing this for any backend refactor; a
+silently dropped route is otherwise invisible.
 
 **Static — catches ~everything mechanical:**
 

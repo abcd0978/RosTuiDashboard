@@ -1,7 +1,6 @@
-// HTTP 응답 헬퍼 · 프로세스→스트림 파이프 · 정적 파일 서빙.
-import { readFileSync } from 'fs';
+// HTTP 스트림 헬퍼 · 프로세스→스트림 파이프 · 정적 파일 루트. json/readBody/serveFile 은 Express 가 대신한다.
 import { fileURLToPath } from 'url';
-import { dirname, join, extname, resolve } from 'path';
+import { dirname, join } from 'path';
 import { rosSpawn } from '../shared/ros.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -12,10 +11,6 @@ export function sse(res) {
   res.write('\n');
   return (data) => res.write(`data: ${data}\n\n`);
 }
-export function json(res, code, obj) {
-  res.writeHead(code, { 'Content-Type': 'application/json' });
-  res.end(JSON.stringify(obj));
-}
 export function runOnce(cmd) {
   return new Promise((resolve) => {
     const p = rosSpawn(`${cmd}`);
@@ -24,13 +19,6 @@ export function runOnce(cmd) {
     p.stdout.on('data', (d) => { out += d.toString(); });
     p.on('close', () => resolve(out));
     p.on('error', () => resolve(out || '(exec error)'));
-  });
-}
-export function readBody(req) {
-  return new Promise((resolve) => {
-    let b = '';
-    req.on('data', (c) => { b += c; });
-    req.on('end', () => { try { resolve(JSON.parse(b || '{}')); } catch { resolve({}); } });
   });
 }
 
@@ -98,22 +86,5 @@ export function streamBlocks(res, cmd) {
   res.on('close', () => { try { child.kill(); } catch { /* */ } });
 }
 
-// ── 정적 파일 — 브라우저 코드는 frontend/web/ 아래(모듈로 쪼개져 있어 하위 경로까지 그대로 서빙) ──
-export const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css' };
+// ── 정적 파일 루트 — 브라우저 코드는 frontend/web/ 아래(app.js 에서 express.static 으로 마운트) ──
 export const WEB = join(HERE, '..', 'frontend', 'web');
-export function serveFile(res, name) {
-  const file = resolve(WEB, '.' + (name.startsWith('/') ? name : '/' + name));
-  if (!file.startsWith(WEB)) {   // 경로 탈출 차단
-    res.writeHead(403);
-    res.end('forbidden');
-    return;
-  }
-  try {
-    const body = readFileSync(file);
-    res.writeHead(200, { 'Content-Type': MIME[extname(file)] || 'text/plain' });
-    res.end(body);
-  } catch {
-    res.writeHead(404);
-    res.end('not found');
-  }
-}

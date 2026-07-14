@@ -1,10 +1,10 @@
 // RDash 웹 서버 — TUI 와 같은 텔레메트리/명령 인프라를 재사용해 브라우저 UI 를 localhost 로 서빙.
 // 목표: TUI 의 모든 기능을 웹에서도. 이 파일은 진입점일 뿐이고, 로직 빌더는 전부 shared/ 재사용.
-// 라우팅은 routes.js, 텔레메트리는 telemetry.js, 잡/텔레옵은 jobs.js, echo 먹스는 mux.js 참조.
+// 앱 조립은 app.js, 텔레메트리는 telemetry.js, 잡/텔레옵은 jobs.js, echo 먹스는 ws.js 참조.
 // 실행: node backend/server.js (npm run web) · 포트 RDASH_WEB_PORT(기본 8080)
 import http from 'http';
 import { VER } from './ros.js';
-import { router } from './routes.js';
+import { app } from './app.js';
 import { attachWebSocket } from './ws.js';
 import { jobs } from './jobs.js';
 
@@ -14,7 +14,7 @@ const PORT = Number(process.env.RDASH_WEB_PORT) || 8080;
 const HOST = process.env.RDASH_WEB_HOST || '0.0.0.0';
 
 // ── 라우팅 ────────────────────────────────────────────────────────────────
-const server = http.createServer(router);
+const server = http.createServer(app);
 
 // ── WebSocket 멀티플렉서(/ws) ──
 attachWebSocket(server);

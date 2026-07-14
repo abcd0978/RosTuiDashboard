@@ -1,7 +1,7 @@
 {
   "name": "rdash",
   "version": "1.0.0",
-  "description": "RDash \u2014 a terminal dashboard (TUI) for browsing ROS topics/services/params/nodes with live values. ROS1 & ROS2, built with React Ink.",
+  "description": "RDash — a terminal dashboard (TUI) for browsing ROS topics/services/params/nodes with live values. ROS1 & ROS2, built with React Ink.",
   "type": "module",
   "bin": {
     "rdash": "index.js"
@@ -21,6 +21,7 @@
   "license": "MIT",
   "dependencies": {
     "@zenobius/ink-mouse": "^1.0.3",
+    "express": "^5.2.1",
     "ink": "^5.0.1",
     "react": "^18.3.1",
     "ws": "^8.18.0"
