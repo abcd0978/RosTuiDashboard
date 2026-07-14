@@ -94,9 +94,19 @@ The web UI has **full parity** with the TUI plus GUI-native views:
   publish/subscribe edges). **Services** render as blue diamonds from their
   server node, **actions** as purple hexagons (server→action→client, derived
   from `/_action/*`). A filter bar toggles services / actions / tf / debug
-  (`/rosout`,`/parameter_events`) / dead-end topics. Collision-free force
-  layout; **wheel-zoom / drag-pan**, drag nodes, click to focus, hover an edge
-  for the topic list.
+  (`/rosout`,`/parameter_events`) / dead-end topics / **CLI-tool nodes** (the
+  anonymous `rostopic_*`, `ros_tui_*`, `_ros2cli_*`, `rqt_*` helper nodes that
+  `echo`/`pub`/`hz` spawn — hidden by default). Collision-free force layout with
+  a live **node-spacing slider** (spread the graph out when edges crowd);
+  **wheel-zoom / drag-pan**, drag nodes, click to focus, hover an edge for the
+  topic list.
+- **Sidebar tree & inspector.** The left pane is a **collapsible TUI-style
+  tree** (names split on `/` into foldable groups, with an **anonymous-item
+  filter** to hide the CLI/tool nodes/services). Clicking **any** kind updates
+  the right **inspector**: a topic shows `rostopic info` (**type · Hz ·
+  publishers · subscribers**) live without opening a modal, a node its
+  publications/subscriptions, a service its server node, and a **parameter its
+  current value** on select. Publisher/subscriber entries are clickable to jump.
 - **PlotLab** (📈) — a **PlotJuggler-class** multi-plot dashboard: multiple
   synchronized plots (세로 / 격자 / 3열, each **drag-resizable** by its ⤡
   corner, or **pop-out** ⧉ into its own window); curves from **any topic/field**
@@ -121,8 +131,13 @@ The web UI has **full parity** with the TUI plus GUI-native views:
     when a condition fires (graph ERROR, `/diagnostics` ERROR), with cooldown.
   - **📊 Node processes** (`P`) — live per-node CPU% / RSS / thread count
     (CPU-sorted) with per-node kill / restart.
-- **🎮 Teleop** — a `geometry_msgs/Twist` D-pad + WASD/arrow keys with
-  adjustable linear/angular speed (a persistent `-r 10 Hz` publisher).
+- **🎮 Teleop** — a D-pad + WASD/arrow keys with adjustable linear/angular
+  speed (a persistent `-r 10 Hz` publisher). **Target presets** set the topic +
+  message + speed in one pick — **turtlesim** (`/turtle1/cmd_vel`),
+  **diff-drive** (`/cmd_vel`), **MAVROS velocity**
+  (`/mavros/setpoint_velocity/cmd_vel`, `TwistStamped`), or custom; the cmd_vel
+  topic is **auto-detected** and the message type (`Twist` / `TwistStamped`)
+  chosen automatically.
 - **Sensor views** (all rendered locally — no external tiles, no WebGL libs):
   - **🗺 Map** — NavSatFix lat/lon track.
   - **🖼 Image** — Compressed/Image camera stream with **annotation overlays**
@@ -141,10 +156,20 @@ The web UI has **full parity** with the TUI plus GUI-native views:
       text / **triangle-list mesh**, with transparency), TF-placed by `frame_id`.
     - **TF frames** (RGB axes + labels).
     - **Native message displays** — **LaserScan**, **Path**, **Odometry**,
-      **PoseArray**, **PoseStamped**, **PointStamped**, **OccupancyGrid**
-      (via `geom_bridge.py`).
+      **PoseArray**, **PoseStamped**, **PointStamped**, **OccupancyGrid**, and
+      **PX4 `VehicleOdometry`** — Odometry / VehicleOdometry also draw an
+      accumulated **trajectory trail** (via `geom_bridge.py`).
     - **RobotModel** — parses `robot_description` **URDF** (box/cylinder/sphere
-      primitives + **STL meshes**), each link posed by its TF frame.
+      primitives + **STL / OBJ / DAE (Collada) meshes**, Collada `up_axis`
+      converted to Z-up), each link posed by its TF frame.
+    - **6-DOF interactive markers** — subscribes an `InteractiveMarker` server
+      (`<topic>/update`), renders the visual + an RViz-style **gizmo** (3 move
+      arrows + 3 rotate rings); **drag** a handle to translate/rotate and the new
+      pose is published back as `InteractiveMarkerFeedback` to `<topic>/feedback`
+      — the full RViz round-trip (via `im_bridge.py`, bidirectional over the WS).
+    - **Camera image 3D projection** — a camera stream projected as a
+      FOV-sized textured quad at its optical `CameraInfo` frame (adjustable
+      distance), so the image sits in the scene like RViz's Camera display.
     - **Interactive tools** (🛠) — ground-plane click picking: **Publish Point**
       (`/clicked_point`), **Nav Goal** (`/goal_pose`), **Pose Estimate**
       (`/initialpose`), and **Measure** (distance between two points).
@@ -157,7 +182,12 @@ The web UI has **full parity** with the TUI plus GUI-native views:
       (`RDASH_CLOUD_VOXEL`) + **shader distance LOD** (keep a `lodDist/depth`
       fraction past a threshold via a stable hash, survivors enlarged), with
       **Off / Distance / Adaptive** (auto-tune to hold a target FPS) modes, a
-      max-points cap, and round/square points.
+      max-points cap, and round/square points. Targets **200k points/s** (Iris
+      360 lidar class) without frame drops.
+    - **On-demand rendering** — when the scene is static (no cloud streaming,
+      drag, or follow) the GL draw is skipped, so a markers/URDF-only view costs
+      near-zero GPU; the cloud-streaming path renders every frame so FPS and
+      adaptive LOD stay accurate.
 - **State Transitions** — a topic field's value changes as a colored timeline
   (enums / booleans / modes). Plus the full TUI toolset: publish form (skeleton
   prefill), service call, QoS, msg def, connections, TF tree, param table,
@@ -184,12 +214,17 @@ frontend/tui/  ─┐
 frontend/web/  ─┘
 ```
 
+The browser link is a single multiplexed **WebSocket** (`/ws`) — text frames for
+streams, **binary** frames for point clouds (float32 `xyzc`, no base64) — so the
+render bottleneck is only the viewer's GPU, not the transport.
+
 `npm start` launches the TUI, which spawns the backend and waits for it. Point the
 TUI at an already-running (or remote) backend with `RDASH_API=http://host:8080` —
 then it does not spawn one.
 
 The contract is written down in **`API.md`**. Sensor streams use python bridges under
-`backend/python/` (`scene3d/`, `image/`, `stream/`, `tools/`); every path is declared
+`backend/python/` (`scene3d/`, `image/`, `stream/`, `tools/`) — each works under
+**ROS1 (rospy) or ROS2 (rclpy)** via a `ros_compat` shim; every path is declared
 in `shared/paths.js` and each is overridable by env (`RDASH_IMG_BRIDGE`, …).
 
 Because the backend owns ROS, a few things moved:
