@@ -52,7 +52,7 @@ export function mkScene(cv, labelDiv, info) {
   const gl = cv.getContext('webgl', { antialias: true, alpha: false, preserveDrawingBuffer: true }) || cv.getContext('experimental-webgl');
   if (!gl) {
     info.textContent = 'WebGL 미지원 브라우저';
-    return { setCloud() {}, setMarkers() {}, setCloudById() {}, setMarkersById() {}, setVisible() {}, removeDisplay() {}, setTF() {}, opts() {}, view() {}, setPointSize() {}, setPickHandler() {}, setInspect() {}, setPin() {}, setCamImage() {}, setCamOpts() {}, clearCamera() {}, setInteractiveMarkers() {}, setImHandler() {}, getStats() { return { fps: 0, points: 0, drawn: 0 }; }, dispose() {} };
+    return { setCloud() {}, setMarkers() {}, setCloudById() {}, setMarkersById() {}, setVisible() {}, removeDisplay() {}, setTF() {}, opts() {}, view() {}, setPointSize() {}, setPickHandler() {}, setInspect() {}, setPin() {}, setContextHandler() {}, setCamImage() {}, setCamOpts() {}, clearCamera() {}, setInteractiveMarkers() {}, setImHandler() {}, getStats() { return { fps: 0, points: 0, drawn: 0 }; }, dispose() {} };
   }
   const VS = 'attribute vec3 p; attribute vec4 col; uniform mat4 mvp; uniform float psize; varying vec4 vc; void main(){ gl_Position = mvp*vec4(p,1.0); gl_PointSize = psize; vc = col; }';
   const FS = 'precision mediump float; varying vec4 vc; uniform float round; void main(){ if(round>0.5){ vec2 d=gl_PointCoord-0.5; if(dot(d,d)>0.25) discard; } gl_FragColor = vc; }';
@@ -108,7 +108,7 @@ export function mkScene(cv, labelDiv, info) {
   let yaw = 0.7, pitch = -0.6, dist = 12, center = [0, 0, 0.5], psize = 2.4, pan = [0, 0], raf = 0, alive = true;
   // 최적화 옵션(선택 가능) — lodMode: off|distance|adaptive · lodDist: 거리 임계(월드) · targetFps: 적응형 목표 ·
   // maxPoints: 하드 상한(0=무제한) · round: 둥근 점(off=사각, 소프트웨어에서 더 빠름).
-  const opt = { grid: true, axes: true, lodMode: 'adaptive', lodDist: 60, targetFps: 40, maxPoints: 0, round: true, colorMode: 0, follow: null, ortho: false, fixedFrame: null };
+  const opt = { axes: true, lodMode: 'adaptive', lodDist: 60, targetFps: 40, maxPoints: 0, round: true, colorMode: 0, follow: null, ortho: false, fixedFrame: null };
   let frames = [], labels = [], frameMap = {};   // frameMap: frame_id → 루트 기준 {p,q}
   // 고정 프레임 변환 g(루트→고정): 고정 프레임의 역변환. null=identity.
   const computeG = () => { const F = opt.fixedFrame && frameMap[opt.fixedFrame]; if (!F) return null; const cq = [-F.q[0], -F.q[1], -F.q[2], F.q[3]]; const pg = qrot(cq, F.p); return { q: cq, p: [-pg[0], -pg[1], -pg[2]] }; };
@@ -269,7 +269,6 @@ export function mkScene(cv, labelDiv, info) {
   function rebuildScene() {
     const L = [], T = [], TA = [], Pc = [];
     labels = [];
-    if (opt.grid) { const g = 8; for (let i = -g; i <= g; i++) { const c = [0.22, 0.27, 0.34, 1]; put(L, [i, -g, 0], c); put(L, [i, g, 0], c); put(L, [-g, i, 0], c); put(L, [g, i, 0], c); } }
     if (opt.axes) { const O = { q: [0, 0, 0, 1], p: [0, 0, 0] }; line(L, O, [0, 0, 0], [1.2, 0, 0], [0.9, 0.35, 0.35, 1]); line(L, O, [0, 0, 0], [0, 1.2, 0], [0.44, 0.82, 0.55, 1]); line(L, O, [0, 0, 0], [0, 0, 1.2], [0.4, 0.6, 0.95, 1]); }
     frameMap = {};
     for (const f of frames) frameMap[f.id] = { p: f.p || [0, 0, 0], q: f.q || [0, 0, 0, 1] };
@@ -428,7 +427,7 @@ export function mkScene(cv, labelDiv, info) {
       if (opt.lodMode === 'adaptive' && cloudN) { if (fps < opt.targetFps - 5) opt.lodDist = Math.max(3, opt.lodDist * 0.85); else if (fps > opt.targetFps + 8) opt.lodDist = Math.min(200, opt.lodDist * 1.12); }
     }
   }
-  let drag = null, btn = 0, pickHandler = null, inspectCb = null, pin = null;
+  let drag = null, btn = 0, pickHandler = null, inspectCb = null, pin = null, ctxCb = null, rcDown = null;
   // 3D 포인트 조회 — 커서에 가장 가까운(화면상) 클라우드 점을 찾아 월드좌표·값·최근접 프레임 반환. RViz엔 없는 편의.
   function pickPointInternal(cx, cy) {
     const rect = cv.getBoundingClientRect(), W = cv.clientWidth, H = cv.clientHeight, px = cx - rect.left, py = cy - rect.top;
@@ -452,12 +451,15 @@ export function mkScene(cv, labelDiv, info) {
     if (inspectCb && e.button === 0) { inspectCb(pickPointInternal(e.clientX, e.clientY), e); e.preventDefault(); return; }
     if (pickHandler && e.button === 0) { const w = pickGround(e.clientX, e.clientY); if (w) { pickHandler(w, e); e.preventDefault(); return; } }
     if (e.button === 0 && ims.size) { const rect = cv.getBoundingClientRect(); const hit = pickIm(e.clientX - rect.left, e.clientY - rect.top); if (hit) { imDrag = startImDrag(hit, e); rebuildScene(); cv.style.cursor = 'grabbing'; e.preventDefault(); return; } }
+    if (e.button === 2) rcDown = { x: e.clientX, y: e.clientY };   // 우클릭 시작 지점(드래그=팬, 제자리클릭=컨텍스트 메뉴)
     drag = { x: e.clientX, y: e.clientY };
     btn = e.button;
     cv.style.cursor = 'grabbing';
     e.preventDefault();
   });
-  window.addEventListener('mouseup', () => { if (imDrag) { finishImDrag(); imDrag = null; rebuildScene(); } drag = null; cv.style.cursor = 'grab'; });
+  window.addEventListener('mouseup', (e) => { if (imDrag) { finishImDrag(); imDrag = null; rebuildScene(); }
+    if (rcDown) { const moved = Math.hypot(e.clientX - rcDown.x, e.clientY - rcDown.y); if (moved < 5 && ctxCb) ctxCb(pickGround(rcDown.x, rcDown.y), e); rcDown = null; }
+    drag = null; cv.style.cursor = 'grab'; });
   cv.addEventListener('mousemove', (e) => {
     if (imDrag) { updateImDrag(e); return; }
     if (!drag) return;
@@ -496,6 +498,7 @@ export function mkScene(cv, labelDiv, info) {
     setPickHandler(fn) { pickHandler = fn; cv.style.cursor = fn ? 'crosshair' : 'grab'; },
     setInspect(fn) { inspectCb = fn; cv.style.cursor = fn ? 'crosshair' : 'grab'; if (!fn) { pin = null; rebuildScene(); } },
     setPin(worldPt, text) { pin = worldPt ? { p: worldPt, t: text || '' } : null; rebuildScene(); },
+    setContextHandler(fn) { ctxCb = fn; },
     setCamImage(imgEl, cam, frame) {
       if (!imgEl || !cam || !cam.K) return;
       camState.W = cam.width || imgEl.naturalWidth || 640;
@@ -548,28 +551,35 @@ export function cloud(it) {
   let cloudMode = 'xyz', colorSel = null, frameIds = [], lastFrameIds = '';   // 클라우드 채널 + TF 프레임 목록(카메라 옵션용)
   const subscribe = (d) => {
     if (d.kind === 'cloud') { d.es = openStream('/cloudstream?topic=' + encodeURIComponent(d.topic), (data) => { const r = decodeCloud(data); if (!r) return; cloudMode = r.mode; if (colorSel && colorSel.value === 'auto') applyAutoColor(); scene.setCloudById(d.id, r.arr); }); }
-    else if (d.kind === 'geom') { d.es = openStream('/geomstream?topic=' + encodeURIComponent(d.topic) + '&type=' + encodeURIComponent(d.ty || ''), (data) => { try { const o = JSON.parse(data); scene.setMarkersById(d.id, o.markers || []); } catch (_) { /* */ } }); }
+    else if (d.kind === 'geom') { d.es = openStream('/geomstream?topic=' + encodeURIComponent(d.topic) + '&type=' + encodeURIComponent(d.ty || ''), (data) => { try { const o = JSON.parse(data); const ms = o.markers || []; if (ms[0] && ms[0].frame_id) d.frame = ms[0].frame_id; scene.setMarkersById(d.id, ms); } catch (_) { /* */ } }); }
     else if (d.kind === 'im') {
       d.es = openStream('/imstream?topic=' + encodeURIComponent(d.topic), (data) => { try { const o = JSON.parse(data); scene.setInteractiveMarkers(o.ims || []); } catch (_) { /* */ } });
       scene.setImHandler((name, pose, event, control) => { if (d.es) d.es.feed({ name, pose, event, control }); });   // 기즈모 드래그 → <topic>/feedback 발행
-    } else { d.es = openStream('/markerstream?topic=' + encodeURIComponent(d.topic), (data) => { try { const o = JSON.parse(data); scene.setMarkersById(d.id, o.markers || (Array.isArray(o) ? o : [o])); } catch (_) { /* */ } }); }
+    } else { d.es = openStream('/markerstream?topic=' + encodeURIComponent(d.topic), (data) => { try { const o = JSON.parse(data); const ms = o.markers || (Array.isArray(o) ? o : [o]); if (ms[0] && ms[0].frame_id) d.frame = ms[0].frame_id; scene.setMarkersById(d.id, ms); } catch (_) { /* */ } }); }
   };
   const applyAutoColor = () => scene.opts({ colorMode: cloudMode === 'rgb' ? 2 : cloudMode === 'intensity' ? 1 : 0 });
   const unsubscribe = (d) => { if (d.es) { d.es.close(); d.es = null; } if (d.kind === 'cloud') scene.setCloudById(d.id, null); else if (d.kind === 'im') { scene.setInteractiveMarkers([]); scene.setImHandler(null); } else scene.setMarkersById(d.id, []); };
   const addDisplay = (kind, topic, ty) => { const id = idOf(kind, topic); if (displays.has(id)) return; const d = { id, kind, topic, ty, on: true }; displays.set(id, d); subscribe(d); renderList(); };
   const toggle = (d) => { d.on = !d.on; if (d.on) subscribe(d); else unsubscribe(d); renderList(); };
   const removeD = (d) => { unsubscribe(d); scene.removeDisplay(d.kind, d.id); displays.delete(d.id); renderList(); };
-  const builtin = { grid: true, axes: true, tf: true, robot: false };
+  const builtin = { axes: true, tf: true, robot: false };
   let tfES = null, urdfES = null;
   const subTF = (on) => { if (tfES) { tfES.close(); tfES = null; } scene.setTF([]); if (!on) return; tfES = openStream('/tfstream', (data) => { try { const o = JSON.parse(data); const fr = o.frames || []; scene.setTF(fr); const ids = fr.map((f) => f.id).join(','); if (ids !== lastFrameIds) { lastFrameIds = ids; frameIds = fr.map((f) => f.id); renderCam(); } } catch (_) { /* */ } }); };
   const subRobot = (on) => { if (urdfES) { urdfES.close(); urdfES = null; } scene.setMarkersById('__robot__', []); if (!on) return; urdfES = openStream('/urdfstream', (data) => { try { const o = JSON.parse(data); scene.setMarkersById('__robot__', o.markers || []); } catch (_) { /* */ } }); };
   const listBox = el('div', {});
+  let followFrame = null;   // 현재 추종 중인 프레임(디스플레이 우클릭으로 토글)
+  const setFollow = (frame) => { followFrame = frame || null; scene.opts({ follow: followFrame }); if (typeof CO !== 'undefined') { CO.follow = followFrame || ''; } if (typeof renderCam === 'function') renderCam(); if (!followFrame) scene.view('iso'); };
+  const followDisplay = (d) => {
+    if (!d.frame) { toast('이 디스플레이는 프레임 정보가 없음(데이터 수신 후 다시)', 'warn'); return; }
+    if (followFrame === d.frame) { setFollow(null); toast('추종 해제', 'info'); } else { setFollow(d.frame); toast('추종: ' + d.frame, 'ok'); }
+    renderList();
+  };
   const DR = 'display:flex;align-items:center;gap:5px;padding:2px 4px;font-size:11px;cursor:default';
   function renderList() {
     listBox.innerHTML = '';
     const chk = (label, key, fn) => { const c = el('input', { type: 'checkbox' }); c.checked = builtin[key]; c.onchange = () => { builtin[key] = c.checked; fn(c.checked); }; return el('label', { style: DR }, c, el('span', {}, label)); };
     listBox.append(el('div', { class: 'hint', style: 'margin:4px 0 2px;text-transform:uppercase;letter-spacing:.05em' }, '내장'));
-    listBox.append(chk('Grid', 'grid', (v) => scene.opts({ grid: v })), chk('Axes', 'axes', (v) => scene.opts({ axes: v })), chk('TF', 'tf', (v) => subTF(v)), chk('RobotModel (URDF)', 'robot', (v) => subRobot(v)));
+    listBox.append(chk('Axes', 'axes', (v) => scene.opts({ axes: v })), chk('TF', 'tf', (v) => subTF(v)), chk('RobotModel (URDF)', 'robot', (v) => subRobot(v)));
     listBox.append(el('div', { class: 'hint', style: 'margin:6px 0 2px;text-transform:uppercase;letter-spacing:.05em' }, '디스플레이'));
     if (!displays.size) listBox.append(el('div', { class: 'hint', style: 'padding:2px 4px' }, '아래에서 토픽 추가'));
     const ICON = { cloud: '🌩 ', marker: '📐 ', geom: '🧭 ', im: '🎯 ' };
@@ -578,7 +588,11 @@ export function cloud(it) {
       c.checked = d.on;
       c.onchange = () => toggle(d);
       const rm = el('span', { style: 'cursor:pointer;color:var(--dim)', title: '제거', onclick: () => removeD(d) }, '✕');
-      listBox.append(el('label', { style: DR }, c, el('span', { style: 'flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap', title: d.topic }, (ICON[d.kind] || '') + d.topic), rm));
+      const followed = followFrame && d.frame === followFrame;
+      const row = el('label', { style: DR + (followed ? ';color:var(--cyan)' : ''), title: (d.frame ? `프레임: ${d.frame}\n` : '') + '우클릭 → 추종(Follow)' },
+        c, el('span', { style: 'flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap' }, (followed ? '📍 ' : '') + (ICON[d.kind] || '') + d.topic), rm);
+      row.oncontextmenu = (e) => { e.preventDefault(); followDisplay(d); };
+      listBox.append(row);
     }
     const avail = [...cloudTopics().map((t) => ['cloud', t, '']), ...markerTopics().map((t) => ['marker', t, '']), ...geomTopics().map(([t, ty]) => ['geom', t, ty]), ...imTopics().map((t) => ['im', t, ''])].filter(([k, t]) => !displays.has(idOf(k, t)));
     const addSel = el('select', { style: 'width:100%;margin-top:5px;font:11px monospace' });
@@ -690,6 +704,26 @@ export function cloud(it) {
     if (activeTool === 'inspect') toolBox.append(inspectOut);
   }
   renderTools();
+  // ── 씬 우클릭(제자리) → 컨텍스트 메뉴: 여기로 Nav Goal / Point 발행 / 좌표 복사 ──
+  let sceneMenu = null;
+  const onDocDown = (ev) => { if (sceneMenu && !sceneMenu.contains(ev.target)) closeSceneMenu(); };
+  function closeSceneMenu() { if (sceneMenu) { sceneMenu.remove(); sceneMenu = null; document.removeEventListener('mousedown', onDocDown, true); } }
+  function showSceneMenu(w, e) {
+    closeSceneMenu();
+    if (!w) { toast('바닥(z=0) 평면을 벗어난 지점', 'warn'); return; }
+    const item = (label, fn) => el('div', { style: 'padding:5px 12px;cursor:pointer;white-space:nowrap', onmouseenter: (ev) => { ev.currentTarget.style.background = 'var(--hover)'; }, onmouseleave: (ev) => { ev.currentTarget.style.background = ''; }, onclick: () => { fn(); closeSceneMenu(); } }, label);
+    sceneMenu = el('div', { style: 'position:fixed;z-index:9999;background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:3px 0;font-size:12px;box-shadow:0 4px 16px rgba(0,0,0,.45)' },
+      el('div', { class: 'hint', style: 'padding:3px 12px' }, `(${w[0].toFixed(2)}, ${w[1].toFixed(2)}) · ${FF}`),
+      item('🎯 여기로 Nav Goal', () => { pub(toolTopics.goal, `{header: {frame_id: "${FF}"}, pose: {position: {x: ${w[0].toFixed(3)}, y: ${w[1].toFixed(3)}, z: 0.0}, orientation: {x: 0.0, y: 0.0, z: 0.0, w: 1.0}}}`); showTool([arw(1, w, 0, [0.44, 0.6, 0.95, 1])]); }),
+      item('📍 여기로 Point 발행', () => { pub(toolTopics.point, `{header: {frame_id: "${FF}"}, point: {x: ${w[0].toFixed(3)}, y: ${w[1].toFixed(3)}, z: 0.0}}`); showTool([sph(1, w, [0.9, 0.42, 0.42, 1])]); }),
+      item('📌 여기로 Pose Estimate', () => { pub(toolTopics.pose, `{header: {frame_id: "${FF}"}, pose: {pose: {position: {x: ${w[0].toFixed(3)}, y: ${w[1].toFixed(3)}, z: 0.0}, orientation: {x: 0.0, y: 0.0, z: 0.0, w: 1.0}}, covariance: [0.25,0,0,0,0,0, 0,0.25,0,0,0,0, 0,0,0,0,0,0, 0,0,0,0,0,0, 0,0,0,0,0,0, 0,0,0,0,0,0.0685]}}`); showTool([arw(1, w, 0, [0.44, 0.6, 0.95, 1])]); }),
+      item('📋 좌표 복사', () => { if (navigator.clipboard) navigator.clipboard.writeText(`${w[0].toFixed(3)}, ${w[1].toFixed(3)}, 0.000`); toast('좌표 복사', 'ok'); }));
+    sceneMenu.style.left = Math.min(e.clientX, window.innerWidth - 190) + 'px';
+    sceneMenu.style.top = Math.min(e.clientY, window.innerHeight - 150) + 'px';
+    document.body.appendChild(sceneMenu);
+    setTimeout(() => document.addEventListener('mousedown', onDocDown, true), 0);
+  }
+  scene.setContextHandler(showSceneMenu);
   // ── 📷 카메라/프레임 — 고정 프레임(fixed frame) · 추종(follow) · 직교 투영 ──
   const camBox = el('div', { style: 'margin-top:10px;border-top:1px solid var(--line);padding-top:8px' });
   const CO = { fixedFrame: '', follow: '', ortho: false, camImg: '', camInf: '', camDist: 2 };
@@ -733,5 +767,5 @@ export function cloud(it) {
     const wall = new Date().toLocaleTimeString(), sim = Clock.sim != null ? Clock.sim.toFixed(2) + 's' : '—';
     timeBar.textContent = `🕒 wall ${wall} · sim ${sim}${Clock.sim == null ? ' (no /clock)' : Clock.stale() ? ' (paused)' : ''}`;
   }, 500);
-  setModalSub({ close: () => { clearInterval(statIv); for (const d of displays.values()) if (d.es) d.es.close(); if (tfES) tfES.close(); if (urdfES) urdfES.close(); if (camImgES) camImgES.close(); if (camInfES) camInfES.close(); scene.dispose(); } });
+  setModalSub({ close: () => { clearInterval(statIv); closeSceneMenu(); for (const d of displays.values()) if (d.es) d.es.close(); if (tfES) tfES.close(); if (urdfES) urdfES.close(); if (camImgES) camImgES.close(); if (camInfES) camInfES.close(); scene.dispose(); } });
 }
