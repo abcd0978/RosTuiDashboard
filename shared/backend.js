@@ -2,7 +2,7 @@
 // 목적: UI/서버 코드는 이 인터페이스만 호출하고, 구현체를 갈아끼우면(CLI → rclnodejs → rosbridge)
 //       UI 를 안 고치고 데이터 소스를 바꿀 수 있다. (리뷰 제안: UI ↓ RosBackend ├CliBackend ├RclNode ├Rosbridge)
 // 현행 CliBackend 는 기존 commands.js/ros.js 빌더를 감싸는 파사드 — 셸 명령 문자열을 만든다(spawn 은 호출측).
-import { echoFullCmd, actionFor, restartFor, protoCmd } from './ros.js';
+import { echoFullCmd, actionFor, restartFor, protoCmd, bwCmd } from './ros.js';
 import { TELEM, TELEM2, IMG_BRIDGE, CLOUD_BRIDGE, BAG_DUMP, ECHO_MUX, MARKER_BRIDGE, TF_DUMP, IMG_ANN_BRIDGE, CAMINFO_BRIDGE, GEOM_BRIDGE, URDF_BRIDGE, IM_BRIDGE } from './paths.js';
 import {
   connectionsCmd, resourceCmd, tfTreeCmd, tfEchoCmd, bagRecordCmd, bagPlayCmd, bagCompareCmd,
@@ -17,6 +17,7 @@ export class RosBackend {
   constructor(ver) { this.ver = ver; }
   telemetryScript() { return NI('telemetryScript'); }   // 그래프 스트림(노드/토픽/QoS/Hz)
   echo() { return NI('echo'); } rosout() { return NI('rosout'); } diagnostics() { return NI('diagnostics'); }
+  bandwidth() { return NI('bandwidth'); }   // 토픽 대역폭 스트림 — 백엔드 호스트의 ROS CLI 로 잰다(원격 rosbridge 라도 여기서 실행)
   msgDef() { return NI('msgDef'); } proto() { return NI('proto'); } connections() { return NI('connections'); }
   resource() { return NI('resource'); } tfTree() { return NI('tfTree'); } tfEcho() { return NI('tfEcho'); }
   bagCompare() { return NI('bagCompare'); } bagRecord() { return NI('bagRecord'); } bagPlay() { return NI('bagPlay'); }
@@ -36,6 +37,7 @@ export class CliBackend extends RosBackend {
   echo(topic) { return echoFullCmd(this.ver, topic); }
   rosout() { return this.ver === '2' ? 'stdbuf -oL ros2 topic echo /rosout 2>/dev/null' : 'stdbuf -oL rostopic echo /rosout 2>/dev/null'; }
   diagnostics() { return this.ver === '2' ? 'stdbuf -oL ros2 topic echo /diagnostics 2>/dev/null' : 'stdbuf -oL rostopic echo /diagnostics 2>/dev/null'; }
+  bandwidth(topic) { return bwCmd(this.ver, topic); }
   msgDef(ty) { return msgDefCmd(this.ver, ty); }
   proto(topic, ty) { return protoCmd(this.ver, 'topic', topic, ty); }
   connections(kind, name) { return connectionsCmd(this.ver, kind, name); }

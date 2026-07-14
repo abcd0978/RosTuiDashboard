@@ -40,6 +40,8 @@ function wsStart(ws, m) {
   const map = {
     rosout: () => (child = pipeBlocks(be.rosout(), txt)),
     diagnostics: () => (child = pipeBlocks(be.diagnostics(), txt)),
+    bw: () => t && (child = pipeLines(be.bandwidth(t), txt)),   // 토픽 대역폭(rostopic bw) — 줄 단위
+
     markerstream: () => t && (child = pipeLines(be.markerBridge(t), txt)),
     tfstream: () => (child = pipeLines(be.tfDump(), txt)),
     geomstream: () => t && (child = pipeLines(be.geomBridge(t, params.type || ''), txt)),

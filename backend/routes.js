@@ -38,6 +38,8 @@ export async function router(req, res) {
     if (p === '/urdfstream') return streamLines(res, be.urdfBridge());
     if (p === '/rosout') return rbRequired(res) || rbEcho(res, '/rosout');
     if (p === '/diagnostics') return rbRequired(res) || rbEcho(res, '/diagnostics');
+    // 대역폭 — rosapi 로는 잴 수 없다(메시지 바이트 크기를 모름). 백엔드 호스트의 ROS CLI 로 잰다.
+    if (p === '/api/bw') { const t = q.get('topic'); if (!t) return json(res, 400, { error: 'topic' }); return streamLines(res, be.bandwidth(t)); }
 
     // 조회(one-shot)
     if (p === '/api/msgdef') return json(res, 200, { out: await runOnce(be.msgDef(q.get('type'))) });
@@ -62,6 +64,11 @@ export async function router(req, res) {
       if (kind === 'topic') {
         const [pu, su, ty] = await Promise.all([rbc.call('/rosapi/publishers', { topic: name }), rbc.call('/rosapi/subscribers', { topic: name }), rbc.call('/rosapi/topic_type', { topic: name })]);
         return json(res, 200, { out: `Type: ${(ty && ty.type) || '?'}\nPublishers:\n  ${(((pu && pu.publishers) || []).join('\n  ')) || '(none)'}\nSubscribers:\n  ${(((su && su.subscribers) || []).join('\n  ')) || '(none)'}` });
+      }
+      if (kind === 'service') {   // rosservice info 대응 — 타입 + 제공 노드.
+        // /rosapi/service_providers 는 ROS1 에서 늘 빈 배열을 준다(쓰지 말 것). service_node 가 실제 답을 준다.
+        const [ty, nd2] = await Promise.all([rbc.call('/rosapi/service_type', { service: name }), rbc.call('/rosapi/service_node', { service: name })]);
+        return json(res, 200, { out: `Type: ${(ty && ty.type) || '?'}\nNode: ${(nd2 && nd2.node) || '(unknown)'}` });
       }
       const nd = await rbc.call('/rosapi/node_details', { node: name });
       return json(res, 200, { out: nd ? JSON.stringify(nd, null, 2) : '(rosbridge: 조회 실패)' });

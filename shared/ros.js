@@ -83,9 +83,11 @@ export const echoFullCmd = (ver, name) => ver === '2'
   : `stdbuf -oL rostopic echo '${name}'`;
 
 // 대역폭 스트림 명령
+// rostopic/ros2 는 파이썬이라 stdbuf 가 안 먹는다(파이썬이 자체 버퍼링) → PYTHONUNBUFFERED 가 필요.
+// bw 는 초당 수십 바이트만 뱉어서, 이게 없으면 4KB 버퍼가 안 차 몇 분간 아무것도 안 나온다.
 export const bwCmd = (ver, name) => ver === '2'
-  ? `stdbuf -oL ros2 topic bw '${name}' 2>&1`
-  : `stdbuf -oL rostopic bw '${name}' 2>&1`;
+  ? `PYTHONUNBUFFERED=1 stdbuf -oL ros2 topic bw '${name}' 2>&1`
+  : `PYTHONUNBUFFERED=1 stdbuf -oL rostopic bw '${name}' 2>&1`;
 
 // ── 제어 액션 (RViz 와의 차별점) — 선택 항목에 x 로 실행 ──────────────────────
 //   node: 죽이기 / service: 호출 / param: 값 설정(needsInput). 반환 {label, cmd} 또는 null.
