@@ -1,4 +1,6 @@
-// ROS 백엔드 선택 · ROS1/ROS2 감지 · rosbridge_server 자동 기동/유지 · ROS 정리 스크립트.
+// ROS1/ROS2 감지 · rosbridge_server 자동 기동/유지 · ROS 정리 스크립트.
+// ROS 그래프/echo 는 전적으로 rosbridge 를 통한다 — rosbridge_suite 가 필수다(없으면 여기서 띄운다).
+import net from 'net';
 import { spawn, spawnSync } from 'child_process';
 import { makeBackend } from '../shared/backend.js';
 
@@ -8,27 +10,41 @@ function detectVer() {
   return r.status === 0 ? '2' : '1';
 }
 export const VER = detectVer();
-// 웹은 항상 rosbridge 백엔드만 사용한다. rosbridge 미연결 시 CLI 로 폴백하지 않는다.
-export const BACKEND = 'rosbridge';
-export const be = makeBackend(VER, BACKEND);
+export const be = makeBackend(VER);
 
-// rosbridge_server 자동 기동/유지(launch = websocket + rosapi). 로컬 URL 한정. ROS1 은 마스터 뜬 뒤에만.
-export function tcpOpen(port) {
-  try {
-    return (spawnSync('bash', ['-c', `(exec 3<>/dev/tcp/127.0.0.1/${port}) 2>/dev/null && echo up`]).stdout || '').toString().includes('up');
-  } catch {
-    return false;
-  }
+// rosbridge 포트는 URL 에서 뽑는다 — 박아 넣으면 RDASH_ROSBRIDGE_URL 을 바꿨을 때 엉뚱한 포트를 본다.
+const RB_PORT = Number((be.url.match(/:(\d+)/) || [])[1]) || 9090;
+const RB_LOCAL = /(\/\/|@)(localhost|127\.0\.0\.1)(:|\/|$)/.test(be.url);
+const MASTER_PORT = Number((process.env.ROS_MASTER_URI || '').match(/:(\d+)/)?.[1]) || 11311;   // ROS1 전용
+
+// 포트가 열려 있나 — net 으로 직접 찌른다.
+// 예전엔 spawnSync('bash', '/dev/tcp/...') 였는데, 이건 동기 서브프로세스라 부를 때마다 이벤트 루프를 멈춘다.
+// 5 초마다 도는 워치독에서 쓰기엔 너무 비싸다(게다가 bash 의존).
+function tcpOpen(port, timeoutMs = 300) {
+  return new Promise((resolve) => {
+    const s = new net.Socket();
+    const done = (v) => { s.destroy(); resolve(v); };
+    s.setTimeout(timeoutMs);
+    s.once('connect', () => done(true));
+    s.once('timeout', () => done(false));
+    s.once('error', () => done(false));
+    s.connect(port, '127.0.0.1');
+  });
 }
+
+// rosbridge_server 자동 기동/유지(launch = websocket + rosapi). 로컬 URL 한정.
+// ROS1 은 마스터가 뜬 뒤에만 — 안 그러면 roslaunch 가 자기 마스터를 띄워 경쟁한다. ROS2 엔 마스터가 없어 이 검사가 없다.
 let rbProc = null;
-function ensureRosbridge() {
-  if (BACKEND !== 'rosbridge' || !/localhost|127\.0\.0\.1/.test(be.url)) return;
-  if (tcpOpen(9090)) return;                        // 이미 떠 있음(공유)
-  if (rbProc && rbProc.exitCode === null) return;   // 기동 중
-  if (VER !== '2' && !tcpOpen(11311)) return;       // ROS1: 마스터 없으면 대기(경쟁 마스터 방지)
+async function ensureRosbridge() {
+  if (!RB_LOCAL) return;                                  // 원격 rosbridge 는 우리가 띄우지 않는다
+  if (rbProc && rbProc.exitCode === null) return;         // 기동 중
+  if (await tcpOpen(RB_PORT)) return;                     // 이미 떠 있음(공유)
+  if (VER !== '2' && !(await tcpOpen(MASTER_PORT))) return;   // ROS1: 마스터 대기
   const cmd = VER === '2' ? 'ros2 launch rosbridge_server rosbridge_websocket_launch.xml'
                           : 'roslaunch rosbridge_server rosbridge_websocket.launch';
-  const ros1Net = VER === '2' ? '' : 'unset ROS_HOSTNAME; export ROS_IP=${ROS_IP:-127.0.0.1}; ';
+  // 루프백 강제(ROS1) — 전부 한 머신에 있을 때 호스트명 해석 실패를 피한다. 다른 머신이면 RDASH_LOOPBACK=0.
+  const ros1Net = (VER === '2' || process.env.RDASH_LOOPBACK === '0')
+    ? '' : 'unset ROS_HOSTNAME; export ROS_IP=${ROS_IP:-127.0.0.1}; ';
   rbProc = spawn('bash', ['-lc', `${ros1Net}source /opt/ros/*/setup.bash 2>/dev/null; exec ${cmd}`], { stdio: 'ignore' });
   rbProc.on('error', () => { rbProc = null; });
   rbProc.on('exit', () => { rbProc = null; });
@@ -41,7 +57,7 @@ process.on('SIGINT', killRb);
 process.on('SIGTERM', killRb);
 
 export function cleanRosCmd() {
-  return String.raw`source /opt/ros/noetic/setup.bash 2>/dev/null || true
+  return String.raw`source /opt/ros/*/setup.bash 2>/dev/null || true
 set +e
 echo "[1/4] kill ROS nodes (keep rdash/rosbridge/rosapi/rosout)"
 rosnode list 2>/dev/null | grep -Ev '^/(rosout|rosapi|rosbridge_websocket|ros_tui|rostopic)(_|$|/)?' | while read -r n; do

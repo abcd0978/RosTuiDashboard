@@ -1,4 +1,5 @@
-// ROS CLI 상호작용 — 명령 문자열 빌더, 서브프로세스 스폰, 제어 액션, 필드 추출.
+// ROS CLI 상호작용 — 백엔드가 rosapi 로는 못 하는 일(파라미터·rosbag·TF·리소스·브리지)을
+// 셸로 하기 위한 명령 문자열 빌더 + 스폰. 프런트엔드는 이 파일을 쓰지 않는다(순수 텍스트 파서만 예외).
 // 이 프로그램은 "ROS 가 되는 셸(rostopic/rospy·ros2 동작)"에서 실행된다고만 가정한다.
 // 현재 셸의 ROS 환경(ROS_MASTER_URI 등)을 그대로 상속 — 도커/런치/프로젝트 스크립트는 모른다.
 import { spawn } from 'child_process';
@@ -16,71 +17,6 @@ export function rosSpawn(inner, env, detached) {
   if (detached) opts.detached = true;
   return spawn('bash', ['-c', inner], opts);
 }
-
-// /proc 을 훑어 root 의 자손 pid 를 전부 모은다(깊이 무관).
-// setsid 는 세션/프로세스그룹만 바꾸고 PPid 는 그대로 두므로, 부모가 살아있는 동안에만 정확하다.
-function procDescendants(root) {
-  const kids = new Map();
-  for (const e of readdirSync('/proc')) {
-    if (!/^\d+$/.test(e)) continue;
-    try {
-      const st = readFileSync(`/proc/${e}/stat`, 'utf8');
-      const ppid = Number(st.slice(st.lastIndexOf(')') + 2).split(' ')[1]);   // comm 에 공백/괄호가 있어 뒤에서 자른다
-      if (!kids.has(ppid)) kids.set(ppid, []);
-      kids.get(ppid).push(Number(e));
-    } catch { /* 그 사이 종료된 pid */ }
-  }
-  const out = [], stack = [root];
-  while (stack.length) for (const c of kids.get(stack.pop()) || []) { out.push(c); stack.push(c); }
-  return out;
-}
-
-const sigPid = (pid, sig) => { try { process.kill(pid, sig); return true; } catch { return false; } };
-
-// 프로세스 종료 — 그룹째 + 자손 pid 직접.
-//
-// roslaunch 는 각 노드(px4/gzserver/mavros/rosmaster)를 setsid 로 **독립 세션**에 넣는다.
-// 그래서 그룹 킬 `kill(-pid)` 은 roslaunch 에만 닿는다. SIGINT 면 roslaunch 가 노드를 정리해주지만,
-// SIGKILL 이면 정리할 틈 없이 즉사해 노드들이 고아로 영원히 남는다(실측 확인).
-// → 신호를 보내기 **전에** 자손 목록을 떠서 각 pid 에 직접 보낸다.
-export function killTree(child, sig = 'SIGINT') {
-  if (!child || !child.pid) return;
-  const kids = procDescendants(child.pid);              // 부모가 죽기 전에 떠야 한다
-  if (!sigPid(-child.pid, sig)) { try { child.kill(sig); } catch { /* */ } }
-  for (const pid of kids) sigPid(pid, sig);
-}
-
-// 강제 종료 — 먼저 SIGINT 로 정상 종료 기회를 주고, graceMs 후에도 살아있는 것만 SIGKILL.
-// SIGKILL 을 곧바로 쏘면 roslaunch 가 노드를 정리하지 못하므로 이 단계가 필요하다.
-export function killTreeHard(child, graceMs = 6000) {
-  if (!child || !child.pid) return;
-  const all = [child.pid, ...procDescendants(child.pid)];
-  killTree(child, 'SIGINT');
-  setTimeout(() => {
-    sigPid(-child.pid, 'SIGKILL');
-    for (const pid of all) if (sigPid(pid, 0)) sigPid(pid, 'SIGKILL');   // 0 = 생존 확인
-  }, graceMs).unref?.();
-}
-
-// 값/정보 조회 명령 (버전별)
-export const echoCmd = (ver, name) => ver === '2'
-  ? `stdbuf -oL ros2 topic echo '${name}' 2>&1`
-  : `stdbuf -oL rostopic echo --noarr '${name}' 2>&1`;
-
-export const infoCmd = (ver, kind, name) => ver === '2'
-  ? (kind === 'service' ? `ros2 service type '${name}' 2>&1`
-    : kind === 'node' ? `ros2 node info '${name}' 2>&1`
-      : kind === 'param' ? `echo 'ROS2: 파라미터는 노드별 (nodes 에서 확인)'`
-        : `ros2 topic info '${name}' 2>&1`)
-  : (kind === 'param' ? `rosparam get '${name}' 2>&1`
-    : kind === 'service' ? `rosservice info '${name}' 2>&1`
-      : kind === 'node' ? `rosnode info '${name}' 2>&1`
-        : `rostopic info '${name}' 2>&1`);
-
-// 전체 메시지 echo(YAML).
-export const echoFullCmd = (ver, name) => ver === '2'
-  ? `stdbuf -oL ros2 topic echo '${name}'`
-  : `stdbuf -oL rostopic echo '${name}'`;
 
 // 대역폭 스트림 명령
 // rostopic/ros2 는 파이썬이라 stdbuf 가 안 먹는다(파이썬이 자체 버퍼링) → PYTHONUNBUFFERED 가 필요.
@@ -182,26 +118,6 @@ export function protoCmd(ver, kind, name, ty) {
   }
   const t = ty ? `T=${shq(ty)}` : `T=$(rostopic type ${shq(name)} 2>/dev/null | head -1)`;
   return `${t}; [ -z "$T" ] && exit 0; ${PROTO_PY1} "$T"`;
-}
-
-// 명령의 전체 stdout(trim)을 콜백으로 — 스켈레톤 등 한 덩어리 결과용.
-export function runText(cmd, onDone) {
-  const p = rosSpawn(cmd);
-  let out = '';
-  if (p.stderr) p.stderr.on('data', () => {});
-  p.stdout.on('data', (d) => { out += d.toString(); });
-  p.on('close', () => onDone(out.trim()));
-  p.on('error', () => onDone(''));
-}
-
-// 액션 실행 → 첫 줄 결과를 콜백으로
-export function runAction(cmd, onDone) {
-  const p = rosSpawn(`${cmd} 2>&1`);
-  let out = '';
-  if (p.stderr) p.stderr.on('data', () => {});
-  p.stdout.on('data', (d) => { out += d.toString(); });
-  p.on('close', () => onDone((out.trim().split('\n')[0] || 'done').slice(0, 60)));
-  p.on('error', () => onDone('action error'));
 }
 
 // echo YAML 텍스트에서 지정 점(.) 경로의 값 문자열을 추출(워치리스트용). 없으면 undefined.

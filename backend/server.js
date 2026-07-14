@@ -7,7 +7,6 @@ import { VER } from './ros.js';
 import { router } from './routes.js';
 import { attachWebSocket } from './ws.js';
 import { jobs } from './jobs.js';
-import { muxKill } from './mux.js';
 
 const PORT = Number(process.env.RDASH_WEB_PORT) || 8080;
 // 바인딩 주소 — 기본 0.0.0.0(모든 인터페이스): 컨테이너 안에서 돌려도 -p 로 포트만 노출하면 호스트에서 접속 가능.
@@ -23,7 +22,6 @@ attachWebSocket(server);
 // 종료 시 잡 정리
 function cleanup() {
   for (const r of jobs.values()) { try { process.kill(-r.child.pid, 'SIGTERM'); } catch { /* */ } }
-  muxKill();
 }
 process.on('exit', cleanup);
 process.on('SIGINT', () => { cleanup(); process.exit(0); });

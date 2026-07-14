@@ -3,14 +3,6 @@ import { shq } from './util.js';
 import { TF_TREE_PY } from './paths.js';
 
 // 연결(pub/sub): 토픽=발행/구독 노드, 노드=in/out 토픽, 서비스=서버.
-export const connectionsCmd = (ver, kind, name) => {
-  if (kind === 'topic') return ver === '2' ? `ros2 topic info -v ${shq(name)} 2>&1` : `rostopic info ${shq(name)} 2>&1`;
-  if (kind === 'node') return ver === '2' ? `ros2 node info ${shq(name)} 2>&1` : `rosnode info ${shq(name)} 2>&1`;
-  if (kind === 'service') return ver === '2' ? `ros2 service type ${shq(name)} 2>&1` : `rosservice info ${shq(name)} 2>&1`;
-  return `echo '연결 정보 없음'`;
-};
-
-// 메시지/서비스 타입 정의 표시 (선택 토픽/서비스의 필드 구조).
 export const msgDefCmd = (ver, ty) => ver === '2'
   ? `ros2 interface show ${shq(ty)} 2>&1`
   : `rosmsg show ${shq(ty)} 2>&1`;

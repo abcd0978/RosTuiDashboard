@@ -1,35 +1,21 @@
-// rosbridge(원격 websocket) 클라이언트 · 텔레메트리 폴링 싱글톤 · 그래프 스냅샷 · echo.
-import { readFileSync } from 'fs';
+// rosbridge 클라이언트 · 텔레메트리 폴링 싱글톤 · 그래프 스냅샷 · echo.
 import { RosbridgeClient, msgToYaml } from '../shared/rosbridge.js';
-import { be, tcpOpen, BACKEND } from './ros.js';
+import { be } from './ros.js';
 import { sse, json } from './http.js';
 
-// (미사용) RDASH_TELEM 환경변수로 텔레메트리 스크립트를 오버라이드 — 없으면 백엔드 기본 스크립트.
-function telemScript() {
-  if (process.env.RDASH_TELEM) {
-    try { return readFileSync(process.env.RDASH_TELEM, 'utf8'); } catch { /* */ }
-  }
-  return be.telemetryScript();
-}
-
-// ── rosbridge(원격 websocket) 백엔드 — 로컬 ROS 없이 원격 로봇의 rosbridge_suite 에 연결 ──
+// 연결 두 개를 쓴다: rb 는 그래프/echo(rosapi 호출이 몰린다), rbCmd 는 publish/service/teleop.
+// 한 소켓에 섞으면 rosapi backlog 뒤에 명령이 줄을 서서 조작이 몇 초씩 밀린다.
+//
+// 재연결 워치독은 없다. 예전엔 2 초마다 tcpOpen(9090) 을 찔러 재연결을 유도했는데, 그건 Node 내장(undici)
+// WebSocket 이 최초 연결 거부 시 close 를 안 쏴서 자동 재시도가 멈추던 걸 때우려던 것이다. 지금은 ws 패키지를
+// 쓰고(error→close 를 제대로 쏜다) RosbridgeClient 가 스스로 백오프 재시도한다 → 워치독은 죽은 땜빵이었다.
 let rb = null, rbCmd = null;
 export function rbEnsure() { if (!rb) { rb = new RosbridgeClient(be.url); rb.connect(); } return rb; }
 export function rbCmdEnsure() { if (!rbCmd) { rbCmd = new RosbridgeClient(be.url); rbCmd.connect(); } return rbCmd; }
-if (BACKEND === 'rosbridge') {
-  rbEnsure();   // 미리 연결 시작 — 연결되기 전/끊기면 rosbridge API 는 503 으로 실패 처리
-  rbCmdEnsure();   // publish/service/teleop 전용 — telemetry rosapi 호출 backlog 와 분리
-  // Node20 undici WebSocket 은 최초 연결 거부(9090 미기동) 시 'close' 이벤트를 안 쏴 rosbridge.js 의 자동 재시도가 멈춘다.
-  // 9090 이 열려 있는데 rb 가 아직 연결 안 됐으면 여기서 재연결을 유도(연결되면 rb.ready=true → useRb()=true). rb.ready 면 tcpOpen 호출 안 함(short-circuit).
-  setInterval(() => {
-    if (tcpOpen(9090)) {
-      if (rb && !rb.ready) rb.connect();
-      if (rbCmd && !rbCmd.ready) rbCmd.connect();
-    }
-  }, 2000);
-}
-export function useRb() { return be.kind === 'rosbridge' && rb && rb.ready; }
-export function useRbCmd() { return be.kind === 'rosbridge' && rbCmd && rbCmd.ready; }
+rbEnsure();      // 미리 연결 시작 — 연결 전/끊김 동안 rosbridge 필요 라우트는 503
+rbCmdEnsure();
+export function useRb() { return !!(rb && rb.ready); }
+export function useRbCmd() { return !!(rbCmd && rbCmd.ready); }
 function rbUnavailable(res) { json(res, 503, { error: `rosbridge unavailable: ${be.url}` }); return true; }
 export function rbRequired(res) { return useRb() ? null : rbUnavailable(res); }
 export function rbCmdRequired(res) { return useRbCmd() ? null : rbUnavailable(res); }

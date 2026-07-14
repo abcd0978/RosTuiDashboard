@@ -3,7 +3,7 @@
 //
 // TUI 는 더 이상 ROS 를 직접 만지지 않는다. 웹과 똑같이 백엔드 HTTP/WS API 의 클라이언트다(계약: API.md).
 // 그래서 백엔드가 반드시 떠 있어야 하고, 여기서 자식으로 띄운 뒤 응답할 때까지 기다렸다가 렌더한다.
-// ROS 와 어떻게 대화할지(cli/rcl/rosbridge)는 백엔드가 RDASH_BACKEND 로 혼자 정한다 — TUI 는 모른다.
+// ROS 에 붙는 주체는 백엔드 하나뿐이다(rosbridge). TUI 는 그게 어떻게 되는지 모르고, 알 필요도 없다.
 import { EventEmitter } from 'events';
 import { spawn } from 'child_process';
 import { fileURLToPath } from 'url';
