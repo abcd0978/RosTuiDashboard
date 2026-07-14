@@ -118,7 +118,9 @@ export function plotlab() {
     } else win.textContent = ' bag 로드 실패(경로/rosbag2 확인)';
   };
   bar.append(bagInp, bagBtn);
-  openModal('📈 PlotLab — 다중 동기 플롯 (PlotJuggler 스타일)', el('div', { class: 'pl' }, bar, el('div', { class: 'pl-body' }, list, grid), scrubBar));
+  // 커서 값 테이블 — 호버 지점(cursorT)의 모든 플롯·모든 커브 값을 한 패널에 동기 표시(PlotJuggler 이상).
+  const cursorBox = el('div', { style: 'position:absolute;top:6px;right:10px;z-index:5;background:rgba(13,17,22,.9);border:1px solid var(--line);border-radius:5px;padding:5px 8px;font:11px monospace;pointer-events:none;max-width:300px;display:none' });
+  openModal('📈 PlotLab — 다중 동기 플롯 (PlotJuggler 스타일)', el('div', { class: 'pl' }, bar, el('div', { class: 'pl-body', style: 'position:relative' }, list, grid, cursorBox), scrubBar));
   const M = document.querySelector('#modal .m');
   const savedW = M ? M.style.cssText : '';
   if (M) { M.style.width = 'min(1500px,97vw)'; M.style.height = '90vh'; M.style.maxHeight = '90vh'; }
@@ -311,6 +313,20 @@ export function plotlab() {
       }
       if (cursorT != null && cursorT >= t0 && cursorT <= t1) { const cx = X(cursorT); ctx.strokeStyle = '#8b97a7'; ctx.setLineDash([3, 3]); ctx.beginPath(); ctx.moveTo(cx, 0); ctx.lineTo(cx, H); ctx.stroke(); ctx.setLineDash([]); }
     }
+    // 커서 값 테이블 갱신 — cursorT 시점 모든 커브 값(변환 적용, 커스텀 수식 포함).
+    if (cursorT != null && cursorT >= t0 && cursorT <= t1) {
+      cursorBox.innerHTML = ''; cursorBox.append(el('div', { style: 'color:#9aa7b8;margin-bottom:3px' }, `t = ${cursorT.toFixed(3)} s`)); let any = false;
+      for (const pl of plots) { const srcs = pl.curves.filter((c) => !c.custom);
+        for (const c of pl.curves) { let v;
+          if (c.custom) { if (!c.fn) continue; try { v = c.fn(srcs.map((s) => sampleAt(applyT(S.series[s.key], s.tf), cursorT)), Math, cursorT); } catch (_) { v = NaN; } }
+          else { const d = applyT(S.series[c.key], c.tf); if (!d || !d.length) continue; v = sampleAt(d, cursorT); }
+          if (!isFinite(v)) continue; any = true; const nm = c.custom ? c.field : (c.topic.replace(/^\//, '') + '/' + c.field);
+          cursorBox.append(el('div', { style: 'display:flex;gap:6px;align-items:center' },
+            el('span', { style: `display:inline-block;width:8px;height:8px;border-radius:2px;flex:0 0 auto;background:${c.color}` }),
+            el('span', { style: 'flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#c8d2df', title: nm }, nm),
+            el('span', { style: 'color:#57c7d4' }, (+v).toPrecision(5)))); } }
+      cursorBox.style.display = any ? '' : 'none';
+    } else cursorBox.style.display = 'none';
     raf = requestAnimationFrame(frame);
     if (SNAP && ++frame.n > 900) alive = false;
   }
