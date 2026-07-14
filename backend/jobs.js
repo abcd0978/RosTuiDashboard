@@ -20,11 +20,16 @@ export function spawnJob(label, cmd) {
 export function jobView(r) {
   return { id: r.id, label: r.label, pid: r.pid, status: r.status, log: r.log.slice(-30) };
 }
+// SIGINT 먼저, 그래도 안 죽으면 SIGKILL. 유예는 넉넉해야 한다 —
+// roslaunch 는 SIGINT 를 받아야 자기 노드들을 정리하고, 노드는 그래야 ROS 마스터에서 등록을 해제한다.
+// 너무 일찍 SIGKILL 하면 노드가 마스터에 "나 빠진다"고 말할 틈이 없어, 죽은 노드의 토픽이 트리에 유령으로
+// 계속 남는다(마스터는 그 노드가 살아있다고 믿는다). gazebo/px4 스택은 정리에 몇 초가 걸린다.
+const KILL_GRACE_MS = 6000;
 export function killJob(id) {
   const r = jobs.get(id);
   if (!r) return null;
   r.status = 'stopping';
-  const force = setTimeout(() => { if (jobs.has(id) && r.child.exitCode == null) { try { process.kill(-r.child.pid, 'SIGKILL'); } catch { try { r.child.kill('SIGKILL'); } catch { /* */ } } } }, 1200);
+  const force = setTimeout(() => { if (jobs.has(id) && r.child.exitCode == null) { try { process.kill(-r.child.pid, 'SIGKILL'); } catch { try { r.child.kill('SIGKILL'); } catch { /* */ } } } }, KILL_GRACE_MS);
   r.child.once('close', () => { clearTimeout(force); r.status = 'killed'; setTimeout(() => jobs.delete(id), 500); });
   try { process.kill(-r.child.pid, 'SIGINT'); } catch { try { r.child.kill('SIGINT'); } catch { /* */ } }
   return r;

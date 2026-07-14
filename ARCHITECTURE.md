@@ -319,6 +319,36 @@ restart it on the same port, then assert the server sees the `subscribe` again,
 exactly one connection, and that `call()` still resolves. Against the pre-fix code
 that test fails on re-subscribe (0) and connection count (2).
 
+### Ghost topics — why the tree kept showing dead topics
+
+Symptom: kill every node and process, and topics that nobody publishes are still in the tree.
+Two independent causes, **both outside RDash**:
+
+1. **The ROS1 master never learns that a node died.** A node is supposed to unregister on shutdown.
+   `kill -9`, a killed process group, or a stopped container gives it no chance. The master keeps
+   believing that node still publishes. `rosnode cleanup` purges those registrations — but see the
+   warning below.
+2. **rosbridge_suite never unregisters its subscriptions.** Verified with a raw websocket, RDash's
+   code entirely out of the picture: `subscribe` → the master shows `/rosbridge_websocket` as a
+   subscriber; `unsubscribe` → still there; **close the socket** → still there. Since ROS1 keeps a
+   topic alive if it has *any* publisher **or** subscriber, every topic RDash ever measured or
+   echoed outlives its publishers forever.
+
+Cause 2 is ours to deal with, and `backend/telemetry.js` filters it: a topic with **no publishers**
+whose **only** subscribers are `/rosbridge_websocket` / `/rosapi` is dropped from the snapshot — it
+exists only because we looked at it. A topic a real node subscribes to (a mavros input waiting for
+a publisher) still shows, because that is a real fact about the graph. On a live PX4 stack this
+correctly separated 2 ghosts from 46 legitimate publisher-less topics.
+
+Cause 1 is why `killJob` gives SIGINT a **6-second** grace before SIGKILL. roslaunch needs that time
+to shut its nodes down, and a node needs to shut down to unregister. Killing it faster manufactures
+exactly the ghosts above. Do not shorten it.
+
+> **`rosnode cleanup` is dangerous — do not wire it to a button.** It pings every registered node
+> and unregisters whatever does not answer *right now*. A live node that is briefly busy gets
+> purged: its processes keep running while the master forgets it exists. It cost us a whole PX4
+> simulation during this investigation.
+
 ### Browser state (`frontend/web/lib/state.js`)
 
 ES module imports are read-only bindings: `import { items }` then `items = …` is a

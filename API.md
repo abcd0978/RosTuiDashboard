@@ -54,6 +54,13 @@ with it, do not merge.
 
 - `kind` ∈ `topic | service | node | param`.
 - `p` is a tree path (`"<category>" + name`) — use it to build the namespace tree.
+- **Observer-effect topics are filtered out.** A topic with **no publishers** whose **only**
+  subscribers are RDash's own ROS nodes (`/rosbridge_websocket`, `/rosapi`) is omitted. Such a
+  topic exists in the ROS master *only because RDash looked at it*: rosbridge never unregisters
+  its subscription — not on `unsubscribe`, not even when the websocket closes — so once RDash has
+  measured or echoed a topic, that topic outlives its publishers forever. A topic a *real* node
+  subscribes to (e.g. a mavros input waiting for a publisher) still appears, because a real
+  subscriber is a real fact about the graph.
 - **`hz: null` means "not measured", NOT "0 Hz".** Doing `hz || 0` will make every
   unmeasured topic look dead. Render null as blank/`—`. Same for `age`.
 - Instead of `{items:[...]}` a tick may be `{"nomaster": true}` — the backend has no
