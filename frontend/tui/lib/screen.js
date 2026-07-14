@@ -10,9 +10,14 @@ export function enterAltScreen() {
 export function restoreScreen() {
   if (isTTY && !restored) { restored = true; process.stdout.write(ALT_OFF); }
 }
-// Ink render 의 waitUntilExit 프라미스를 받아 화면 복원/종료 시그널을 배선한다.
+// Ink render 의 waitUntilExit 프라미스를 받아 화면 복원 + 프로세스 종료를 배선한다.
+//
+// 언마운트된 뒤 반드시 직접 exit 해야 한다. TUI 가 백엔드 API 클라이언트가 되면서 lib/api.js 가
+// /ws 웹소켓을 열고 재연결 타이머를 돌리고, store 는 잡을 1 초마다 폴링한다. 이 핸들들이 이벤트
+// 루프를 붙잡고 있어서, Ink 가 언마운트돼도(= Ctrl+C, q) 화면만 돌아오고 프로세스는 영원히 남는다.
+// 실제로 그렇게 안 죽는 TUI 가 떠 있었다.
 export function bindExit(waitPromise) {
-  waitPromise.then(restoreScreen, restoreScreen);
+  const done = () => { restoreScreen(); process.exit(0); };   // 'exit' 핸들러들이 나머지 정리를 한다
+  waitPromise.then(done, done);
   process.on('exit', restoreScreen);
-  process.on('SIGTERM', () => process.exit(0));
 }

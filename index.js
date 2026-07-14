@@ -44,8 +44,14 @@ if (spawnBackend) {
   const web = spawn(process.execPath, [...process.execArgv, join(here, 'backend', 'server.js')],
     { stdio: 'ignore', env });                          // stdio 를 삼켜 대체 화면 오염 방지
   web.on('error', () => { /* 아래 waitForBackend 가 잡는다 */ });
+  // TUI 는 프로세스 그 자체다 — 죽으면 백엔드도, 백엔드가 소유한 잡도 함께 내려간다.
   const killWeb = () => { try { web.kill('SIGTERM'); } catch { /* */ } };
-  process.on('exit', killWeb); process.on('SIGINT', killWeb); process.on('SIGTERM', killWeb);
+  process.on('exit', killWeb);
+  // SIGINT/SIGTERM 리스너를 달면 Node 는 "기본 종료" 동작을 포기한다 → 직접 끝내야 한다.
+  // 예전엔 killWeb 만 걸어 둬서, 신호를 받아도 백엔드만 죽이고 TUI 는 살아남았다. 정리는 'exit' 가 한다.
+  const bye = () => process.exit(0);
+  process.on('SIGINT', bye);
+  process.on('SIGTERM', bye);
 }
 
 // 백엔드가 응답할 때까지 대기 — 없으면 빈 TUI 를 영원히 그리는 대신 이유를 말하고 죽는다.
