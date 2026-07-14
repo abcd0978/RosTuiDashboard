@@ -470,6 +470,30 @@ export function mkScene(cv, labelDiv, info) {
   });
   cv.addEventListener('wheel', (e) => { e.preventDefault(); dist *= e.deltaY < 0 ? 0.9 : 1.1; invalidate(); }, { passive: false });
   cv.addEventListener('contextmenu', (e) => e.preventDefault());
+  // ── WASD 이동 — 씬 위에 마우스를 둔 채 FPS 식 워킹(W/S 전후, A/D 좌우, Q/E 상하) + 화살표 회전 ──
+  let hover = false; const keys = new Set();
+  cv.addEventListener('mouseenter', () => { hover = true; });
+  cv.addEventListener('mouseleave', () => { hover = false; keys.clear(); });
+  const MOVEK = new Set(['w', 'a', 's', 'd', 'q', 'e', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright']);
+  const kd = (e) => { if (!hover) return; const tag = document.activeElement && document.activeElement.tagName; if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return; const k = e.key.toLowerCase(); if (MOVEK.has(k)) { keys.add(k); e.preventDefault(); invalidate(); } };
+  const ku = (e) => { keys.delete(e.key.toLowerCase()); };
+  window.addEventListener('keydown', kd); window.addEventListener('keyup', ku);
+  function applyMove() {
+    if (!keys.size) return;
+    const step = dist * 0.02, fwd = [Math.sin(yaw), Math.cos(yaw)], rt = [Math.cos(yaw), -Math.sin(yaw)]; let mx = 0, my = 0, mz = 0;
+    if (keys.has('w')) { mx += fwd[0]; my += fwd[1]; }
+    if (keys.has('s')) { mx -= fwd[0]; my -= fwd[1]; }
+    if (keys.has('d')) { mx += rt[0]; my += rt[1]; }
+    if (keys.has('a')) { mx -= rt[0]; my -= rt[1]; }
+    if (keys.has('e')) mz += 1;
+    if (keys.has('q')) mz -= 1;
+    if (!opt.follow) { center[0] += mx * step; center[1] += my * step; center[2] += mz * step; }   // 추종 중엔 이동 무시(프레임이 중심)
+    if (keys.has('arrowleft')) yaw -= 0.03;
+    if (keys.has('arrowright')) yaw += 0.03;
+    if (keys.has('arrowup')) pitch = Math.min(1.55, pitch + 0.025);
+    if (keys.has('arrowdown')) pitch = Math.max(-1.55, pitch - 0.025);
+    invalidate();
+  }
   rebuildScene();   // 그리드·좌표축을 데이터 도착 전에도 표시
   // 렌더 루프 — 클라우드 스트리밍(FPS/적응형 LOD 유효), 드래그·추종, 또는 dirty(데이터/카메라 변경) 시에만 draw.
   // 그 외 정지 상태에선 GL 작업을 건너뛰어 브라우저 GPU 부하 제거(preserveDrawingBuffer 아니어도 화면 유지).
@@ -477,7 +501,8 @@ export function mkScene(cv, labelDiv, info) {
     if (!alive) return;
     const W = cv.clientWidth || 900, H = cv.clientHeight || 520;
     if (cv.width !== W || cv.height !== H) dirty = true;   // 리사이즈 감지
-    if (dirty || cloudN || opt.follow || imDrag || drag) { dirty = false; draw(); }
+    if (hover && keys.size) applyMove();
+    if (dirty || cloudN || opt.follow || imDrag || drag || (hover && keys.size)) { dirty = false; draw(); }
     if (!(SNAP && ++loop.n > 300)) raf = requestAnimationFrame(loop);
   }
   loop.n = 0;
@@ -521,8 +546,8 @@ export function mkScene(cv, labelDiv, info) {
     clearCamera() { camState.on = false; camState.ready = false; invalidate(); },
     setInteractiveMarkers(list) { ims.clear(); for (const im of (list || [])) if (im && im.name) ims.set(im.name, { ...im, visible: true }); rebuildScene(); },
     setImHandler(fn) { imHandler = fn; },
-    getStats() { return { fps, points: cloudN, drawn: cloudN ? lastDrawn : 0, lodDist: opt.lodDist, lodMode: opt.lodMode, active: !!(cloudN || imDrag || drag || opt.follow) }; },
-    dispose() { alive = false; cancelAnimationFrame(raf); if (labelDiv) labelDiv.innerHTML = ''; try { for (const k in bufs) gl.deleteBuffer(bufs[k]); gl.deleteBuffer(cloudBuf); gl.deleteProgram(prog); gl.deleteProgram(cprog); } catch (_) { /* */ } },
+    getStats() { return { fps, points: cloudN, drawn: cloudN ? lastDrawn : 0, lodDist: opt.lodDist, lodMode: opt.lodMode, active: !!(cloudN || imDrag || drag || opt.follow || (hover && keys.size)), center: center.slice() }; },
+    dispose() { alive = false; cancelAnimationFrame(raf); window.removeEventListener('keydown', kd); window.removeEventListener('keyup', ku); if (labelDiv) labelDiv.innerHTML = ''; try { for (const k in bufs) gl.deleteBuffer(bufs[k]); gl.deleteBuffer(cloudBuf); gl.deleteProgram(prog); gl.deleteProgram(cprog); } catch (_) { /* */ } },
   };
 }
 
@@ -544,7 +569,7 @@ export function cloud(it) {
   const labelDiv = el('div', { style: 'position:absolute;inset:0;pointer-events:none;overflow:hidden' });
   const fpsOv = el('div', { style: 'position:absolute;left:8px;top:8px;font:11px monospace;color:#9aa7b8;background:rgba(13,17,22,.6);padding:2px 7px;border-radius:4px;pointer-events:none' });
   const stage = el('div', { style: 'position:relative;flex:1;min-width:0' }, cv, labelDiv, fpsOv);
-  const info = el('div', { class: 'hint', style: 'margin-top:4px' }, '드래그=회전 · 휠=줌 · 우클릭드래그=이동 · 기즈모 드래그=마커 이동/회전');
+  const info = el('div', { class: 'hint', style: 'margin-top:4px' }, '드래그=회전 · 휠=줌 · 우클릭드래그=이동 · WASD=이동 Q/E=상하 화살표=회전 · 우클릭=메뉴 · 기즈모 드래그=마커');
   const scene = mkScene(cv, labelDiv, info);
   const displays = new Map();   // id → {id,kind,topic,es,on}
   const idOf = (kind, topic) => kind + ':' + topic;
