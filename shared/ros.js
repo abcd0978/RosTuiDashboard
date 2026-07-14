@@ -4,12 +4,15 @@
 import { spawn } from 'child_process';
 import { readdirSync, readFileSync } from 'fs';
 import { shq } from './util.js';
+import { PY_COMMON } from './paths.js';
 
 export function rosSpawn(inner, env, detached) {
   // 로그인셸(-l) 아님 → 현재 env 그대로 상속. env 지정 시 덧씌움(RDASH_CTRL, ROS_DOMAIN_ID 등).
   // detached=true → 새 프로세스 그룹(리더). 파이프라인 자식까지 그룹째 종료(process.kill(-pid))하기 위함.
-  const opts = {};
-  if (env) opts.env = { ...process.env, ...env };
+  // PYTHONPATH: 브리지 스크립트는 backend/python 하위 디렉토리에 있어 sys.path[0] 가 자기 디렉토리다.
+  // 공용 shim(ros_compat)은 common/ 에 있으므로 여기서 넣어줘야 `import ros_compat` 이 풀린다.
+  const pyPath = [PY_COMMON, process.env.PYTHONPATH].filter(Boolean).join(':');
+  const opts = { env: { ...process.env, PYTHONPATH: pyPath, ...env } };
   if (detached) opts.detached = true;
   return spawn('bash', ['-c', inner], opts);
 }
