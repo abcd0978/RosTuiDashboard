@@ -47,15 +47,21 @@ with it, do not merge.
       "subs": [["/slam",  null, null]] }, // ROS1 has no QoS → the two extra slots are null
     { "p": "services/reset", "kind": "service", "name": "/reset", "server": [] },
     { "p": "nodes/slam",     "kind": "node",    "name": "/slam" },
-    { "p": "params/rate",    "kind": "param",   "name": "/rate" }   // ROS1 only
+    { "p": "params/rate",    "kind": "param",   "name": "/rate" }
   ]
 }
 ```
 
 - `kind` ∈ `topic | service | node | param`.
 - `p` is a tree path (`"<category>" + name`) — use it to build the namespace tree.
+- **Param `name` differs by ROS version.** ROS1 params are global to the master, so `name` is just
+  the param path (`/run_id`). ROS2 has no global param store — params live *inside nodes* — so `name`
+  is `"<node>:<param>"` (`/turtlesim:background_r`), and `p` swaps that `:` for a `/` so the tree
+  groups them under their node (`params/turtlesim/background_r`). Pass `name` **verbatim** to
+  `/api/param/get1` and `/api/setparam1`; they split on the `:` themselves. A client that wants the
+  two halves can split on the first `:` (a ROS1 name never contains one).
 - **Observer-effect topics are filtered out.** A topic with **no publishers** whose **only**
-  subscribers are RDash's own ROS nodes (`/rosbridge_websocket`, `/rosapi`) is omitted. Such a
+  subscribers are RDash's own ROS nodes (`/rosbridge_websocket`, `/rosapi`, `/rosapi_params`) is omitted. Such a
   topic exists in the ROS master *only because RDash looked at it*: rosbridge never unregisters
   its subscription — not on `unsubscribe`, not even when the websocket closes — so once RDash has
   measured or echoed a topic, that topic outlives its publishers forever. A topic a *real* node
@@ -165,7 +171,7 @@ you no longer need — each one is a live ROS subscription or a child process.
 | `/api/tftree` | — | `{"out": "<frame tree text>"}` |
 | `/api/tfecho` | `src`, `tgt` | `{"out": "<transform text>"}` |
 | `/api/param/list` | `node` | `{"rows":[{"name":"/p","value":"1.0"}, …]}` |
-| `/api/param/get1` | `name` | `{"out":"<value>"}` (ROS1). On ROS2 returns an explanatory string — params are per-node, use `/api/param/list`. |
+| `/api/param/get1` | `name` | `{"out":"<value>"}`. `name` is the snapshot's param `name` verbatim — ROS1 `/run_id`, ROS2 `/turtlesim:background_r`. |
 | `/api/bagdump` | `path`, `topics` | `{"series":{…}}` — numeric leaf time-series from a bag; on failure `{"series":{}, "error":"…"}` |
 | `/api/bagcompare` | `a`, `b` | `{"out":"<side-by-side bag info>"}` |
 | `/api/preflight` | — | `{"checks":[…]}` from `~/.rdash_preflight.json` |
@@ -206,7 +212,7 @@ no way to *enumerate* domains — DDS does not expose a list; you can only repor
 | `/api/service` | `{name, req}` — `req` is flow-YAML/JSON text | `{"out":"<response JSON>"}` or `{"out":"(no response)"}` **[RB]** |
 | `/api/teleop` | `{topic?, lin, ang, ty?}` or `{topic?, stop:true}` | `{"ok":true}` **[RB]** |
 | `/api/param/set` | `{node, name, value}` | `{"value":"<value read back after setting>"}` |
-| `/api/setparam1` | `{name, value}` | `{"out":"…"}` — ROS1 global param |
+| `/api/setparam1` | `{name, value}` | `{"out":"…"}` — same `name` format as `/api/param/get1` |
 | `/api/killnode` | `{name}` | `{"out":"…"}` |
 | `/api/restart` | `{name}` | `{"out":"…"}` |
 | `/api/lifecycle` | `{node, transition}` | `{"out":"…"}` — ROS2 lifecycle |

@@ -85,13 +85,26 @@ for d in os.listdir("/proc"):
 print(" ".join(str(p) for p in sorted(hits)))'`;
 const NODE_PIDS_SH = `PIDS=$(${NODE_PIDS_PY} "$TOK" $$ $PPID 2>/dev/null); `;
 
+// 파라미터 이름 형식이 버전마다 다르다 — 그래프 스냅샷(rosapi)이 주는 그대로다.
+//   ROS1: 마스터의 전역 파라미터        /common/imu_topic
+//   ROS2: 노드별 파라미터 "노드:파라미터"  /turtlesim:background_r
+// ROS 노드명에는 ':' 가 못 들어가므로 첫 ':' 에서 가르면 안전하다.
+export function splitNodeParam(name) {
+  const s = String(name || '');
+  const i = s.indexOf(':');
+  return i < 0 ? [s, ''] : [s.slice(0, i), s.slice(i + 1)];
+}
+
 // ── 제어 액션 (RViz 와의 차별점) — 선택 항목에 x 로 실행 ──────────────────────
 //   node: 죽이기 / service: 호출 / param: 값 설정(needsInput). 반환 {label, cmd} 또는 null.
 export function actionFor(ver, kind, name, arg) {
   if (kind === 'action') return { label: 'send goal', needsInput: true, defaultVal: '{}', cmd: null };   // 실제 전송은 store.submitActionGoal
   if (kind === 'param') {
-    if (ver === '2') return { label: 'set param (ROS2: per-node, N/A)', cmd: null };
-    return { label: 'set param', needsInput: true, cmd: arg != null ? `rosparam set '${name}' '${arg}'` : null };
+    if (ver === '2') {
+      const [nd, p] = splitNodeParam(name);
+      return { label: 'set param', needsInput: true, cmd: (arg != null && p) ? `ros2 param set ${shq(nd)} ${shq(p)} ${shq(arg)} 2>&1` : null };
+    }
+    return { label: 'set param', needsInput: true, cmd: arg != null ? `rosparam set ${shq(name)} ${shq(arg)} 2>&1` : null };
   }
   if (kind === 'service') {
     // 인자 있는 호출 지원 — x → 요청(YAML/JSON) 입력창(기본 '{}'). Gazebo spawn/set_entity_state 등에 유용.

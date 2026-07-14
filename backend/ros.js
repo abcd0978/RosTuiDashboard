@@ -40,8 +40,11 @@ async function ensureRosbridge() {
   if (rbProc && rbProc.exitCode === null) return;         // 기동 중
   if (await tcpOpen(RB_PORT)) return;                     // 이미 떠 있음(공유)
   if (VER !== '2' && !(await tcpOpen(MASTER_PORT))) return;   // ROS1: 마스터 대기
-  const cmd = VER === '2' ? 'ros2 launch rosbridge_server rosbridge_websocket_launch.xml'
-                          : 'roslaunch rosbridge_server rosbridge_websocket.launch';
+  // 포트를 반드시 넘긴다. 안 넘기면 launch 파일 기본값(9090)에 바인딩하는데, 우리가 붙는 주소는
+  // RDASH_ROSBRIDGE_URL 이라 포트를 바꾼 순간 "9090 에 띄우고 9091 에 붙는" 상태가 되어 영영 못 붙는다.
+  // 컨테이너를 host 네트워크로 여러 개 띄우면(같은 네트워크 네임스페이스) 9090 이 하나뿐이라 이게 실제로 필요하다.
+  const cmd = VER === '2' ? `ros2 launch rosbridge_server rosbridge_websocket_launch.xml port:=${RB_PORT}`
+                          : `roslaunch rosbridge_server rosbridge_websocket.launch port:=${RB_PORT}`;
   // 루프백 강제(ROS1) — 전부 한 머신에 있을 때 호스트명 해석 실패를 피한다. 다른 머신이면 RDASH_LOOPBACK=0.
   const ros1Net = (VER === '2' || process.env.RDASH_LOOPBACK === '0')
     ? '' : 'unset ROS_HOSTNAME; export ROS_IP=${ROS_IP:-127.0.0.1}; ';

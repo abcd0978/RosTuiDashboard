@@ -7,7 +7,7 @@
 // 예전엔 CliBackend / RclNodeBackend / RosbridgeBackend 를 RDASH_BACKEND 로 갈아끼웠지만,
 // /events 와 /echo 가 rosbridge 전용이 되면서 cli·rcl 은 켜도 아무것도 안 나오는 죽은 옵션이 됐다.
 // 지금은 rosbridge 하나뿐이고, rosbridge_suite 가 필수다(없으면 backend/ros.js 가 띄운다).
-import { actionFor, restartFor, protoCmd, bwCmd } from './ros.js';
+import { actionFor, restartFor, protoCmd, bwCmd, splitNodeParam } from './ros.js';
 import { IMG_BRIDGE, CLOUD_BRIDGE, BAG_DUMP, MARKER_BRIDGE, TF_DUMP, IMG_ANN_BRIDGE, CAMINFO_BRIDGE, GEOM_BRIDGE, URDF_BRIDGE, IM_BRIDGE } from './paths.js';
 import {
   resourceCmd, tfTreeCmd, tfEchoCmd, bagRecordCmd, bagPlayCmd, bagCompareCmd,
@@ -34,7 +34,14 @@ export class Backend {
   bagPlay(path) { return bagPlayCmd(this.ver, path); }
   paramList(node) { return paramListCmd(node); }
   paramGet(node, name) { return paramGetCmd(node, name); }
-  paramGet1(name) { return this.ver === '2' ? null : `rosparam get ${shq(name)} 2>&1`; }   // ROS1 전역 파라미터 현재값
+  // 파라미터 단일 값 — 이름 형식이 버전마다 다르다(splitNodeParam 주석 참조).
+  //   ROS1: rosparam get /common/imu_topic
+  //   ROS2: /turtlesim:background_r → ros2 param get /turtlesim background_r
+  paramGet1(name) {
+    if (this.ver !== '2') return `rosparam get ${shq(name)} 2>&1`;
+    const [nd, p] = splitNodeParam(name);
+    return p ? `ros2 param get ${shq(nd)} ${shq(p)} 2>&1 | sed -n 's/.*value is: //p'` : null;
+  }
   paramSet(node, name, val) { return paramSetCmd(node, name, val); }
   setParam1(name, val) { const a = actionFor(this.ver, 'param', name, val); return a && a.cmd; }
   killNode(name) { const a = actionFor(this.ver, 'node', name); return a && a.cmd; }
