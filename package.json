@@ -8,7 +8,7 @@
   },
   "scripts": {
     "start": "node index.js",
-    "web": "node web/server.js"
+    "web": "node backend/server.js"
   },
   "keywords": [
     "ros",

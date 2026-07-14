@@ -6,12 +6,12 @@ import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { render } from 'ink';
 import { MouseProvider } from '@zenobius/ink-mouse';
-import { h } from './src/react.js';
-import { StoreProvider } from './src/store.js';
-import { Layout } from './src/components/chrome/Layout.js';
-import { enterAltScreen, bindExit } from './src/lib/screen.js';
-import { createDiffStdout } from './src/lib/diffstdout.js';
-import { ensurePyDeps } from './src/lib/pydeps.js';
+import { h } from './frontend/tui/react.js';
+import { StoreProvider } from './frontend/tui/store.js';
+import { Layout } from './frontend/tui/components/chrome/Layout.js';
+import { enterAltScreen, bindExit } from './frontend/tui/lib/screen.js';
+import { createDiffStdout } from './frontend/tui/lib/diffstdout.js';
+import { ensurePyDeps } from './frontend/tui/lib/pydeps.js';
 
 // 마우스 이벤트 이미터에 버튼/스토어가 다수 구독 → 기본 상한(10)을 넘겨 MaxListenersExceededWarning 이
 // 대체 화면 위로 새어 나오며 프레임을 망가뜨렸다. 0 = 무제한 → 경고 자체를 없앤다.
@@ -39,7 +39,7 @@ if (process.env.RDASH_NO_WEB !== '1') {
       ROS_IP: process.env.ROS_IP || '127.0.0.1',
     };
     delete webEnv.ROS_HOSTNAME;
-    const webArgs = [...process.execArgv, join(here, 'web', 'server.js')];
+    const webArgs = [...process.execArgv, join(here, 'backend', 'server.js')];
     const web = spawn(process.execPath, webArgs,
       { stdio: 'ignore', env: webEnv });
     web.on('error', () => { delete process.env.RDASH_WEB_ACTIVE; });
