@@ -52,7 +52,7 @@ export function mkScene(cv, labelDiv, info) {
   const gl = cv.getContext('webgl', { antialias: true, alpha: false, preserveDrawingBuffer: true }) || cv.getContext('experimental-webgl');
   if (!gl) {
     info.textContent = 'WebGL 미지원 브라우저';
-    return { setCloud() {}, setMarkers() {}, setCloudById() {}, setMarkersById() {}, setVisible() {}, removeDisplay() {}, setTF() {}, opts() {}, view() {}, setPointSize() {}, setPickHandler() {}, setCamImage() {}, setCamOpts() {}, clearCamera() {}, setInteractiveMarkers() {}, setImHandler() {}, getStats() { return { fps: 0, points: 0, drawn: 0 }; }, dispose() {} };
+    return { setCloud() {}, setMarkers() {}, setCloudById() {}, setMarkersById() {}, setVisible() {}, removeDisplay() {}, setTF() {}, opts() {}, view() {}, setPointSize() {}, setPickHandler() {}, setInspect() {}, setPin() {}, setCamImage() {}, setCamOpts() {}, clearCamera() {}, setInteractiveMarkers() {}, setImHandler() {}, getStats() { return { fps: 0, points: 0, drawn: 0 }; }, dispose() {} };
   }
   const VS = 'attribute vec3 p; attribute vec4 col; uniform mat4 mvp; uniform float psize; varying vec4 vc; void main(){ gl_Position = mvp*vec4(p,1.0); gl_PointSize = psize; vc = col; }';
   const FS = 'precision mediump float; varying vec4 vc; uniform float round; void main(){ if(round>0.5){ vec2 d=gl_PointCoord-0.5; if(dot(d,d)>0.25) discard; } gl_FragColor = vc; }';
@@ -307,6 +307,7 @@ export function mkScene(cv, labelDiv, info) {
       }
       labels.push({ p: [w.p[0], w.p[1], w.p[2] + s * 1.15], t: im.name, c: '#c8d2df' });
     }
+    if (pin) { put(Pc, pin.p, [1, 0.82, 0.29, 1]); labels.push({ p: pin.p, t: pin.t, c: '#ffd24a' }); }   // 조회 핀(월드 고정)
     upload('line', new Float32Array(L));
     upload('tri', new Float32Array(T));
     upload('triA', new Float32Array(TA));
@@ -427,8 +428,28 @@ export function mkScene(cv, labelDiv, info) {
       if (opt.lodMode === 'adaptive' && cloudN) { if (fps < opt.targetFps - 5) opt.lodDist = Math.max(3, opt.lodDist * 0.85); else if (fps > opt.targetFps + 8) opt.lodDist = Math.min(200, opt.lodDist * 1.12); }
     }
   }
-  let drag = null, btn = 0, pickHandler = null;
+  let drag = null, btn = 0, pickHandler = null, inspectCb = null, pin = null;
+  // 3D 포인트 조회 — 커서에 가장 가까운(화면상) 클라우드 점을 찾아 월드좌표·값·최근접 프레임 반환. RViz엔 없는 편의.
+  function pickPointInternal(cx, cy) {
+    const rect = cv.getBoundingClientRect(), W = cv.clientWidth, H = cv.clientHeight, px = cx - rect.left, py = cy - rect.top;
+    const M = mul(mvpMat(), gMat4());   // clip = mvp * world * p (셰이더와 동일)
+    const R2 = 18 * 18; let best = null, bestScore = 1e18;
+    for (const c of clouds.values()) { if (!c.visible || !c.data || !c.data.length) continue; const d = c.data, n = d.length / 4 | 0;
+      for (let i = 0; i < n; i++) { const x = d[i * 4], y = d[i * 4 + 1], z = d[i * 4 + 2];
+        const cw = M[3] * x + M[7] * y + M[11] * z + M[15]; if (cw <= 1e-6) continue;
+        const sx = ((M[0] * x + M[4] * y + M[8] * z + M[12]) / cw * 0.5 + 0.5) * W, sy = (-(M[1] * x + M[5] * y + M[9] * z + M[13]) / cw * 0.5 + 0.5) * H;
+        const ddx = sx - px, ddy = sy - py, sd2 = ddx * ddx + ddy * ddy; if (sd2 > R2) continue;
+        const score = cw + sd2 * 0.002;   // 반경 내에서 카메라에 가장 가까운(앞쪽) 점 우선
+        if (score < bestScore) { bestScore = score; best = { x, y, z, c: d[i * 4 + 3] }; } } }
+    if (!best) return null;
+    const g = gMat4(), x = best.x, y = best.y, z = best.z;   // 렌더되는 월드 위치 = world * p
+    const world = [g[0] * x + g[4] * y + g[8] * z + g[12], g[1] * x + g[5] * y + g[9] * z + g[13], g[2] * x + g[6] * y + g[10] * z + g[14]];
+    let nf = null, nfd = 1e18;
+    for (const id in frameMap) { const fp = frameW(id).p, dd = Math.hypot(fp[0] - world[0], fp[1] - world[1], fp[2] - world[2]); if (dd < nfd) { nfd = dd; nf = id; } }
+    return { world, value: best.c, colorMode: opt.colorMode, frame: nf, frameDist: nfd };
+  }
   cv.addEventListener('mousedown', (e) => {
+    if (inspectCb && e.button === 0) { inspectCb(pickPointInternal(e.clientX, e.clientY), e); e.preventDefault(); return; }
     if (pickHandler && e.button === 0) { const w = pickGround(e.clientX, e.clientY); if (w) { pickHandler(w, e); e.preventDefault(); return; } }
     if (e.button === 0 && ims.size) { const rect = cv.getBoundingClientRect(); const hit = pickIm(e.clientX - rect.left, e.clientY - rect.top); if (hit) { imDrag = startImDrag(hit, e); rebuildScene(); cv.style.cursor = 'grabbing'; e.preventDefault(); return; } }
     drag = { x: e.clientX, y: e.clientY };
@@ -473,6 +494,8 @@ export function mkScene(cv, labelDiv, info) {
     view(p) { pan = [0, 0]; if (p === 'top') { yaw = 0; pitch = -1.554; } else if (p === 'front') { yaw = 0; pitch = 0; } else if (p === 'side') { yaw = Math.PI / 2; pitch = 0; } else if (p === 'back') { yaw = Math.PI; pitch = 0; } else { yaw = 0.7; pitch = -0.6; dist = 12; center = [0, 0, 0.5]; } invalidate(); },
     setPointSize(s) { psize = s; invalidate(); },
     setPickHandler(fn) { pickHandler = fn; cv.style.cursor = fn ? 'crosshair' : 'grab'; },
+    setInspect(fn) { inspectCb = fn; cv.style.cursor = fn ? 'crosshair' : 'grab'; if (!fn) { pin = null; rebuildScene(); } },
+    setPin(worldPt, text) { pin = worldPt ? { p: worldPt, t: text || '' } : null; rebuildScene(); },
     setCamImage(imgEl, cam, frame) {
       if (!imgEl || !cam || !cam.K) return;
       camState.W = cam.width || imgEl.naturalWidth || 640;
@@ -619,7 +642,20 @@ export function cloud(it) {
   const sph = (id, p, c) => ({ ns: 'tool', id, type: 2, action: 0, frame_id: FF, pose: { p, q: [0, 0, 0, 1] }, scale: [0.2, 0.2, 0.2], color: c, points: [], colors: [], text: '' });
   const arw = (id, p, yaw, c) => ({ ns: 'tool', id, type: 0, action: 0, frame_id: FF, pose: { p, q: [0, 0, Math.sin(yaw / 2), Math.cos(yaw / 2)] }, scale: [0.7, 0.1, 0.15], color: c, points: [], colors: [], text: '' });
   const showTool = (ms) => scene.setMarkersById('__tool__', ms);
-  const clearTool = () => { activeTool = null; toolStage = null; scene.setPickHandler(null); showTool([]); renderTools(); };
+  const clearTool = () => { activeTool = null; toolStage = null; scene.setPickHandler(null); scene.setInspect(null); showTool([]); renderTools(); };
+  const inspectOut = el('div', { class: 'hint', style: 'margin-top:5px;font-family:monospace;line-height:1.6' });
+  function onInspect(hit) {
+    if (!hit) { inspectOut.textContent = '점 없음 — 클라우드 위를 클릭'; scene.setPin(null); return; }
+    const w = hit.world, xyz = `${w[0].toFixed(3)}, ${w[1].toFixed(3)}, ${w[2].toFixed(3)}`;
+    let valStr; if (hit.colorMode === 2) { const c = hit.value, b = c % 256, g = Math.floor(c / 256) % 256, r = Math.floor(c / 65536); valStr = `RGB ${r},${g},${b}`; } else valStr = `intensity ${(+hit.value).toFixed(2)}`;
+    scene.setPin(w, `(${w[0].toFixed(2)}, ${w[1].toFixed(2)}, ${w[2].toFixed(2)})`);
+    inspectOut.innerHTML = '';
+    inspectOut.append(
+      el('div', {}, 'XYZ: ', el('span', { style: 'color:var(--fg)' }, xyz + ' m')),
+      el('div', {}, '값: ', el('span', { style: 'color:var(--cyan)' }, valStr)),
+      el('div', {}, '가까운 프레임: ', el('span', { style: 'color:var(--green)' }, hit.frame ? `${hit.frame} (${hit.frameDist.toFixed(2)} m)` : '—')),
+      el('button', { class: 'act', style: 'padding:1px 6px;margin-top:3px;font-size:11px', onclick: () => { if (navigator.clipboard) navigator.clipboard.writeText(xyz); toast('좌표 복사', 'ok'); } }, '좌표 복사'));
+  }
   const pub = (topic, yaml) => post('/api/publish', { name: topic, msg: yaml }).then(() => toast('발행 → ' + topic, 'ok')).catch(() => toast('발행 실패', 'err'));
   function onToolPick(w) {
     if (activeTool === 'measure') {
@@ -648,9 +684,10 @@ export function cloud(it) {
   function renderTools() {
     toolBox.innerHTML = '';
     toolBox.append(el('div', { class: 'hint', style: 'font-weight:600;margin-bottom:3px' }, '🛠 도구'));
-    const tb = (label, tool) => el('button', { class: 'act', style: 'padding:2px 6px;margin:2px 3px 2px 0;font-size:11px' + (activeTool === tool ? ';border-color:var(--cyan);color:var(--cyan)' : ''), onclick: () => { if (activeTool === tool) { clearTool(); return; } activeTool = tool; toolStage = null; showTool([]); scene.setPickHandler(onToolPick); renderTools(); } }, label);
-    toolBox.append(tb('📍 Point', 'point'), tb('🎯 Nav Goal', 'goal'), tb('📌 Pose', 'pose'), tb('📏 측정', 'measure'));
-    toolBox.append(el('div', { class: 'hint', style: 'margin-top:3px' }, activeTool ? (activeTool === 'point' ? '그라운드 클릭 → 발행' : activeTool === 'measure' ? '두 점 클릭 → 거리(반복)' : '클릭=위치, 다시 클릭=방향') : '도구 선택 후 씬 클릭 (z=0 평면)'));
+    const tb = (label, tool) => el('button', { class: 'act', style: 'padding:2px 6px;margin:2px 3px 2px 0;font-size:11px' + (activeTool === tool ? ';border-color:var(--cyan);color:var(--cyan)' : ''), onclick: () => { if (activeTool === tool) { clearTool(); return; } activeTool = tool; toolStage = null; showTool([]); if (tool === 'inspect') { scene.setPickHandler(null); scene.setInspect(onInspect); } else { scene.setInspect(null); scene.setPickHandler(onToolPick); } renderTools(); } }, label);
+    toolBox.append(tb('🔍 조회', 'inspect'), tb('📍 Point', 'point'), tb('🎯 Nav Goal', 'goal'), tb('📌 Pose', 'pose'), tb('📏 측정', 'measure'));
+    toolBox.append(el('div', { class: 'hint', style: 'margin-top:3px' }, activeTool ? (activeTool === 'inspect' ? '점 클릭 → 좌표·값·프레임 조회' : activeTool === 'point' ? '그라운드 클릭 → 발행' : activeTool === 'measure' ? '두 점 클릭 → 거리(반복)' : '클릭=위치, 다시 클릭=방향') : '도구 선택 후 씬 클릭'));
+    if (activeTool === 'inspect') toolBox.append(inspectOut);
   }
   renderTools();
   // ── 📷 카메라/프레임 — 고정 프레임(fixed frame) · 추종(follow) · 직교 투영 ──
