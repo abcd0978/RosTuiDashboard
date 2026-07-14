@@ -130,6 +130,7 @@ export function rbTelemetryCore(send) {
       telemTrack.clear();
       telemCounts = {};
       telemLast = {};
+      measure.clear();   // 화면에 보는 사람이 없으므로 측정 대상도 비움 — 남아있으면 새 클라이언트 접속 시 아무도 안 보는 토픽까지 재구독됨
     }
   };
 }
