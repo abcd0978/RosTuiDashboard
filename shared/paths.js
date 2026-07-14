@@ -19,7 +19,6 @@ const PY = join(ROOT, 'backend', 'python');
 
 export const PY_COMMON = join(PY, 'common');   // PYTHONPATH 에 들어간다 — ros_compat import 용
 
-export const PLOT_PY = join(PY, 'tools', 'plot.py');        // matplotlib 라이브 플로터(원값/미분/적분/FFT)
 export const BAG_DUMP = join(PY, 'tools', 'bag_dump.py');   // rosbag2 → 숫자 리프 시계열 JSON (PlotLab 파일 재생)
 export const TF_TREE_PY = join(PY, 'tools', 'tf_tree.py');  // /tf → 프레임 트리 파서
 

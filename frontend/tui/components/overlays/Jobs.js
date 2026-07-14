@@ -19,10 +19,10 @@ export function Jobs() {
     else if (key.downArrow || ch === 'j') d.setJobsOpen((p) => p && ({ ...p, idx: clamp(idx + 1, 0, list.length - 1) }));
     else if (key.upArrow) d.setJobsOpen((p) => p && ({ ...p, idx: clamp(idx - 1, 0, list.length - 1) }));
     else if (!list.length) return;
-    else if (ch === 'k') d.killJob(list[idx].id, 'SIGINT');
-    else if (ch === 'K') d.killJob(list[idx].id, 'SIGKILL');   // SIGINT 후 유예 → 생존자만 SIGKILL
+    else if (ch === 'k') d.killJob(list[idx].id);
+    else if (ch === 'K') d.killJob(list[idx].id);   // 백엔드가 SIGTERM→SIGKILL 유예 처리
     // 실행 중인 작업은 목록에서 지우지 않는다. 지우면 child 핸들을 잃어 노드를 죽일 길이 없어진다.
-    else if (ch === 'd') { const jb = list[idx]; if (jb.status === 'run') d.killJob(jb.id, 'SIGINT'); else d.removeJob(jb.id); }
+    else if (ch === 'd') { const jb = list[idx]; if (jb.status === 'run') d.killJob(jb.id); else d.removeJob(jb.id); }
   }, { isActive: !!process.stdin.isTTY });
 
   const sel = list[idx];

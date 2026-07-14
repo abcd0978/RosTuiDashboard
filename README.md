@@ -175,31 +175,42 @@ runs against different data sources:
 | `rcl` | a single **rclpy** node multiplexes all topic echoes into one process | local, many plotted topics — kills the `ros2 topic echo` process fan-out |
 | `rosbridge` | a **websocket** client to `rosbridge_suite` (`RDASH_ROSBRIDGE_URL=ws://robot:9090`) | remote robot, no local ROS install |
 
-**The TUI and the web currently use different backends, on purpose:**
+**The TUI and the browser are both clients of the same backend.** Neither talks to
+ROS. `RDASH_BACKEND` is the *backend's* choice and the only knob:
 
-| | default | override |
-|---|---|---|
-| TUI | `cli` — spawns ROS CLI processes | `RDASH_TUI_BACKEND` |
-| Web | `rosbridge` — auto-starts `rosbridge_server` on :9090 if it isn't up | `RDASH_WEB_BACKEND` |
+```
+frontend/tui/  ─┐
+                ├─ HTTP + /ws ─▶ backend/ ─▶ RDASH_BACKEND ─▶ ROS
+frontend/web/  ─┘
+```
 
-`npm start` sets both (see `index.js`). The TUI cannot use `rosbridge` yet —
-`store.js` runs every ROS action as a command string, so `RosbridgeBackend.publish()`
-still returns CLI text. Unifying them is tracked in `ROSBRIDGE_TUI_TODO.md`.
+`npm start` launches the TUI, which spawns the backend and waits for it. Point the
+TUI at an already-running (or remote) backend with `RDASH_API=http://host:8080` —
+then it does not spawn one.
 
-Runs in a ROS-sourced shell like the TUI. Sensor streams use python bridges under
-`backend/python/` (`scene3d/`, `image/`, `stream/`, `tools/`); every path is
-declared in `shared/paths.js` and each is overridable by env (`RDASH_TELEM`,
-`RDASH_IMG_BRIDGE`, `RDASH_CLOUD_BRIDGE`, …).
+The contract is written down in **`API.md`**. Sensor streams use python bridges under
+`backend/python/` (`scene3d/`, `image/`, `stream/`, `tools/`); every path is declared
+in `shared/paths.js` and each is overridable by env (`RDASH_IMG_BRIDGE`, …).
+
+Because the backend owns ROS, a few things moved:
+
+- **Jobs** (rosbag record/play, action goals, bookmarked commands) live on the
+  backend. They outlive the TUI and the TUI and browser see the same list.
+- **`ROS_DOMAIN_ID` / `ROS_MASTER_URI`** belong to the backend's environment. The TUI's
+  `D` key now *shows* them (`GET /api/env`) instead of changing them.
+- **The matplotlib plotter was removed from the TUI** — the browser's PlotLab covers
+  it, and `matplotlib` is no longer a dependency.
 
 ### Repo layout
 
 ```
-index.js       TUI entry (also spawns the web server; RDASH_NO_WEB=1 to skip)
-shared/        used by BOTH the TUI and the web backend — ROS command builders,
+index.js       TUI entry — spawns the backend, waits for it, then renders
+shared/        used by BOTH the TUI and the backend — ROS command builders,
                rosbridge client, paths.js (the only place python paths are written)
-backend/       web backend (node backend/server.js) + python/ bridges by function
-frontend/tui/  React Ink TUI
-frontend/web/  browser — native ES modules, no bundler, no build step
+backend/       the backend (node backend/server.js) + python/ bridges by function
+frontend/tui/  React Ink TUI     — talks only to the API (lib/api.js)
+frontend/web/  browser           — native ES modules, no bundler, no build step
+API.md         the contract both front ends are written against
 ```
 
 See **ARCHITECTURE.md** for the full map, the rosbridge telemetry design (and why

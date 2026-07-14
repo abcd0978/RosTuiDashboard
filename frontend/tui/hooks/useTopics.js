@@ -1,34 +1,38 @@
-// 토픽/Hz 스트림 — telemetry(.py) 를 python3 로 실행해 1초마다 JSON 한 줄을 파싱.
-import { useState, useEffect } from '../react.js';
-import { rosSpawn } from '../../../shared/ros.js';
-import { TELEM, TELEM2 } from '../../../shared/paths.js';
+// 토픽/그래프 스냅샷 — python3 스폰 대신 백엔드 events 멀티플렉스 스트림을 구독한다.
+// Hz 측정 정책(all/selected/off)은 store 가 이미 토픽 목록으로 풀어서 넘겨준다(measure 인자).
+// null = 전체 측정(현재 그래프의 모든 토픽), [] = 측정 안 함, [..] = 그 토픽만.
+import { useState, useEffect, useRef } from '../react.js';
+import { openStream, post } from '../lib/api.js';
 
-export function useTopics(ver, ctrlPath, domain) {
+export function useTopics(ver, measure) {
   const [topics, setTopics] = useState(null);
   const [conn, setConn] = useState('starting');
+  const topicsRef = useRef(null);
+  topicsRef.current = topics;
+
   useEffect(() => {
-    if (!ver) return;                          // 버전 감지 전엔 대기
-    let child, buf = '', alive = true, timer;
-    const env = { RDASH_CTRL: ctrlPath };      // 선택적 Hz 제어 파일 경로
-    if (domain != null && domain !== '') env.ROS_DOMAIN_ID = String(domain);   // 도메인 전환(다른 컨테이너)
-    const start = () => {
-      child = rosSpawn('python3 -', env);
-      child.stdin.on('error', () => {});
-      if (child.stderr) child.stderr.on('data', () => {});   // stderr 버림(파이프 막힘 방지)
-      child.stdin.write(ver === '2' ? TELEM2 : TELEM); child.stdin.end();
-      child.stdout.on('data', (d) => {
-        buf += d.toString(); let i;
-        while ((i = buf.indexOf('\n')) >= 0) {
-          const line = buf.slice(0, i); buf = buf.slice(i + 1);
-          if (!line.trim()) continue;
-          try { const o = JSON.parse(line); setConn('ok'); setTopics(o.nomaster ? null : (o.items || [])); } catch { /* */ }
-        }
-      });
-      child.on('error', () => setConn('exec-error'));
-      child.on('exit', () => { if (alive) { setConn('reconnecting'); timer = setTimeout(start, 2000); } });
-    };
-    start();
-    return () => { alive = false; clearTimeout(timer); if (child) child.kill(); };
-  }, [ver, domain]);                           // 도메인 바뀌면 재시작(제어파일은 재시작 불필요)
+    if (!ver) return undefined;                        // 버전 감지 전엔 대기(기존과 동일한 게이트)
+    const unsub = openStream('events', {}, (d) => {
+      let o; try { o = JSON.parse(d); } catch { return; }
+      if (o.nomaster) { setConn('nomaster'); return; }   // 마지막 items 유지, 연결 끊김만 표시
+      setConn('ok'); setTopics(o.items || []);
+    });
+    return unsub;
+  }, [ver]);
+
+  // 측정 대상 통보 — 바뀔 때만 POST(백엔드는 이 집합만 구독해 Hz 를 센다).
+  // measure=null(전체)은 그래프가 바뀔 때마다 목록이 달라지므로 topics 도 의존성에 넣는다.
+  const sentRef = useRef(null);
+  useEffect(() => {
+    const items = topicsRef.current || [];
+    const list = measure === null
+      ? items.filter((t) => t.kind === 'topic').map((t) => t.name)
+      : measure;
+    const key = JSON.stringify([...list].sort());
+    if (key === sentRef.current) return;
+    sentRef.current = key;
+    post('/api/measure', { topics: list });
+  }, [measure, topics]);
+
   return { topics, conn };
 }

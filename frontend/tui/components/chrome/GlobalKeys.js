@@ -15,7 +15,7 @@ export function GlobalKeys() {
     else if (ch === '/') d.setSearching(true);
     else if (ch === ' ') d.setFrozen((f) => !f);
     else if (ch === 'h') d.cycleHz();
-    else if (ch === 'D') d.setDomainEdit({ value: d.domain || '' });
+    else if (ch === 'D') d.setDomainEdit({});   // ROS 환경 표시(읽기 전용)
     else if (ch === 'b') d.setBmOpen({ idx: 0 });
     else if (ch === 'J') d.setJobsOpen({ idx: 0 });      // 실행 중 작업(Jobs)
     else if (ch === 'w') d.setWatchOpen(true);           // 워치리스트
@@ -50,7 +50,6 @@ export function GlobalKeys() {
     else if (key.pageUp) d.move(-d.VISIBLE);
     else if (key.return || key.rightArrow || ch === 'l') d.activate(d.sel);
     else if (ch === 'x') d.doAction();
-    else if (ch === 'p') d.doPlot();
     else if (ch === 'r') d.doRestart();
     else if (ch === 'g') { d.setSel(0); d.setTop(0); }
     else if (ch === 'G') { d.setSel(Math.max(0, d.n - 1)); d.setTop(d.maxTop); }

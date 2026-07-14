@@ -1,7 +1,8 @@
-// 워치리스트 스트림 — 워치된 토픽들을 echo 로 구독해 각 필드의 최신 값을 맵으로 반환.
-// (Watch 오버레이가 열려 있을 때만 마운트되므로, 볼 때만 구독한다.)
+// 워치리스트 스트림 — 워치된 토픽마다 echo 스트림을 구독한다(멀티플렉스라 소켓 하나에 여러 개).
+// 페이로드는 JSON 문자열이므로 파싱해서 기존 필드-추출 헬퍼(fieldValue)에 그대로 넘긴다.
 import { useState, useEffect } from '../react.js';
-import { rosSpawn, echoCmd, fieldValue } from '../../../shared/ros.js';
+import { openStream } from '../lib/api.js';
+import { fieldValue } from '../../../shared/ros.js';
 
 export function useWatches(watches, ver) {
   const [vals, setVals] = useState({});
@@ -9,19 +10,10 @@ export function useWatches(watches, ver) {
   useEffect(() => {
     if (!watches.length) { setVals({}); return; }
     const topics = [...new Set(watches.map((w) => w.topic))];
-    const latest = {};                       // topic → 최신 echo YAML 블록
-    const children = topics.map((t) => {
-      const child = rosSpawn(echoCmd(ver, t));
-      let buf = '';
-      child.stdout.on('data', (d) => {
-        buf += d.toString();
-        const parts = buf.split('\n---\n');
-        if (parts.length > 1) { latest[t] = parts[parts.length - 2]; buf = parts[parts.length - 1]; }
-      });
-      if (child.stderr) child.stderr.on('data', () => {});
-      child.on('error', () => {});
-      return child;
-    });
+    const latest = {};                       // topic → 최신 echo 텍스트
+    const unsubs = topics.map((t) => openStream('echo', { topic: t }, (d) => {
+      try { latest[t] = JSON.parse(d); } catch { /* */ }
+    }));
     const timer = setInterval(() => {
       const out = {};
       for (const w of watches) {
@@ -29,7 +21,7 @@ export function useWatches(watches, ver) {
       }
       setVals(out);
     }, 300);
-    return () => { clearInterval(timer); for (const c of children) { try { c.kill(); } catch { /* */ } } };
+    return () => { clearInterval(timer); for (const u of unsubs) u(); };
   }, [keys, ver]);
   return vals;
 }

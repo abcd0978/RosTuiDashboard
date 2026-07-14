@@ -3,8 +3,7 @@
 import { h, useState, useEffect } from '../../react.js';
 import { Text, useInput } from 'ink';
 import { useDashboard } from '../../store.js';
-import { rosSpawn } from '../../../../shared/ros.js';
-import { resourceCmd } from '../../../../shared/commands.js';
+import { post, outOf } from '../../lib/api.js';
 import { evalCheck } from '../../../../shared/preflight.js';
 import { clamp, pad } from '../../../../shared/util.js';
 import { OverlayFrame } from '../common/OverlayFrame.js';
@@ -14,16 +13,15 @@ export function SystemOverview() {
   const items = d.topics || [];
   const [res, setRes] = useState([]);
 
-  useEffect(() => {   // 노드 리소스(CPU/RSS) 폴링
+  useEffect(() => {   // 노드 리소스(CPU/RSS) 폴링 — 백엔드 호스트에서 잰다(POST /api/resource)
     let alive = true, timer;
     const nodes = items.filter((i) => i.kind === 'node').map((i) => i.name);
-    const poll = () => {
+    const poll = async () => {
       if (!nodes.length) return;
-      const p = rosSpawn(resourceCmd(nodes)); let out = '';
-      if (p.stderr) p.stderr.on('data', () => {});
-      p.stdout.on('data', (x) => { out += x.toString(); });
-      p.on('close', () => { if (alive) { setRes(out.trim().split('\n').filter((l) => l && !l.startsWith('('))); timer = setTimeout(poll, 2000); } });
-      p.on('error', () => {});
+      const out = outOf(await post('/api/resource', { nodes }));
+      if (!alive) return;
+      setRes(out.trim().split('\n').filter((l) => l && !l.startsWith('(')));
+      timer = setTimeout(poll, 2000);
     };
     poll();
     return () => { alive = false; clearTimeout(timer); };

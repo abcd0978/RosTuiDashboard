@@ -1,25 +1,23 @@
 // 대시보드 중앙 상태 store — 모든 공유 state·파생값·액션·스트림/마우스 효과를 한 곳에 모아
 // Context 로 제공한다. 각 컴포넌트는 useDashboard() 로 필요한 값만 꺼내 쓰고,
 // 키보드 입력은 컴포넌트별 useInput(모드 게이팅)으로 자기 책임에서 처리한다.
-import { writeFileSync } from 'fs';
-import { tmpdir } from 'os';
-import { join } from 'path';
+// ROS 는 이제 백엔드 API 로만 만진다(계약: API.md). 여기서 ROS 프로세스를 spawn 하지 않는다.
+// 예외: 세션/북마크/기준선 같은 설정 파일은 백엔드와 같은 호스트에 있으므로 그대로 로컬에서 읽고 쓴다.
+// 잡(rosbag·액션·북마크 명령)은 백엔드가 소유한다 — TUI 가 죽어도 살아있고 웹 UI 와 같은 목록을 본다.
 import { h, createContext, useContext, useState, useEffect, useRef } from './react.js';
 import { useApp } from 'ink';
 import { useMouse, useElementPosition } from '@zenobius/ink-mouse';
 import { clamp, fuzzy, RATES, LEFT_W } from '../../shared/util.js';
 import { buildTree, flattenTree } from './lib/tree.js';
-import { actionFor, restartFor, runAction, numericFields, rosSpawn, echoFullCmd, killTree, killTreeHard, protoCmd, runText } from '../../shared/ros.js';
+import { numericFields } from '../../shared/ros.js';   // 순수 텍스트 파싱(ROS 안 건드림)
 import { flattenSkeleton, buildYaml } from '../../shared/msgform.js';
 import { shq } from '../../shared/util.js';
-import { PLOT_PY } from '../../shared/paths.js';
-import { rosEnv } from './lib/env.js';
+import { api, post, outOf, openStream } from './lib/api.js';
 import { loadBookmarks, saveBookmarks, activePreset, presetNames, savePreset } from '../../shared/bookmarks.js';
 import { loadPreflight } from '../../shared/preflight.js';
 import { loadSession, saveSession, loadHistory, pushHistory } from './lib/session.js';
 import { loadBaseline, saveBaseline, snapshot as snapProfile } from '../../shared/baseline.js';
 import { diagnose } from './lib/doctor.js';
-import { makeBackend } from '../../shared/backend.js';
 import { useRosVersion } from './hooks/useRosVersion.js';
 import { useTopics } from './hooks/useTopics.js';
 import { useTermSize } from './hooks/useTermSize.js';
@@ -34,11 +32,11 @@ export const useDashboard = () => useContext(DashboardContext);
 export function StoreProvider({ children }) {
   const { exit } = useApp();
   const ver = useRosVersion();
-  const be = makeBackend(ver, process.env.RDASH_TUI_BACKEND || 'cli');   // TUI 는 ROS CLI 백엔드를 기본 사용
   const sessRef = useRef(loadSession());                // 이전 세션(펼침/워치/모드/마지막 선택)
   const sess = sessRef.current;
-  const [domain, setDomain] = useState(process.env.ROS_DOMAIN_ID ?? null);   // 컨테이너/도메인 전환
-  const [domainEdit, setDomainEdit] = useState(null);   // 도메인 입력창 {value} 또는 null
+  // ROS 환경은 백엔드 것을 받아온다 — 우리 process.env 는 ROS 와 무관하다(우리 셸이지 로봇이 아니다).
+  const [env, setEnv] = useState({ host: '?', domain: '?', rmw: '?', master: '', ver: null, backend: '?', url: '' });
+  const [domainEdit, setDomainEdit] = useState(null);   // ROS 환경 뷰(읽기 전용) 열림 여부
   const [hzMode, setHzMode] = useState(sess.hzMode || 'all');          // Hz 측정 정책 all|selected|off
   const [bookmarks, setBookmarks] = useState(() => loadBookmarks());   // 명령 북마크 리스트
   const [preset, setPreset] = useState(() => activePreset());   // 활성 북마크 프리셋(px4/turtlesim…) 또는 null
@@ -72,12 +70,13 @@ export function StoreProvider({ children }) {
   const [watchOpen, setWatchOpen] = useState(false);    // 워치 오버레이
   const [preflight] = useState(() => loadPreflight());  // 프리플라이트 체크 정의
   const [preflightOpen, setPreflightOpen] = useState(false);
-  const jobsRef = useRef([]); jobsRef.current = jobs;    // 종료 시 정리용 최신 참조
-  const jobLogsRef = useRef(new Map());                 // id → 출력 라인 링버퍼(리렌더 폭주 방지)
-  const jobSeqRef = useRef(0);
+  const jobsRef = useRef([]); jobsRef.current = jobs;    // 최신 참조
+  const jobLogsRef = useRef(new Map());                 // id → 출력 라인(백엔드가 준 log 를 그대로 담음)
+  const hiddenJobsRef = useRef(new Set());             // 목록에서 치운 잡 id — 백엔드엔 끝난 잡을 지우는 API 가 없어 클라이언트에서 숨긴다
   const infoRef = useRef({ alive: false, timer: null });
-  const ctrlPathRef = useRef(join(tmpdir(), `rdash-ctrl-${process.pid}.json`));
-  const { topics, conn } = useTopics(ver, ctrlPathRef.current, domain);
+  // Hz 측정 대상 — null=전체, []=측정 안 함, [..]=그 토픽만. 아래 hzMode 효과가 채운다(옛 RDASH_CTRL 파일 대체).
+  const [measureList, setMeasureList] = useState(null);
+  const { topics, conn } = useTopics(ver, measureList);
   const { cols, rows } = useTermSize();
   const mouse = useMouse();
 
@@ -119,17 +118,36 @@ export function StoreProvider({ children }) {
     }
   }, [topics]);
 
-  // 패키지 이름 목록(북마크 자동완성용) — 버전 감지 후 1회, 백그라운드로.
+  // 백엔드가 붙어 있는 ROS 환경(호스트/도메인/RMW/마스터) — EnvBar 표시용. 1회.
+  useEffect(() => {
+    let alive = true;
+    api('/api/env').then((o) => { if (alive && o) setEnv(o); });
+    return () => { alive = false; };
+  }, [ver]);
+
+  // 패키지 이름 목록(북마크 자동완성용) — 백엔드 호스트에서 실행. 버전 감지 후 1회.
   useEffect(() => {
     if (!ver) return undefined;
-    const p = rosSpawn(ver === '2' ? 'ros2 pkg list' : 'rospack list-names');
-    let out = '';
-    if (p.stderr) p.stderr.on('data', () => {});
-    p.stdout.on('data', (dd) => { out += dd.toString(); });
-    p.on('close', () => setPkgNames(out.trim() ? out.trim().split(/\s+/) : []));
-    p.on('error', () => {});
-    return () => { try { p.kill(); } catch { /* */ } };
+    let alive = true;
+    post('/api/run', { cmd: ver === '2' ? 'ros2 pkg list' : 'rospack list-names' })
+      .then((o) => { if (!alive) return; const out = outOf(o).trim(); setPkgNames(out ? out.split(/\s+/) : []); });
+    return () => { alive = false; };
   }, [ver]);
+
+  // 잡(Jobs)은 백엔드가 소유한다 — TUI 가 죽어도 살아있고 웹과 공유된다. 1초 폴링(스트림 없음).
+  useEffect(() => {
+    let alive = true;
+    const tick = async () => {
+      const o = await api('/api/jobs');
+      if (!alive || !o || !Array.isArray(o.jobs)) return;
+      const list = o.jobs.filter((j) => !hiddenJobsRef.current.has(j.id));
+      for (const j of list) jobLogsRef.current.set(j.id, j.log || []);
+      setJobs(list);
+    };
+    tick();
+    const t = setInterval(tick, 1000);
+    return () => { alive = false; clearInterval(t); };
+  }, []);
 
   // 마지막 선택 복원 — 토픽이 처음 도착했을 때 한 번(경로 일치 시).
   const restoredRef = useRef(false);
@@ -160,16 +178,16 @@ export function StoreProvider({ children }) {
   const n = flat.length;
   useEffect(() => { setSel(0); setTop(0); }, [filt]);   // 필터 바뀌면 선택 맨 위로
 
-  // 선택적 Hz: 정책을 제어 파일에 기록(telemetry 가 폴링). all=전체 / off=없음 / selected=보이는 토픽+active.
+  // 선택적 Hz: all=전체 / off=없음 / selected=화면에 보이는 토픽 + 선택 항목.
+  // 목록을 useTopics 에 넘기면 훅이 POST /api/measure 로 백엔드에 알린다(백엔드는 이 집합만 구독해 Hz 를 센다).
   const visTopics = flat.filter((r) => r.node.item && r.node.item.kind === 'topic').map((r) => r.node.item.name);
   if (active && active.kind === 'topic') visTopics.push(active.name);
   const visKey = hzMode === 'selected' ? [...new Set(visTopics)].sort().join(',') : hzMode;
   useEffect(() => {
-    let measure = 'all';
-    if (hzMode === 'off') measure = 'none';
-    else if (hzMode === 'selected') measure = [...new Set(visTopics)];
-    try { writeFileSync(ctrlPathRef.current, JSON.stringify({ measure })); } catch { /* */ }
-  }, [visKey]);
+    if (hzMode === 'off') setMeasureList([]);
+    else if (hzMode === 'all') setMeasureList(null);
+    else setMeasureList([...new Set(visTopics)]);
+  }, [visKey, hzMode]);
 
   // 전체 높이 = VISIBLE + 8 (패널 헤더/테두리3 + 오버레이1 + EnvBar1 + 테두리 버튼 푸터3).
   // 화면(rows)보다 크면 Ink 가 매 프레임 전체를 다시 그려 깜빡임 → rows-9 로 한 줄 여유.
@@ -202,27 +220,22 @@ export function StoreProvider({ children }) {
   // 마지막으로 실행한 셸 명령 기억 → 북마크 추가 시 자동 채움(명령 안 외워도 됨)
   const lastCmdRef = useRef('');
   const historyRef = useRef(loadHistory());   // 명령 히스토리(북마크 에디터 Ctrl+P/N)
-  const run = (cmd, onDone) => { lastCmdRef.current = cmd; historyRef.current = pushHistory(cmd); runAction(cmd, onDone); };
 
   // 토픽 발행 폼 — 타입에서 필드를 뽑아 값만 채우게 한다(구조를 손으로 안 침).
-  const openPublishForm = () => {
+  const openPublishForm = async () => {
     if (!active || active.kind !== 'topic') { setStatus('토픽을 선택하세요'); return; }
-    const nm = active.name, pc = protoCmd(ver, 'topic', nm, active.ty);
-    if (!pc) { setStatus('발행 불가'); return; }
+    const nm = active.name;
     setStatus('메시지 필드 조회 중…');
-    runText(pc, (out) => {
-      let parsed = null;
-      try { parsed = JSON.parse(out); } catch { /* */ }
-      const skel = parsed && parsed.skel;
-      if (!skel || typeof skel !== 'object') {
-        setEdit({ name: nm, value: '{}', kind: 'topic' });   // 타입 조회 실패 → YAML 자유 입력 폴백
-        setStatus('타입 필드 조회 실패 — YAML 직접 입력');
-        return;
-      }
-      const fields = flattenSkeleton(skel);
-      setPubForm({ name: nm, type: (parsed.type || active.ty || '?'), fields, idx: 0 });
-      setStatus(`▲ publish ${nm} — 필드 ${fields.length}개`);
-    });
+    const o = await api(`/api/proto?name=${encodeURIComponent(nm)}&type=${encodeURIComponent(active.ty || '')}`);
+    const skel = o && o.skel;
+    if (!skel || typeof skel !== 'object') {
+      setEdit({ name: nm, value: (o && o.yaml) || '{}', kind: 'topic' });   // 스켈레톤 실패 → YAML 자유 입력 폴백
+      setStatus('타입 필드 조회 실패 — YAML 직접 입력');
+      return;
+    }
+    const fields = flattenSkeleton(skel);
+    setPubForm({ name: nm, type: (o.type || active.ty || '?'), fields, idx: 0 });
+    setStatus(`▲ publish ${nm} — 필드 ${fields.length}개`);
   };
   const submitPubForm = () => {
     const f = pubForm; if (!f) return;
@@ -231,42 +244,47 @@ export function StoreProvider({ children }) {
     submitPublish(f.name, msg);
   };
 
-  const doAction = () => {
+  // x 키 — 선택 항목별 기본 액션. 노드는 죽이기(즉시), 나머지는 입력창/폼.
+  const ACT_LABEL = { topic: '▲ publish', service: 'call service', param: 'set param', action: '🎯 action goal', node: '💀 kill node' };
+  const doAction = async () => {
     if (!active) { setStatus('선택된 항목 없음 (Enter 로 선택)'); return; }
-    if (active.kind === 'topic') { openPublishForm(); return; }   // 발행은 폼으로
-    if (active.kind === 'action') { setEdit({ name: active.name, value: '{}', kind: 'action' }); return; }   // 액션 goal 입력
-    const act = actionFor(ver, active.kind, active.name);
-    if (!act) { setStatus(`(${active.kind}) 액션 없음`); return; }
-    if (act.needsInput) { setEdit({ name: active.name, value: act.defaultVal || '', kind: active.kind }); return; }
-    if (!act.cmd) { setStatus(act.label); return; }
-    setStatus(`${act.label} …`);
-    run(act.cmd, (o) => setStatus(`${active.name}: ${o}`));
+    const k = active.kind, nm = active.name;
+    if (k === 'topic') { openPublishForm(); return; }                                          // 발행은 폼으로
+    if (k === 'action') { setEdit({ name: nm, value: '{}', kind: 'action' }); return; }         // 액션 goal 입력
+    if (k === 'service') { setEdit({ name: nm, value: '{}', kind: 'service' }); return; }       // 서비스 요청 입력
+    if (k === 'param') { setEdit({ name: nm, value: '', kind: 'param' }); return; }             // 파라미터 값 입력
+    if (k === 'node') {
+      setStatus(`💀 kill ${nm} …`);
+      setStatus(`${nm}: ${outOf(await post('/api/killnode', { name: nm })) || '(응답 없음)'}`);
+      return;
+    }
+    setStatus(`(${k}) 액션 없음`);
   };
-  const doRestart = () => {
+  const doRestart = async () => {
     if (!active) { setStatus('선택된 항목 없음 (Enter 로 선택)'); return; }
-    const act = restartFor(active.kind, active.name);
-    if (!act) { setStatus(`(${active.kind}) 재시작 대상 아님 (노드만)`); return; }
-    setStatus(`${act.label} …`);
-    run(act.cmd, (o) => setStatus(`${active.name}: ${o}`));
+    if (active.kind !== 'node') { setStatus(`(${active.kind}) 재시작 대상 아님 (노드만)`); return; }
+    const nm = active.name;
+    setStatus(`♻ restart ${nm} …`);
+    setStatus(`${nm}: ${outOf(await post('/api/restart', { name: nm })) || '(응답 없음)'}`);
   };
-  const submitSet = (name, value) => {
-    const act = actionFor(ver, 'param', name, value);
-    if (act && act.cmd) { setStatus(`set ${name} …`); run(act.cmd, (o) => setStatus(`${name} = ${value}  (${o})`)); }
+  const submitSet = async (name, value) => {   // ROS1 전역 파라미터(ROS2 는 노드별 → ParamPanel)
+    setStatus(`set ${name} …`);
+    setStatus(`${name} = ${value}  (${outOf(await post('/api/setparam1', { name, value })) || 'ok'})`);
   };
-  const submitServiceCall = (name, req) => {
-    const act = actionFor(ver, 'service', name, req);
-    if (act && act.cmd) { setStatus(`call ${name} …`); run(act.cmd, (o) => setStatus(`${name}: ${o}`)); }
+  const submitServiceCall = async (name, req) => {
+    setStatus(`call ${name} …`);
+    setStatus(`${name}: ${outOf(await post('/api/service', { name, req })) || '(응답 없음)'}`);
   };
-  const submitPublish = (name, msg) => {
-    const act = actionFor(ver, 'topic', name, msg);
-    if (act && act.cmd) { setStatus(`pub ${name} …`); run(act.cmd, (o) => setStatus(`${name}: ${o}`)); }
+  const submitPublish = async (name, msg) => {
+    setStatus(`pub ${name} …`);
+    setStatus(`${name}: ${outOf(await post('/api/publish', { name, msg })) || '(응답 없음)'}`);
   };
-  // 액션 goal 전송 — 피드백/결과는 Job 로그로 스트리밍.
-  const submitActionGoal = (name, goal) => {
+  // 액션 goal 전송 — 백엔드가 잡으로 실행하고, 피드백/결과는 잡 로그에 쌓인다.
+  const submitActionGoal = async (name, goal) => {
     const it = actionItems.find((a) => a.name === name);
     const ty = it && it.ty;
     if (!ty) { setStatus(`${name}: 액션 타입 미상`); return; }
-    spawnJob(`action ${name}`, `ros2 action send_goal ${shq(name)} ${shq(ty)} ${shq(goal)} --feedback 2>&1`);
+    await post('/api/action', { name, type: ty, goal });
     setStatus(`▶ action goal → ${name} (J 에서 피드백)`);
   };
   const submitEdit = (kind, name, value) => (
@@ -274,18 +292,14 @@ export function StoreProvider({ children }) {
       : kind === 'topic' ? submitPublish(name, value)
         : kind === 'action' ? submitActionGoal(name, value)
           : submitSet(name, value));
-  // 필드 선택 오버레이 — target 'plot'(matplotlib) 또는 'watch'(워치리스트 핀)
-  const openFieldPicker = (target) => {
+  // 필드 선택 오버레이 — 워치리스트 핀 전용(플롯은 웹 PlotLab 으로 일원화, TUI 에선 제거).
+  const openFieldPicker = () => {
     if (!active || active.kind !== 'topic') { setStatus('토픽을 선택하세요'); return; }
-    if (target === 'plot' && !process.env.DISPLAY && process.platform === 'linux') {
-      setStatus('플롯: $DISPLAY 없음 — GUI(matplotlib) 표시 불가'); return;
-    }
     const fields = numericFields(echo);
     if (!fields.length) { setStatus('숫자 필드 없음(메시지 수신 대기 중일 수 있음)'); return; }
     setWatchOpen(false);
-    setPlotPick({ fields, idx: 0, target });
+    setPlotPick({ fields, idx: 0, target: 'watch' });
   };
-  const doPlot = () => openFieldPicker('plot');
   const addWatch = (topic, fields) => {
     setWatches((ws) => {
       const next = [...ws];
@@ -295,51 +309,30 @@ export function StoreProvider({ children }) {
     setStatus(`👁 watch +${fields.length}`);
   };
   const removeWatch = (i) => setWatches((ws) => ws.filter((_, j) => j !== i));
-  // fields: 문자열 또는 배열. mode: 'time'(원값/미분·적분/FFT, 다중=오버레이) | 'xy'(2필드 산점도+선형회귀)
-  const launchPlot = (fields, mode = 'time') => {
-    const fl = Array.isArray(fields) ? fields : [fields];
-    const title = `${active.name} / ${fl.join(', ')}${mode === 'xy' ? ' (xy)' : ''}`;
-    const fieldArgs = fl.map((f) => `--field ${shq(f)}`).join(' ');
-    const cmd = `${echoFullCmd(ver, active.name)} | python3 ${shq(PLOT_PY)} ${fieldArgs} --mode ${mode} --title ${shq(title)}`;
-    spawnJob(`plot ${mode}: ${fl.join(',')}`, cmd);
-    setStatus(`📈 plot ${mode}: ${fl.join(', ')}`);
-  };
-  const actHint = active ? ((actionFor(ver, active.kind, active.name) || {}).label || '') : '';
+  const actHint = active ? (ACT_LABEL[active.kind] || '') : '';
 
   const move = (d) => {
     const ns = clamp(dsel + d, 0, Math.max(0, n - 1));
     setSel(ns);
     setTop((t) => { let nt = clamp(t, 0, maxTop); if (ns < nt) nt = ns; else if (ns >= nt + VISIBLE) nt = ns - VISIBLE + 1; return nt; });
   };
-  // ── 작업(Jobs) 레지스트리 — RDash 가 띄운 프로세스를 추적/조회/종료 ──────────────
-  const spawnJob = (label, cmd) => {
+  // ── 작업(Jobs) — 이제 백엔드가 소유한다. TUI 가 죽어도 살아있고 웹 UI 와 같은 목록을 본다.
+  // 여기선 실행 요청만 하고, 상태/로그는 위의 1초 폴링(/api/jobs)이 채운다.
+  const runJob = async (label, cmd) => {
     lastCmdRef.current = cmd;               // 북마크 자동채움용
     historyRef.current = pushHistory(cmd);  // 히스토리 누적
-    const id = ++jobSeqRef.current;
-    const child = rosSpawn(cmd, undefined, true);   // detached=새 그룹 → 파이프라인째 종료 가능
-    const lines = []; jobLogsRef.current.set(id, lines);
-    const push = (s) => { for (const ln of String(s).split('\n')) { if (ln !== '') { lines.push(ln); if (lines.length > 300) lines.shift(); } } };
-    if (child.stdout) child.stdout.on('data', (d) => push(d.toString()));
-    if (child.stderr) child.stderr.on('data', (d) => push(d.toString()));
-    child.on('close', (code) => setJobs((js) => js.map((j) => (j.id === id ? { ...j, status: 'done', code } : j))));
-    child.on('error', () => { push('(실행 오류)'); setJobs((js) => js.map((j) => (j.id === id ? { ...j, status: 'error' } : j))); });
-    setJobs((js) => [...js, { id, label, pid: child.pid, status: 'run', child }]);
-    return id;
+    const j = await post('/api/job', { cmd, label });
+    return j && j.id;
   };
-  // SIGKILL 요청은 곧바로 쏘지 않는다 — roslaunch 가 죽으면 노드들이 고아로 남는다. SIGINT 후 유예.
-  const killJob = (id, sig = 'SIGINT') => {
-    const j = jobsRef.current.find((x) => x.id === id);
-    if (!j) return;
-    if (sig === 'SIGKILL') killTreeHard(j.child); else killTree(j.child, sig);
-  };
-  const removeJob = (id) => { jobLogsRef.current.delete(id); setJobs((js) => js.filter((j) => j.id !== id)); };
-  const killAllJobs = () => { for (const j of jobsRef.current) killTree(j.child, 'SIGTERM'); };
+  const killJob = (id) => { post(`/api/job/${id}/kill`); };
+  // 백엔드엔 "끝난 잡 지우기" API 가 없다 → 목록에서만 숨긴다(폴링이 다시 넣지 않도록 기억).
+  const removeJob = (id) => { hiddenJobsRef.current.add(id); jobLogsRef.current.delete(id); setJobs((js) => js.filter((j) => j.id !== id)); };
 
   const cycleHz = () => setHzMode((m) => HZ_MODES[(HZ_MODES.indexOf(m) + 1) % HZ_MODES.length]);
   // ── 북마크(명령 단축) ──────────────────────────────────────────────────────
   const runBookmark = (bm) => {
     if (!bm || !bm.cmd) return;
-    spawnJob(bm.name || bm.cmd, bm.cmd);               // 작업으로 추적 → J 에서 조회/종료
+    runJob(bm.name || bm.cmd, bm.cmd);                 // 백엔드 잡으로 실행 → J 에서 조회/종료
     setStatus(`▶ ${bm.name} (J 로 확인)`);
   };
   const runBookmarkKey = (ch) => {
@@ -383,21 +376,16 @@ export function StoreProvider({ children }) {
     return '';
   };
   const bmSeedCmd = () => lastCmdRef.current || scaffoldCmd();
-  // ── 정보 오버레이(연결/리소스/TF) — 명령 실행 결과를 스크롤 표시, 선택적 주기 갱신 ──
-  const openInfo = (title, cmd, refreshMs) => {
+  // ── 정보 오버레이(연결/리소스/TF) — API 조회 결과를 스크롤 표시, 선택적 주기 갱신 ──
+  // fetcher: async () => string. 명령 문자열이 아니라 API 호출 함수를 받는다.
+  const openInfo = (title, fetcher, refreshMs) => {
     clearTimeout(infoRef.current.timer);
     infoRef.current.alive = true;
-    const run = () => {
-      const p = rosSpawn(cmd);
-      let out = '';
-      if (p.stderr) p.stderr.on('data', () => {});
-      p.stdout.on('data', (d) => { out += d.toString(); });
-      p.on('close', () => {
-        if (!infoRef.current.alive) return;
-        setInfoView((v) => v && ({ ...v, lines: (out.trim() || '(빈 값)').split('\n') }));
-        if (refreshMs) infoRef.current.timer = setTimeout(run, refreshMs);
-      });
-      p.on('error', () => setInfoView((v) => v && ({ ...v, lines: ['(오류)'] })));
+    const run = async () => {
+      const out = await fetcher();
+      if (!infoRef.current.alive) return;
+      setInfoView((v) => v && ({ ...v, lines: (String(out).trim() || '(빈 값)').split('\n') }));
+      if (refreshMs && infoRef.current.alive) infoRef.current.timer = setTimeout(run, refreshMs);
     };
     setInfoView({ title, lines: ['(조회 중…)'], top: 0 });
     run();
@@ -405,21 +393,23 @@ export function StoreProvider({ children }) {
   const closeInfo = () => { infoRef.current.alive = false; clearTimeout(infoRef.current.timer); setInfoView(null); };
   const openConnections = () => {
     if (!active) { setStatus('선택 항목 없음 (Enter 로 선택)'); return; }
-    openInfo(`🔗 ${active.name} [${active.kind}]`, be.connections(active.kind, active.name));
+    const { kind, name } = active;
+    openInfo(`🔗 ${name} [${kind}]`, async () => outOf(await api(`/api/connections?kind=${kind}&name=${encodeURIComponent(name)}`)));
   };
   const openResource = () => {
     const nodes = fullList.filter((i) => i.kind === 'node').map((i) => i.name);
     if (!nodes.length) { setStatus('노드 없음'); return; }
-    openInfo('📊 node resources (CPU%/RSS)', be.resource(nodes), 2000);   // 2초마다 갱신
+    openInfo('📊 node resources (CPU%/RSS)', async () => outOf(await post('/api/resource', { nodes })), 2000);   // 2초마다 갱신
   };
-  const openTf = () => openInfo('🌳 TF tree (/tf 수집 중, ~3s)', be.tfTree());
+  const openTf = () => openInfo('🌳 TF tree (/tf 수집 중, ~3s)', async () => outOf(await api('/api/tftree')));
   // 노드 그래프 — 선택이 노드면 그 노드 중심, 아니면 전체 엣지.
   const graphFocusName = active && active.kind === 'node' ? active.name : null;
   const openGraph = () => setGraphOpen({ focus: graphFocusName, top: 0 });
   // 메시지 정의(타입 구조) — 선택 토픽/서비스의 필드.
   const openMsgDef = () => {
     if (!active || !active.ty) { setStatus('타입 있는 토픽을 선택하세요'); return; }
-    openInfo(`📄 ${active.ty}`, be.msgDef(active.ty));
+    const ty = active.ty;
+    openInfo(`📄 ${ty}`, async () => outOf(await api(`/api/msgdef?type=${encodeURIComponent(ty)}`)));
   };
   // QoS 뷰 — 선택 토픽만. 엣지(pubs/subs 의 reliability/durability)에서 계산.
   const openLog = () => setLogOpen({ min: 20, top: null, text: '', typing: false });
@@ -432,16 +422,18 @@ export function StoreProvider({ children }) {
     const node = active.name;
     setParamPanel({ node, rows: null, idx: 0, edit: null });
     setStatus(`⚙ ${node} 파라미터 조회 중…`);
-    runText(be.paramList(node), (out) => {
-      const rows = out.split('\n').filter(Boolean).map((l) => { const i = l.indexOf('\t'); return { name: i < 0 ? l : l.slice(0, i), value: (i < 0 ? '' : l.slice(i + 1)).trim() }; });
+    api(`/api/param/list?node=${encodeURIComponent(node)}`).then((o) => {
+      const rows = (o && o.rows) || [];
       setParamPanel((p) => (p && p.node === node ? { ...p, rows } : p));
     });
   };
-  const refreshParam = (node, name) => runText(be.paramGet(node, name), (nv) =>
-    setParamPanel((p) => (p && p.node === node ? { ...p, rows: (p.rows || []).map((r) => (r.name === name ? { ...r, value: nv.trim() } : r)) } : p)));
-  const setParam = (node, name, val) => {
+  // /api/param/set 이 설정 후 읽어온 값을 그대로 돌려주므로 따로 재조회하지 않는다.
+  const setParam = async (node, name, val) => {
     setStatus(`set ${name} = ${val} …`);
-    run(be.paramSet(node, name, val), (o) => { setStatus(`${name} = ${val}  (${o})`); refreshParam(node, name); });
+    const o = await post('/api/param/set', { node, name, value: val });
+    const nv = (o && typeof o.value === 'string') ? o.value.trim() : String(val);
+    setStatus(`${name} = ${nv}`);
+    setParamPanel((p) => (p && p.node === node ? { ...p, rows: (p.rows || []).map((r) => (r.name === name ? { ...r, value: nv } : r)) } : p));
   };
   const openQos = () => {
     if (!active || active.kind !== 'topic') { setStatus('토픽을 선택하세요'); return; }
@@ -457,21 +449,23 @@ export function StoreProvider({ children }) {
   };
   const submitTfEcho = (src, tgt) => {
     if (!src.trim() || !tgt.trim()) { setStatus('두 프레임 필요'); return; }
-    openInfo(`🧭 tf ${src} → ${tgt}`, be.tfEcho(src.trim(), tgt.trim()), 1500);   // 1.5s 주기 갱신
+    const s = src.trim(), t = tgt.trim();
+    openInfo(`🧭 tf ${s} → ${t}`, async () => outOf(await api(`/api/tfecho?src=${encodeURIComponent(s)}&tgt=${encodeURIComponent(t)}`)), 1500);   // 1.5s 주기 갱신
   };
   const submitBagCompare = (a, b) => {
     if (!a.trim() || !b.trim()) { setStatus('두 bag 경로 필요'); return; }
-    openInfo(`🔀 bag A/B  ${a} ↔ ${b}`, be.bagCompare(a.trim(), b.trim()));
+    const x = a.trim(), y = b.trim();
+    openInfo(`🔀 bag A/B  ${x} ↔ ${y}`, async () => outOf(await api(`/api/bagcompare?a=${encodeURIComponent(x)}&b=${encodeURIComponent(y)}`)));
   };
-  // ── rosbag 녹화/재생 ───────────────────────────────────────────────────────
-  const toggleRec = () => {
-    if (rec) { killJob(rec.id, 'SIGINT'); setRec(null); setStatus('■ 녹화 정지'); return; }
-    // 우선순위: 표시(marked) 토픽 > 필터 결과 > 전체(-a).
-    const recTopics = marked.size ? [...marked] : (filt ? list.filter((i) => i.kind === 'topic').map((i) => i.name) : null);
-    const out = `rdash_rec_${Date.now()}`;
-    const id = spawnJob(`rosbag rec → ${out}`, be.bagRecord(recTopics, out));
-    setRec({ id, out, started: Date.now(), n: recTopics ? recTopics.length : 0 });
-    setStatus(`● 녹화: ${recTopics ? recTopics.length + ' 토픽' + (marked.size ? '(표시)' : '(필터)') : '전체 -a'} → ${out}`);
+  // ── rosbag 녹화/재생 — 백엔드 잡으로. 파일도 백엔드 호스트에 떨어진다. ────────────
+  const toggleRec = async () => {
+    if (rec) { killJob(rec.id); setRec(null); setStatus('■ 녹화 정지'); return; }
+    // 우선순위: 표시(marked) 토픽 > 필터 결과 > 전체.
+    const recTopics = marked.size ? [...marked] : (filt ? list.filter((i) => i.kind === 'topic').map((i) => i.name) : []);
+    const j = await post('/api/record', { topics: recTopics });
+    if (!j || !j.id) { setStatus('녹화 시작 실패'); return; }
+    setRec({ id: j.id, out: j.label, started: Date.now(), n: recTopics.length });
+    setStatus(`● 녹화: ${recTopics.length ? recTopics.length + ' 토픽' + (marked.size ? '(표시)' : '(필터)') : '전체'} → ${j.label}`);
   };
   // 토픽 표시 토글(멀티선택) — 선택 행이 토픽일 때.
   const toggleMark = () => {
@@ -481,13 +475,16 @@ export function StoreProvider({ children }) {
   };
   const clearMarks = () => setMarked(new Set());
   // 스냅샷 — 표시(또는 선택) 토픽의 현재 값 1개씩을 파일로 덤프(버그리포트용).
+  // 스냅샷/트리거는 셸 한 줄이면 되는 일이라 전용 라우트를 만들지 않고 백엔드 잡으로 던진다(/api/job).
+  const snapCmd = (sel, out) => {
+    const echo1 = (t) => (ver === '2' ? `timeout 2 ros2 topic echo --once ${shq(t)}` : `timeout 2 rostopic echo -n1 ${shq(t)}`);
+    return sel.map((t) => `echo '=== ${t} ==='; ${echo1(t)}`).join('; ') + ` > ${shq(out)} 2>&1`;
+  };
   const snapshot = () => {
     const sel = marked.size ? [...marked] : (active && active.kind === 'topic' ? [active.name] : []);
     if (!sel.length) { setStatus('스냅샷: 토픽을 . 로 표시하거나 선택하세요'); return; }
     const out = `rdash_snapshot_${Date.now()}.txt`;
-    const echo1 = (t) => (ver === '2' ? `timeout 2 ros2 topic echo --once ${shq(t)}` : `timeout 2 rostopic echo -n1 ${shq(t)}`);
-    const cmd = sel.map((t) => `echo '=== ${t} ==='; ${echo1(t)}`).join('; ') + ` > ${shq(out)} 2>&1`;
-    spawnJob(`snapshot → ${out}`, cmd);
+    runJob(`snapshot → ${out}`, snapCmd(sel, out));
     setStatus(`📸 snapshot: ${sel.length} 토픽 → ${out} (J 에서 확인)`);
   };
   // 라이프사이클(ROS2 managed node) — 전환 선택.
@@ -496,22 +493,13 @@ export function StoreProvider({ children }) {
     if (!active || active.kind !== 'node') { setStatus('노드를 선택하세요'); return; }
     setLifeOpen({ node: active.name, idx: 0 });
   };
-  const runLifecycle = (node, transition) => {
-    run(be.lifecycle(node, transition), (o) => setStatus(`lifecycle ${transition}: ${o}`));
+  const runLifecycle = async (node, transition) => {
+    setStatus(`lifecycle ${transition}: ${outOf(await post('/api/lifecycle', { node, transition })) || '(응답 없음)'}`);
   };
-  // Teleop — geometry_msgs/Twist 를 하나의 지속 퍼블리셔(-r 10 Hz)로. 방향 바뀔 때만 재기동, 정지 시 0 트위스트.
-  const teleopChildRef = useRef(null);
-  const teleopKill = () => { if (teleopChildRef.current) { try { killTree(teleopChildRef.current, 'SIGINT'); } catch { /* */ } teleopChildRef.current = null; } };
-  const teleopStop = (topic) => {
-    teleopKill();
-    const cmd = be.publish(topic, '{linear: {x: 0.0, y: 0.0, z: 0.0}, angular: {x: 0.0, y: 0.0, z: 0.0}}');
-    if (cmd) runAction(cmd, () => {});   // 0 트위스트 1회
-  };
-  const teleopDrive = (topic, lin, ang) => {
-    teleopKill();
-    teleopChildRef.current = rosSpawn(be.teleop(topic, lin, ang), undefined, true);
-    teleopChildRef.current.on('error', () => {});
-  };
+  // Teleop — 백엔드가 지속 퍼블리셔를 하나 들고 있다(상태 있음). 한 번 POST 하면 계속 발행하므로
+  // 타이머로 재전송하지 않는다. 정지는 stop:true 한 번.
+  const teleopStop = (topic) => { post('/api/teleop', { topic, stop: true }); };
+  const teleopDrive = (topic, lin, ang) => { post('/api/teleop', { topic, lin, ang }); };
   const openTeleop = () => setTeleopOpen({ topic: '/cmd_vel', lin: 0.5, ang: 1.0, dir: 'stop' });
   const openDoctor = () => setDoctorOpen({ idx: 0 });
   const openBaseline = () => setBaselineOpen({ idx: 0 });
@@ -523,22 +511,21 @@ export function StoreProvider({ children }) {
   const submitBagPlay = (path) => {
     const s = String(path).trim();
     if (!s) return;
-    spawnJob(`rosbag play ${s}`, be.bagPlay(s));
+    post('/api/play', { path: s });
     setStatus(`▶ play: ${s}`);
-  };
-  const submitDomain = (v) => {
-    const s = String(v).trim();
-    setDomain(s === '' ? null : s);
-    setStatus(`ROS_DOMAIN_ID = ${s || '(unset)'} — 재연결`);
   };
   const quit = () => {
     try { saveSession({ expanded: [...expanded], watches, hzMode, treeHidden, activePath: active && active.p }); } catch { /* */ }
     try { mouse.disable(); } catch { /* */ }
-    killAllJobs(); exit();
+    // 잡은 백엔드 것이라 죽이지 않는다(웹에서 계속 보고, TUI 를 다시 켜면 그대로 보인다).
+    // 다만 teleop 지속 퍼블리셔와 로컬 플롯 창은 우리가 켠 것이니 정리한다.
+    if (teleopOpen) teleopStop(teleopOpen.topic);
+
+    exit();
   };
 
-  // 종료(언마운트) 시 모든 작업 정리
-  useEffect(() => () => { killAllJobs(); teleopKill(); }, []);
+  // 종료(언마운트) 시 로컬 자원만 정리 — 백엔드 잡은 그대로 살려둔다.
+  
 
   // 🔴 트리거 감시 — 무장 상태에서 그래프 ERROR 감지 시 자동 스냅샷(쿨다운). fullList 갱신마다 폴링.
   useEffect(() => {
@@ -549,9 +536,7 @@ export function StoreProvider({ children }) {
       trigRef.current.last = now;
       const sel = marked.size ? [...marked] : fullList.filter((i) => i.kind === 'topic' && !i.name.includes('/_action/')).slice(0, 8).map((i) => i.name);
       const out = `rdash_trig_${now}.txt`;
-      const echo1 = (t) => (ver === '2' ? `timeout 2 ros2 topic echo --once ${shq(t)}` : `timeout 2 rostopic echo -n1 ${shq(t)}`);
-      const cmd = sel.map((t) => `echo '=== ${t} ==='; ${echo1(t)}`).join('; ') + ` > ${shq(out)} 2>&1`;
-      spawnJob(`🔴 trigger(${errs[0].target}) → ${out}`, cmd);
+      runJob(`🔴 trigger(${errs[0].target}) → ${out}`, snapCmd(sel, out));
       setStatus(`🔴 트리거 발동: ${errs[0].target} — 스냅샷 ${sel.length}토픽 → ${out} (J 확인)`);
     }
   }, [fullList, triggerArmed]);
@@ -605,7 +590,7 @@ export function StoreProvider({ children }) {
     sel: dsel, top: dtop, n, maxTop, flat, list, VISIBLE, LW, RW, rightW, hoverIdx,
     expanded, active, echo, bw, activeHz, activeAge, valTop, valMaxRef, frozen, renderHz,
     edit, searching, filter, plotPick, status, actHint, hzHistRef, listRef,
-    hzMode, domain, domainEdit, env: rosEnv(ver, domain),
+    hzMode, domainEdit, env,   // env = 백엔드가 붙어 있는 ROS 환경(GET /api/env). 우리 process.env 가 아니다.
     bookmarks, preset, bmOpen, bmAdd, infoView, rec, bagPlay, tfEcho, bagCmp, jobs, jobsOpen, jobLogsRef,
     treeHidden, help, watches, watchOpen, preflight, preflightOpen, pubForm, pkgNames, graphOpen, graphFocusName, qosOpen, logOpen, paramPanel, overviewOpen, diagOpen, lifeOpen, teleopOpen, doctorOpen, baselineOpen, baseline, triggerArmed, allItems: fullList, marked,
     setSel, setTop, setValTop, setExpanded, setActive, setEdit, setSearching, setPubForm, submitPubForm,
@@ -616,8 +601,8 @@ export function StoreProvider({ children }) {
     setBmOpen, setBmAdd, setInfoView, setBagPlay, setJobsOpen, setHelp, setWatchOpen, setTfEcho, setPreflightOpen, setBagCmp,
     openFieldPicker, addWatch, removeWatch, submitTfEcho, submitBagCompare,
     toggleTree: () => setTreeHidden((v) => !v),
-    activate, move, doAction, doRestart, submitSet, submitEdit, doPlot, launchPlot, quit,
-    cycleHz, submitDomain, runBookmark, runBookmarkKey, cyclePreset, addBookmark, deleteBookmark, updateBookmark, bmSeedCmd,
+    activate, move, doAction, doRestart, submitSet, submitEdit, quit,
+    cycleHz, runBookmark, runBookmarkKey, cyclePreset, addBookmark, deleteBookmark, updateBookmark, bmSeedCmd,
     history: historyRef.current,
     openConnections, openResource, openTf, closeInfo, toggleRec, submitBagPlay,
     killJob, removeJob,

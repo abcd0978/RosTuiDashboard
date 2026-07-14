@@ -1,12 +1,12 @@
-// 플롯(plot.py)에 필요한 파이썬 패키지 자동 설치 — 시작 시 없는 것만 pip 로 설치한다.
+// 파이썬 브리지(이미지·포인트클라우드·bag·tf)가 쓰는 패키지 자동 설치 — 시작 시 없는 것만 pip 로.
 // 대체 화면 진입 전에 호출(설치 로그가 TUI 위에 찍히지 않도록). 실패해도 TUI 는 계속 뜬다
-// (plot.py 가 import 를 방어하므로 플롯만 비활성).
+// (브리지가 import 를 방어하므로 해당 패널만 비활성).
 //   끄기: RDASH_NO_AUTOPIP=1 · 파이썬 지정: RDASH_PYTHON=python3.10
 import { execFileSync } from 'child_process';
 import { readSync } from 'fs';
 
 // [import 이름, pip 이름] — requirements.txt 와 동일 목록(이름 매핑만 다름: yaml↔PyYAML).
-const MODS = [['numpy', 'numpy'], ['matplotlib', 'matplotlib'], ['yaml', 'PyYAML']];
+const MODS = [['numpy', 'numpy'], ['yaml', 'PyYAML']];
 
 // 설치 로그를 사용자가 확인한 뒤 TUI 로 넘어가도록 Enter 대기(대체 화면 진입 전).
 function waitForEnter() {

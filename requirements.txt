@@ -1,9 +1,10 @@
-# RDash 플롯(plot.py)용 파이썬 패키지. index.js 실행 시 없으면 자동 설치를 시도한다.
+# RDash 파이썬 브리지용 패키지. index.js 실행 시 없으면 자동 설치를 시도한다.
 #   수동 설치:  pip install -r requirements.txt
 #   자동 설치 끄기:  RDASH_NO_AUTOPIP=1
 #
-# 참고: 텔레메트리(telemetry*.py)는 rospy/rclpy 등 ROS 배포판이 제공하는 패키지를 쓰므로
-#       여기(pip)에 넣지 않는다. 아래는 순수 pip 설치 대상만.
+# numpy  — img_bridge(이미지 인코딩) / cloud_bridge(PointCloud2 → float32)
+# PyYAML — bag_dump / tf_tree
+#
+# 참고: 텔레메트리·브리지의 ROS 부분(rospy/rclpy)은 ROS 배포판이 제공하므로 여기(pip)에 넣지 않는다.
 numpy
-matplotlib
 PyYAML

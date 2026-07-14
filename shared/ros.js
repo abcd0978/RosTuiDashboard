@@ -77,7 +77,7 @@ export const infoCmd = (ver, kind, name) => ver === '2'
       : kind === 'node' ? `rosnode info '${name}' 2>&1`
         : `rostopic info '${name}' 2>&1`);
 
-// 전체 메시지 echo(YAML) — 플롯용. plot.py 가 stdin 에서 필드를 뽑아 그린다.
+// 전체 메시지 echo(YAML).
 export const echoFullCmd = (ver, name) => ver === '2'
   ? `stdbuf -oL ros2 topic echo '${name}'`
   : `stdbuf -oL rostopic echo '${name}'`;

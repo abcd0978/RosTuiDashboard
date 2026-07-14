@@ -1,4 +1,5 @@
 // 라우팅 — 경로별 HTTP 핸들러(SSE 스트림 + JSON 액션). server.js 의 http.createServer 에 연결된다.
+import { hostname } from 'os';
 import { loadPreflight } from '../shared/preflight.js';
 import { flattenSkeleton, buildYaml } from '../shared/msgform.js';
 import { loadBookmarks, saveBookmarks, activePreset, presetNames, savePreset } from '../shared/bookmarks.js';
@@ -17,6 +18,19 @@ export async function router(req, res) {
   try {
     if (p === '/' || p === '/index.html') return serveFile(res, 'index.html');
     if (p === '/api/ver') return json(res, 200, { ver: VER });
+    // 백엔드가 실제로 붙어 있는 ROS 환경. 클라이언트(TUI/웹)의 process.env 는 ROS 와 무관하므로
+    // 반드시 여기서 받아야 한다 — 클라이언트가 자기 env 를 읽으면 엉뚱한 값을 보여준다.
+    if (p === '/api/env') {
+      return json(res, 200, {
+        ver: VER,
+        backend: be.kind,                                        // cli | rcl | rosbridge
+        url: be.url || '',                                       // rosbridge 일 때의 websocket 주소
+        host: hostname(),
+        domain: process.env.ROS_DOMAIN_ID || '0',                // ROS2 전용(DDS 논리 분리). ROS1 에선 의미 없음
+        rmw: (process.env.RMW_IMPLEMENTATION || 'default').replace('rmw_', '').replace('_cpp', ''),
+        master: process.env.ROS_MASTER_URI || '',                // ROS1 전용
+      });
+    }
     if (p === '/api/preflight') return json(res, 200, { checks: loadPreflight() });
     if (p === '/api/graph') {   // 타임아웃 시 마지막 정상 스냅샷 재사용
       const unavailable = rbRequired(res);
@@ -43,14 +57,16 @@ export async function router(req, res) {
 
     // 조회(one-shot)
     if (p === '/api/msgdef') return json(res, 200, { out: await runOnce(be.msgDef(q.get('type'))) });
-    if (p === '/api/proto') {   // 발행 폼 프리필: 타입 스켈레톤 → flow-style YAML 한 줄 (TUI 와 동일)
+    if (p === '/api/proto') {   // 발행 폼 프리필: 타입 스켈레톤 → flow-style YAML 한 줄 + 스켈레톤 자체
+      // 웹은 yaml 만 쓰지만(textarea 프리필), TUI 는 필드별 입력 폼을 그리므로 skel 이 필요하다.
       const cmd = be.proto(q.get('name'), q.get('type'));
-      if (!cmd) return json(res, 200, { yaml: '{}' });
+      if (!cmd) return json(res, 200, { yaml: '{}', skel: null, type: '' });
       try {
-        const skel = JSON.parse((await runOnce(cmd)).trim() || '{}').skel || {};
-        return json(res, 200, { yaml: buildYaml(flattenSkeleton(skel)) || '{}' });
+        const parsed = JSON.parse((await runOnce(cmd)).trim() || '{}');
+        const skel = parsed.skel || {};
+        return json(res, 200, { yaml: buildYaml(flattenSkeleton(skel)) || '{}', skel, type: parsed.type || '' });
       } catch {
-        return json(res, 200, { yaml: '{}' });
+        return json(res, 200, { yaml: '{}', skel: null, type: '' });
       }
     }
     if (p === '/api/bagdump') {

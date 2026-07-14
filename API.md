@@ -150,9 +150,10 @@ you no longer need — each one is a live ROS subscription or a child process.
 | path | params | response |
 |---|---|---|
 | `/api/ver` | — | `{"ver":"1"\|"2"}` — the ROS major version the backend detected |
+| `/api/env` | — | The ROS environment **the backend is actually attached to** — see below |
 | `/api/graph` | — | one snapshot `{items:[…]}` **[RB]**; falls back to the last good snapshot on timeout |
 | `/api/msgdef` | `type` | `{"out": "<message definition text>"}` |
-| `/api/proto` | `name`, `type` | `{"yaml": "{linear: {x: 0}, …}"}` — a one-line flow-YAML skeleton to prefill a publish form. Always returns something (`"{}"` if it can't build one). |
+| `/api/proto` | `name`, `type` | `{"yaml": "{linear: {x: 0}, …}", "skel": {…}\|null, "type": "geometry_msgs/Twist"}` — publish-form prefill. `yaml` is a one-line flow-YAML you can drop straight into a text box. `skel` is the raw message skeleton (nested object of default values) for clients that render a **field-by-field** form instead. Always returns something (`yaml:"{}"`, `skel:null` if it can't build one). |
 | `/api/connections` | `kind`=`topic`\|`service`\|`node`, `name` | `{"out": "<text>"}` **[RB]** — `topic`: type + publishers + subscribers (this is what `rostopic info` shows). `service`: type + providers. `node`: node details JSON. |
 | `/api/tftree` | — | `{"out": "<frame tree text>"}` |
 | `/api/tfecho` | `src`, `tgt` | `{"out": "<transform text>"}` |
@@ -166,6 +167,27 @@ you no longer need — each one is a live ROS subscription or a child process.
 | `/api/bookmarks` | — | `{"bookmarks":[…], "preset":"<name>", "presets":["…"]}` |
 
 `/api/resource` is **POST** (body `{"nodes":["/a","/b"]}`) → `{"out":"<CPU/RSS/threads table>"}`.
+
+### `/api/env` — never read your own `process.env`
+
+```jsonc
+{ "ver": "1",                       // ROS major version
+  "backend": "rosbridge",           // cli | rcl | rosbridge — how the backend reaches ROS
+  "url": "ws://localhost:9090",     // rosbridge endpoint (empty for cli/rcl)
+  "host": "superpx4",               // the machine the BACKEND runs on
+  "domain": "0",                    // ROS_DOMAIN_ID — ROS2 only (DDS discovery partition). Meaningless on ROS1.
+  "rmw": "default",                 // RMW implementation — ROS2 only
+  "master": "http://localhost:11311" }  // ROS_MASTER_URI — ROS1 only
+```
+
+A client's own environment says **nothing** about ROS — only the backend is attached to it.
+A TUI reading `process.env.ROS_DOMAIN_ID` is reading its own shell, not the robot's. Always
+display these values, and label them as the backend's.
+
+**There is no way to switch the domain from a client, and none is planned.** `ROS_DOMAIN_ID` is
+a property of the backend's ROS connection; changing it means restarting that connection
+(and rosbridge with it). Set it in the backend's environment before starting it. There is also
+no way to *enumerate* domains — DDS does not expose a list; you can only report the one in use.
 
 ---
 

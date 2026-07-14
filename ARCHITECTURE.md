@@ -509,24 +509,36 @@ browsers can't resolve bare specifiers), and half of this code — WebGL, canvas
 plots, the SVG force layout, binary pointcloud decode — is inherently imperative
 and would keep living behind refs anyway.
 
-### Backend split: the TUI and the web do NOT share a data source
+### One backend, two front ends
 
-This surprises everyone, so it is worth stating plainly:
+**The TUI and the browser are both clients of `backend/`.** Neither touches ROS.
+The contract they speak is written down in **`API.md`** — that file, not the server
+source, is the spec. It was verified by firing every documented route at a live
+backend and diffing the response shapes.
 
-| | data source | set by |
-|---|---|---|
-| TUI | **ROS CLI** — spawns `rostopic`/`rosnode`/`python3 telemetry.py` | `RDASH_TUI_BACKEND=cli` (forced in `index.js`) |
-| Web | **rosbridge** websocket :9090 | `RDASH_BACKEND=rosbridge` (forced for the child in `index.js`) |
+```
+frontend/tui/  ─┐
+                ├─ HTTP + /ws ─▶ backend/ ─▶ rosbridge :9090 ─▶ ROS
+frontend/web/  ─┘
+```
 
-The TUI cannot currently use rosbridge: `store.js` executes every ROS action as a
-*command string* → `spawnJob`/`runOnce`, and `RosbridgeBackend` extends
-`CliBackend`, so its `publish()` still returns a CLI string. The real rosbridge
-client wiring lives only in `backend/telemetry.js`. Unifying the two (so the TUI
-can attach to a remote robot with no ROS CLI, and publish/teleop drops from a
-multi-second process respawn to ~0.2 ms) is the outstanding work tracked in
-`ROSBRIDGE_TUI_TODO.md`. Note that local-only features (node CPU/RSS, rosbag
-record, process kill) have no meaning over a remote rosbridge and must be disabled
-in that mode.
+The TUI used to spawn `rostopic`/`rosnode`/`python3 telemetry.py` itself. Now
+`frontend/tui/lib/api.js` is its only door to ROS: `fetch` for JSON routes, the `/ws`
+multiplex for streams. Consequences worth knowing:
+
+- **Jobs are server-owned.** rosbag recordings, action goals and bookmarked commands
+  outlive the TUI and are visible from the browser — the same job list. Quitting the
+  TUI no longer kills them (it used to).
+- **`ROS_DOMAIN_ID` / `ROS_MASTER_URI` belong to the backend.** A client reading its
+  own `process.env` is reading its own shell, not the robot. `GET /api/env` reports
+  the real thing; the TUI's `D` key now *displays* it and cannot change it.
+- **The Hz policy (`h`) is a `POST /api/measure`,** not a temp file. `all` on a large
+  graph means the backend subscribes to every topic through rosbridge — see the
+  telemetry section for why that is expensive.
+- **The matplotlib plotter is gone from the TUI** (the browser's PlotLab covers it).
+  `plot.py` and the `matplotlib` dependency went with it.
+- Local-only work (node CPU/RSS, rosbag, process kill, arbitrary commands) still
+  happens — on **the backend's** host, which is where you want it: next to the robot.
 
 ## Development & verification
 
