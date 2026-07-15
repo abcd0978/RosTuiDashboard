@@ -4,3 +4,7 @@ node_modules/
 .DS_Store
 HANDOFF.md
 ROBOTICS_ROADMAP.md
+
+# 파이썬 바이트코드
+__pycache__/
+*.pyc
