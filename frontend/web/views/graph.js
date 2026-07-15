@@ -7,6 +7,7 @@ import { renderSidebar } from '../panels/sidebar.js';
 import { renderInfo } from '../panels/info.js';
 import { renderValActs, clearNonTopicSelection, selectTopic } from '../panels/value.js';
 import { openEdgeModal } from './edge.js';
+import { aggregateTopicEdges } from '../lib/graphedges.js';
 
 let G = { ents: new Map(), edges: [] }, pos = new Map(), dragging = null, hoverEdge = null;
 let gspread = 1;                        // 노드 간격 배수(슬라이더로 실시간 조절) — 척력·스프링·충돌 간격에 반영
@@ -71,14 +72,15 @@ export function buildGraph() {
       subs.forEach((s) => edges.push({ from: t.name, to: s, kind: 'sub' }));
     }
   } else {
-    const agg = new Map();
+    // 무방향 쌍으로 집계 — 양방향 통신도 엣지 하나, 방향은 토픽별로(graphedges.js). ent 등록은 여기서.
+    const forAgg = [];
     for (const t of realTopics) {
       const pubs = (t.pubs || []).map(nodeName).filter(keepNode), subs = (t.subs || []).map(nodeName).filter(keepNode);
       pubs.forEach((p) => ent(p, 'node'));
       subs.forEach((s) => ent(s, 'node'));
-      for (const p of pubs) for (const s of subs) { if (p === s) continue; const k = p + '\0' + s; if (!agg.has(k)) agg.set(k, new Set()); agg.get(k).add(t.name); }
+      forAgg.push({ name: t.name, pubNodes: pubs, subNodes: subs });
     }
-    for (const [k, ts] of agg) edges.push({ from: k.split('\0')[0], to: k.split('\0')[1], kind: 'topic', labels: [...ts] });
+    for (const e of aggregateTopicEdges(forAgg)) edges.push(e);
   }
   if (GF.services) for (const i of state.items) if (i.kind === 'service' && (i.server || []).length) {
     ent(i.name, 'service');

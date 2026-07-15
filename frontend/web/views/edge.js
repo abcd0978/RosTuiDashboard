@@ -23,34 +23,48 @@ function qosStr(t, pubNode, subNode) {
 }
 
 function openTopicsModal(e) {
-  const names = e.kind === 'topic' ? e.labels : e.kind === 'pub' ? [e.to] : [e.from];
-  const pubNode = e.kind === 'sub' ? null : e.from;
-  const subNode = e.kind === 'pub' ? null : e.to;
+  // 집계 뷰(kind 'topic')는 from/to 가 방향이 아니라 노드 쌍(사전순)이고, 방향은 토픽별로 e.dirs 에 있다.
+  // 이분 뷰(kind 'pub'/'sub')는 예전처럼 from/to 가 곧 pub/sub 방향이다.
+  const isAgg = e.kind === 'topic';
+  const names = isAgg ? e.labels : e.kind === 'pub' ? [e.to] : [e.from];
+  // 토픽 하나의 실제 pub/sub 노드 + 표시용 화살표. QoS 를 올바른 쪽에서 읽으려면 방향을 되짚어야 한다.
+  const dirOf = (n) => {
+    if (!isAgg) return { pub: e.kind === 'sub' ? null : e.from, sub: e.kind === 'pub' ? null : e.to, arrow: null };
+    const d = e.dirs && e.dirs.get(n);
+    if (d === 'ba') return { pub: e.to, sub: e.from, arrow: `${e.to} → ${e.from}` };
+    if (d === 'both') return { pub: null, sub: null, arrow: `${e.from} ↔ ${e.to}` };
+    return { pub: e.from, sub: e.to, arrow: `${e.from} → ${e.to}` };   // 'ab'(기본)
+  };
   const items = names.map((n) => byName(n));
-  const anyQos = items.some((t) => t && qosStr(t, pubNode, subNode));
-  const cols = anyQos ? 7 : 6;
+  const showDir = isAgg && e.bidir;                                   // 단방향뿐이면 방향 컬럼은 군더더기
+  const anyQos = names.some((n, i) => items[i] && qosStr(items[i], dirOf(n).pub, dirOf(n).sub));
   const tbl = el('table', { class: 'tbl' });
   const head = [el('th', {}, '토픽'), el('th', {}, '타입'), el('th', {}, 'Hz'), el('th', {}, 'age'), el('th', {}, 'pubs'), el('th', {}, 'subs')];
+  if (showDir) head.splice(1, 0, el('th', {}, '방향'));
   if (anyQos) head.push(el('th', {}, 'QoS'));
+  const cols = head.length;
   tbl.append(el('tr', {}, ...head));
   names.forEach((n, i) => {
-    const t = items[i];
+    const t = items[i], dd = dirOf(n);
     if (!t) { tbl.append(el('tr', {}, el('td', { colspan: cols }, n + ' (정보 없음)'))); return; }
-    const cells = [
-      el('td', {}, n),
+    const cells = [el('td', {}, n)];
+    if (showDir) cells.push(el('td', {}, dd.arrow || ''));
+    cells.push(
       el('td', {}, t.ty || '?'),
       el('td', {}, t.hz == null ? '—' : (+t.hz).toFixed(2)),
       el('td', {}, t.age != null ? t.age + 's' : '—'),
       el('td', {}, String((t.pubs || []).length)),
       el('td', {}, String((t.subs || []).length)),
-    ];
-    if (anyQos) cells.push(el('td', {}, qosStr(t, pubNode, subNode) || '—'));
+    );
+    if (anyQos) cells.push(el('td', {}, qosStr(t, dd.pub, dd.sub) || '—'));
     const tr = el('tr', { style: 'cursor:pointer' }, ...cells);
     tr.onclick = () => { selectTopic(n); closeModal(); };
     tbl.append(tr);
   });
   const cnt = names.length > 1 ? ` (${names.length}개 토픽)` : '';
-  openModal(`🔗 ${e.from} → ${e.to}${cnt}`, tbl);
+  // 제목 화살표: 양방향 ↔, 단방향은 실제 흐르는 쪽(사전순 from/to 라 'ba' 뿐이면 ← 로 뒤집어 보여준다).
+  const sym = !isAgg ? '→' : e.bidir ? '↔' : (e.dirs && [...e.dirs.values()][0] === 'ba' ? '←' : '→');
+  openModal(`🔗 ${e.from} ${sym} ${e.to}${cnt}`, tbl);
 }
 
 function openServiceModal(e) {
