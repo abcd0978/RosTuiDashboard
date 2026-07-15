@@ -7,6 +7,7 @@
 // 예전엔 CliBackend / RclNodeBackend / RosbridgeBackend 를 RDASH_BACKEND 로 갈아끼웠지만,
 // /events 와 /echo 가 rosbridge 전용이 되면서 cli·rcl 은 켜도 아무것도 안 나오는 죽은 옵션이 됐다.
 // 지금은 rosbridge 하나뿐이고, rosbridge_suite 가 필수다(없으면 backend/ros.js 가 띄운다).
+import { rosbridgeUrl } from './ports.js';
 import { actionFor, restartFor, protoCmd, bwCmd, splitNodeParam } from './ros.js';
 import { IMG_BRIDGE, CLOUD_BRIDGE, BAG_DUMP, MARKER_BRIDGE, TF_DUMP, IMG_ANN_BRIDGE, CAMINFO_BRIDGE, GEOM_BRIDGE, URDF_BRIDGE, IM_BRIDGE } from './paths.js';
 import {
@@ -18,7 +19,7 @@ import { shq } from './util.js';
 export class Backend {
   constructor(ver) { this.ver = ver; }
   get kind() { return 'rosbridge'; }
-  get url() { return process.env.RDASH_ROSBRIDGE_URL || 'ws://localhost:9090'; }
+  get url() { return rosbridgeUrl(this.ver); }   // 버전별 기본 포트(9090/9091)는 shared/ports.js 가 정한다
 
   // rosapi 로는 못 하는 것들 — 백엔드 호스트의 ROS CLI 로.
   bandwidth(topic) { return bwCmd(this.ver, topic); }   // 메시지 바이트 크기를 rosapi 가 모른다

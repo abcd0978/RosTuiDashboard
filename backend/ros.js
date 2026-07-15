@@ -1,15 +1,11 @@
 // ROS1/ROS2 감지 · rosbridge_server 자동 기동/유지 · ROS 정리 스크립트.
 // ROS 그래프/echo 는 전적으로 rosbridge 를 통한다 — rosbridge_suite 가 필수다(없으면 여기서 띄운다).
 import net from 'net';
-import { spawn, spawnSync } from 'child_process';
+import { spawn } from 'child_process';
 import { makeBackend } from '../shared/backend.js';
+import { VER } from '../shared/ver.js';
 
-function detectVer() {
-  if (process.env.ROS_VER) return process.env.ROS_VER;
-  const r = spawnSync('bash', ['-lc', 'command -v ros2 >/dev/null 2>&1']);
-  return r.status === 0 ? '2' : '1';
-}
-export const VER = detectVer();
+export { VER };   // 기존에 './ros.js' 에서 VER 을 받던 곳들 유지 — 감지 자체는 shared/ver.js 로 옮겼다
 export const be = makeBackend(VER);
 
 // rosbridge 포트는 URL 에서 뽑는다 — 박아 넣으면 RDASH_ROSBRIDGE_URL 을 바꿨을 때 엉뚱한 포트를 본다.

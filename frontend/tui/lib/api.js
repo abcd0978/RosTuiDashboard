@@ -4,8 +4,11 @@
 //
 // HTTP: fetch(Node 18+ 내장). 스트림: /ws 멀티플렉스 하나로 전부(연결 N 개 대신 1 개).
 import WebSocket from 'ws';
+import { VER } from '../../../shared/ver.js';
+import { webPort } from '../../../shared/ports.js';
 
-export const API = process.env.RDASH_API || `http://127.0.0.1:${process.env.RDASH_WEB_PORT || 8080}`;
+// 백엔드 포트는 ROS 버전이 정한다(shared/ports.js) — ROS2 백엔드는 8082 라, 8080 로 박아 두면 못 붙는다.
+export const API = process.env.RDASH_API || `http://127.0.0.1:${webPort(VER)}`;
 const WS_URL = API.replace(/^http/, 'ws') + '/ws';
 
 // ── HTTP ─────────────────────────────────────────────────────────────────────
