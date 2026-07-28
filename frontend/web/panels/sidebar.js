@@ -54,10 +54,13 @@ export function scheduleMeasure(vis) {
   measureTimer = setTimeout(() => { const key = list.join('\0'); if (key === measureSent) return; measureSent = key; post('/api/measure', { topics: list }); }, 300);
 }
 
+// depth 0 의 들여쓰기가 23 인 이유: 섹션 헤더(.sec)는 padding-left 10 + caret 12 + gap 4 = 26 에서
+// 제목이 시작한다. depth 0 을 10 으로 두면 이름이 24 에 놓여 헤더와 같은 줄처럼 보인다 — '서비스' 와
+// 'robot_sim' 이 형제로 읽혔다. 한 단계(13) 밀어 섹션의 자식임을 들여쓰기로 드러낸다.
 export function renderTree(kind, node, depth, H, VT) {
   const kids = [...node.children.values()].sort((a, b) => a.seg.localeCompare(b.seg));
   for (const c of kids) {
-    const hasKids = c.children.size > 0, key = kind + '\0' + c.full, collapsed = treeCollapsed.has(key), pad = 10 + depth * 13;
+    const hasKids = c.children.size > 0, key = kind + '\0' + c.full, collapsed = treeCollapsed.has(key), pad = 23 + depth * 13;
     const caret = el('span', { class: 'tcaret' }, hasKids ? (collapsed ? '▸' : '▾') : '');
     const nameCls = (hasKids && !c.item ? 'tdir' : 'k-' + kind) + ' tname';
     const label = (c.item && state.marked.has(c.item.name) ? '*' : '') + c.seg + (c.item ? deadMark(c.item) : '');
