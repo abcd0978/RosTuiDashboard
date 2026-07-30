@@ -22,7 +22,30 @@ export function action(it) {
   const tyHint = el('div', { class: 'hint' }, '타입 조회 중…');
   const ta = el('textarea', { rows: 4, style: 'width:100%', html: '{}' });
   const out = el('pre', { class: 'out' });
-  const sendBtn = el('button', { class: 'act', disabled: true, onclick: async () => { out.textContent = '전송 중…'; const r = await post('/api/action', { name, type: ty, goal: ta.value }); out.textContent = 'goal 전송 (job ' + r.id + ')'; } }, 'send goal');
+
+  // job 폴링 — send 버튼은 job id 만 돌려주고 성공/실패는 안 알려준다(POST /api/action 은
+  // spawnJob 결과일 뿐, 실제 goal 수락/거부는 비동기로 잡 로그에 찍힌다). status 가 'run' 을 벗어나거나
+  // ~5초가 지날 때까지 /api/jobs 를 폴링해 로그 꼬리를 out 에 그려서, "타입이 잘못됐다" 같은 실패가
+  // Jobs 뷰를 따로 열어야만 보이던 문제(이 버그가 숨어 있던 이유)를 없앤다.
+  let pollTimer = null;
+  const stopPoll = () => { if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; } };
+  const pollJob = (id) => {
+    const deadline = Date.now() + 5000;
+    const step = async () => {
+      pollTimer = null;
+      let job = null;
+      try { const r = await api('/api/jobs'); job = (r.jobs || []).find((j) => j.id === id); } catch { /* */ }
+      if (job) {
+        const tail = (job.log || []).slice(-8).join('\n');
+        out.textContent = `job ${job.id} [${job.status}]` + (tail ? '\n' + tail : '');
+      }
+      if (job && job.status !== 'run') return;   // 끝났음(done/error/killed) — 폴링 종료
+      if (Date.now() >= deadline) return;         // 타임아웃 — 그냥 마지막 상태로 둔다
+      pollTimer = setTimeout(step, 700);
+    };
+    step();
+  };
+  const sendBtn = el('button', { class: 'act', disabled: true, onclick: async () => { stopPoll(); out.textContent = '전송 중…'; const r = await post('/api/action', { name, type: ty, goal: ta.value }); out.textContent = 'goal 전송 (job ' + r.id + ')'; pollJob(r.id); } }, 'send goal');
   const cancelBtn = el('button', { class: 'act', onclick: async () => { const r = await post('/api/actioncancel', { name }); out.textContent = r.ok ? `취소 요청 — ${r.canceling}개 취소 중` : ('취소 실패: ' + (r.error || '')); toast(r.ok ? `${r.canceling}개 goal 취소 요청` : '취소 실패', r.ok ? 'ok' : 'err'); } }, 'cancel all');
   const statusPane = el('pre', { class: 'out', style: 'max-height:140px;overflow:auto' }, '(대기 중…)');
   const feedPane = el('pre', { class: 'out', style: 'max-height:200px;overflow:auto' }, '(대기 중…)');
@@ -51,7 +74,7 @@ export function action(it) {
   });
 
   let feedSub = null;
-  setModalSub({ close: () => { statusSub.close(); if (feedSub) feedSub.close(); } });   // 둘을 하나로 묶어 모달 닫힐 때 같이 정리
+  setModalSub({ close: () => { statusSub.close(); if (feedSub) feedSub.close(); stopPoll(); } });   // 셋을 하나로 묶어 모달 닫힐 때 같이 정리
 
   api('/api/actiontype?name=' + encodeURIComponent(name)).then((r) => {
     ty = (r && r.ty) || '';
