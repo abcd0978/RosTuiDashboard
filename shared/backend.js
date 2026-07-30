@@ -27,6 +27,8 @@ export class Backend {
   diagnostics() { return this.ver === '2' ? 'stdbuf -oL ros2 topic echo /diagnostics 2>/dev/null' : 'stdbuf -oL rostopic echo /diagnostics 2>/dev/null'; }
   msgDef(ty) { return msgDefCmd(this.ver, ty); }
   proto(kind, name, ty) { return protoCmd(this.ver, kind, name, ty); }   // kind: 'topic'|'service' — 호출측이 지정
+  // 액션 타입 조회 — /rosapi/action_type 이 이 환경엔 없어(검증됨) `ros2 action list -t` 출력("NAME [TYPE]")에서 파싱한다. ROS1 actionlib 은 대응 원라이너가 없어 범위 밖.
+  actionType(name) { return this.ver === '2' ? `ros2 action list -t 2>/dev/null | grep -F ${shq(name + ' [')} | sed -n 's/.*\\[\\(.*\\)\\]/\\1/p'` : null; }
   resource(nodes) { return resourceCmd(nodes); }
   tfTree() { return tfTreeCmd(this.ver); }
   tfEcho(src, tgt) { return tfEchoCmd(this.ver, src, tgt); }

@@ -2,7 +2,8 @@
 
 import { $, el, api, post } from '../lib/dom.js';
 import { state, byName } from '../lib/state.js';
-import { openModal, getActiveModal } from '../lib/modal.js';
+import { openModal, getActiveModal, setModalSub, toast } from '../lib/modal.js';
+import { openStream } from '../lib/stream.js';
 
 export function publish(it) {
   msgForm('▲ publish — ' + it.name, '/api/publish', { name: it.name }, 'msg', '/api/proto?name=' + encodeURIComponent(it.name) + '&type=' + encodeURIComponent(it.ty || ''));
@@ -12,11 +13,62 @@ export function service(it) {
   msgForm('call service — ' + it.name, '/api/service', { name: it.name }, 'req', '/api/proto?kind=service&name=' + encodeURIComponent(it.name));
 }
 
+// GoalStatus.status 정수 → 이름(action_msgs/msg/GoalStatus 상수, 검증됨).
+const ACT_STATUS = ['UNKNOWN', 'ACCEPTED', 'EXECUTING', 'CANCELING', 'SUCCEEDED', 'CANCELED', 'ABORTED'];
+
 export function action(it) {
+  const name = it.name;
+  let ty = '';   // 그래프 스냅샷엔 액션 타입이 없다 — /api/actiontype 로 늦게 채워진다. 타입이 필요한 것들은 전부 이걸 기다린다.
+  const tyHint = el('div', { class: 'hint' }, '타입 조회 중…');
   const ta = el('textarea', { rows: 4, style: 'width:100%', html: '{}' });
   const out = el('pre', { class: 'out' });
-  const btn = el('button', { class: 'act', onclick: async () => { const r = await post('/api/action', { name: it.name, type: it.ty || '', goal: ta.value }); out.textContent = 'goal 전송 (job ' + r.id + ') — Jobs 에서 피드백'; } }, 'send goal');
-  openModal('🎯 action goal — ' + it.name, el('div', {}, el('div', { class: 'hint' }, 'goal (YAML)'), ta, el('div', { class: 'actbtns' }, btn), out));
+  const sendBtn = el('button', { class: 'act', disabled: true, onclick: async () => { out.textContent = '전송 중…'; const r = await post('/api/action', { name, type: ty, goal: ta.value }); out.textContent = 'goal 전송 (job ' + r.id + ')'; } }, 'send goal');
+  const cancelBtn = el('button', { class: 'act', onclick: async () => { const r = await post('/api/actioncancel', { name }); out.textContent = r.ok ? `취소 요청 — ${r.canceling}개 취소 중` : ('취소 실패: ' + (r.error || '')); toast(r.ok ? `${r.canceling}개 goal 취소 요청` : '취소 실패', r.ok ? 'ok' : 'err'); } }, 'cancel all');
+  const statusPane = el('pre', { class: 'out', style: 'max-height:140px;overflow:auto' }, '(대기 중…)');
+  const feedPane = el('pre', { class: 'out', style: 'max-height:200px;overflow:auto' }, '(대기 중…)');
+  const feedLines = [];
+
+  openModal('🎯 action — ' + name, el('div', {},
+    tyHint,
+    el('div', { class: 'hint' }, 'goal (YAML)'), ta,
+    el('div', { class: 'actbtns' }, sendBtn, cancelBtn), out,
+    el('div', { class: 'hint', style: 'margin-top:10px' }, '상태 (status)'), statusPane,
+    el('div', { class: 'hint', style: 'margin-top:10px' }, '피드백 (feedback)'), feedPane));
+
+  // 상태 — action_msgs/msg/GoalStatusArray 는 타입이 고정이라 액션 타입 조회를 기다리지 않고 바로 구독한다.
+  const statusSub = openStream('/echo?topic=' + encodeURIComponent(name + '/_action/status') + '&type=' + encodeURIComponent('action_msgs/msg/GoalStatusArray'), (d) => {
+    const text = JSON.parse(d);
+    // status_list 는 GoalStatus 배열 — msgToYaml 이 객체 배열을 펼치면 항목마다 uuid 다음에 status:N 이
+    // 나온다(선언 순서). 짝지어 뽑는다. 최신 스냅샷이 이전 렌더를 그대로 대체한다(로그가 아니라 상태 뷰).
+    //
+    // rosbridge 는 uint8[16] uuid 를 배열이 아니라 base64 문자열로 준다(실측: "iReeXzJ9Tr+TsKwhc7pr3g==").
+    // 그래서 대괄호를 기대하면 영원히 매치되지 않는다 — 공백 없는 토큰으로 받는다.
+    const goals = [];
+    const re = /uuid:\s*(\S+)[\s\S]*?status:\s*(-?\d+)/g;
+    let m;
+    while ((m = re.exec(text))) goals.push(`${m[1].slice(0, 8)}  ${ACT_STATUS[+m[2]] || m[2]}`);
+    statusPane.textContent = goals.length ? goals.join('\n') : '(진행 중인 goal 없음)';
+  });
+
+  let feedSub = null;
+  setModalSub({ close: () => { statusSub.close(); if (feedSub) feedSub.close(); } });   // 둘을 하나로 묶어 모달 닫힐 때 같이 정리
+
+  api('/api/actiontype?name=' + encodeURIComponent(name)).then((r) => {
+    ty = (r && r.ty) || '';
+    tyHint.textContent = ty || '(타입을 알 수 없음)';
+    sendBtn.disabled = false;
+    // goal 프리필 — msgForm 과 동일한 규칙(현재 textarea 가 아직 {} 일 때만 덮어씀)
+    api('/api/proto?kind=action&name=' + encodeURIComponent(name) + '&type=' + encodeURIComponent(ty)).then((rp) => { if (rp && rp.yaml && ta.value.trim() === '{}') ta.value = rp.yaml; }).catch(() => {});
+    if (ty) {
+      // 피드백 — <ActionType>_FeedbackMessage. 타입 이름 자체가 필요해 조회 전엔 구독할 수 없다.
+      feedSub = openStream('/echo?topic=' + encodeURIComponent(name + '/_action/feedback') + '&type=' + encodeURIComponent(ty + '_FeedbackMessage'), (d) => {
+        feedLines.push(JSON.parse(d));
+        if (feedLines.length > 200) feedLines.shift();
+        feedPane.textContent = feedLines.join('\n---\n');
+        feedPane.scrollTop = feedPane.scrollHeight;
+      });
+    }
+  }).catch(() => { tyHint.textContent = '(타입 조회 실패)'; sendBtn.disabled = false; });
 }
 
 export function msgForm(title, url, base, key, protoUrl) {

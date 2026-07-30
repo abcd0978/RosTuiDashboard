@@ -53,7 +53,7 @@ function wsStart(ws, m) {
     cloudstream: () => t && (child = pipeCloud(be.cloudBridge(t), bin)),
   };
   if (stream === 'events') { if (useRb()) off = rbTelemetryCore(txt); else txt(JSON.stringify({ error: `rosbridge unavailable: ${be.url}` })); }
-  else if (stream === 'echo') { if (t) { if (useRb()) off = rbEchoOff(t, txt); else txt(JSON.stringify({ error: `rosbridge unavailable: ${be.url}` })); } }
+  else if (stream === 'echo') { if (t) { if (useRb()) off = rbEchoOff(t, txt, params.type); else txt(JSON.stringify({ error: `rosbridge unavailable: ${be.url}` })); } }
   else if (map[stream]) map[stream]();
   return {
     off: () => { if (child) { try { child.kill(); } catch { /* */ } } if (off) { try { off(); } catch { /* */ } } },

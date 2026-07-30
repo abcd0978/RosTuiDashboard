@@ -61,4 +61,20 @@ router.post('/api/teleop', needRbCmd, (req, res) => {
   res.json({ ok: true });
 });
 
+// 액션 타입 조회 — 그래프 스냅샷엔 ty 가 없어 이름으로 늦게 찾는다(be.actionType, ROS1/미확인 시 빈 문자열).
+router.get('/api/actiontype', async (req, res) => {
+  const cmd = be.actionType(req.query.name);
+  res.json({ ty: cmd ? (await runOnce(cmd)).trim() : '' });
+});
+
+// 액션의 진행 중인 goal 전부 취소 — all-zero goal_id 는 cancel_goal 서비스에서 "전부"를 뜻한다(검증됨).
+router.post('/api/actioncancel', needRbCmd, async (req, res) => {
+  const b = req.body;
+  const v = await rbCmdEnsure().call(`${b.name}/_action/cancel_goal`, {
+    goal_info: { goal_id: { uuid: new Array(16).fill(0) }, stamp: { sec: 0, nanosec: 0 } },
+  });
+  if (v == null) return res.json({ ok: false, error: '(no response)' });
+  res.json({ ok: true, canceling: (v.goals_canceling || []).length });
+});
+
 export default router;

@@ -11,7 +11,7 @@ function needTopic(req, res, next) { if (!req.query.topic) return res.status(400
 
 // 스트림
 router.get('/events', needRb, (req, res) => rbTelemetry(res));
-router.get('/echo', needTopic, needRb, (req, res) => rbEcho(res, req.query.topic));
+router.get('/echo', needTopic, needRb, (req, res) => rbEcho(res, req.query.topic, req.query.type));
 router.get('/imgstream', needTopic, (req, res) => streamLines(res, be.imgBridge(req.query.topic)));
 // /cloudstream 은 WS 전용(바이너리). SSE 로는 제공하지 않음.
 router.get('/markerstream', needTopic, (req, res) => streamLines(res, be.markerBridge(req.query.topic)));

@@ -33,7 +33,7 @@ let telemTypes = {};                 // 최근 /rosapi/topics 타입 캐시(meas
 let telemSnapshot = null;            // 마지막 정상 스냅샷 — 신규 클라이언트에게 1초 기다리지 않고 즉시 전달
 let measure = new Set();             // 브라우저가 화면에 보여주는 토픽만(Hz 측정 대상) — POST /api/measure 로 갱신
 // last-known-good 캐시 — rosapi 콜이 타임아웃(null)이어도 이전 값을 그대로 재사용(끊김 플리커 방지)
-let cacheNodes = [], cacheServices = [], cacheParams = [], cacheDetails = new Map();   // node → node_details 응답 {publishing,subscribing}
+let cacheNodes = [], cacheServices = [], cacheParams = [], cacheActions = [], cacheDetails = new Map();   // node → node_details 응답 {publishing,subscribing}
 
 export function getTelemSnapshot() { return telemSnapshot; }
 export function setMeasure(topics) { measure = new Set(topics); measureSync(); }
@@ -105,11 +105,12 @@ export async function rbGraphSnapshot(consume = false) {   // consume: 텔레메
   names.forEach((n, i) => { types[n] = (tr.types || [])[i] || '?'; });
   telemTypes = types;
   measureSync();
-  const [nodesR, svcR] = await Promise.all([rb.call('/rosapi/nodes'), rb.call('/rosapi/services')]);
+  const [nodesR, svcR, actR] = await Promise.all([rb.call('/rosapi/nodes'), rb.call('/rosapi/services'), rb.call('/rosapi/action_servers')]);
   // ROS2 rosapi 는 노드를 중복해서 준다(["/rosapi","/rosapi_params","/rosapi","/rosapi_params"] 실측).
   // 중복을 안 지우면 노드 수가 부풀고 node_details 를 같은 노드에 두 번 부른다.
   if (nodesR && nodesR.nodes) cacheNodes = [...new Set(nodesR.nodes)];   // null 이면 이전 노드 목록 재사용
   if (svcR && svcR.services) cacheServices = [...new Set(svcR.services)];
+  if (actR && actR.action_servers) cacheActions = [...new Set(actR.action_servers)];
   const details = await Promise.all(cacheNodes.map((nd) => rb.call('/rosapi/node_details', { node: nd })));
   const pubs = {}, subs = {};   // topic → [node, ...] (node_details 를 뒤집어 구성)
   cacheNodes.forEach((nd, i) => {
@@ -133,6 +134,7 @@ export async function rbGraphSnapshot(consume = false) {   // consume: 텔레메
   });
   for (const s of cacheServices) items.push({ p: 'services' + s, kind: 'service', name: s, server: [] });
   for (const nd of cacheNodes) items.push({ p: 'nodes' + nd, kind: 'node', name: nd });
+  for (const a of cacheActions) items.push({ p: 'actions' + a, kind: 'action', name: a });   // ty 없음 — 타입은 /api/actiontype 으로 늦게 조회
   // 트리 경로는 ':' 를 '/' 로 바꿔 ROS2 파라미터가 노드별로 묶이게 한다(params/turtlesim/background_r).
   // name 은 원본 그대로 — /api/param/get1·/api/setparam1 이 그걸로 노드와 파라미터를 가른다.
   for (const pn of cacheParams) items.push({ p: 'params' + pn.replace(':', '/'), kind: 'param', name: pn });
@@ -180,14 +182,17 @@ export function rbTelemetryCore(send) {
     }
   };
 }
-export function rbEchoOff(topic, send) {
+// type 을 명시하면 /rosapi/topic_type 조회를 건너뛰고 바로 구독한다 — 이 환경엔 그 서비스 자체가 없어
+// (rbTopicType 은 늘 '') 액션의 숨은 _action/* 토픽처럼 그래프에 없는 토픽은 타입을 넘겨줘야만 echo 가 된다.
+export function rbEchoOff(topic, send, type) {
   rbEnsure();
+  if (type) { const off = rb.subscribe(topic, type, (msg) => send(JSON.stringify(msgToYaml(msg)))); return () => off(); }
   let off = () => {};
-  rbTopicType(topic).then((type) => { off = rb.subscribe(topic, type, (msg) => send(JSON.stringify(msgToYaml(msg)))); });
+  rbTopicType(topic).then((t) => { off = rb.subscribe(topic, t, (msg) => send(JSON.stringify(msgToYaml(msg)))); });
   return () => off();
 }
-export function rbEcho(res, topic) {
+export function rbEcho(res, topic, type) {
   const send = sse(res);
-  const off = rbEchoOff(topic, send);
+  const off = rbEchoOff(topic, send, type);
   res.on('close', off);
 }
