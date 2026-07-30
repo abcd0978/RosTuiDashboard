@@ -161,6 +161,7 @@ export function renderValActs() {
     add('publish', () => Views.publish(it));
     add('states', () => Views.states(it));
     if ((it.ty || '').includes('NavSatFix')) add('🗺 map', () => Views.map(it));
+    if ((it.ty || '').includes('Pose2D')) add('🐢 turtle', () => Views.turtle(it));
     if ((it.ty || '').includes('CompressedImage') || (it.ty || '').includes('sensor_msgs/msg/Image')) add('🖼 image', () => Views.image(it));
     if ((it.ty || '').includes('PointCloud2') || /visualization_msgs\/(msg\/)?Marker(Array)?/.test(it.ty || '')) add('🧊 3D', () => Views.cloud(it));
     add('msg def', () => Views.msgdef(it));

@@ -8,6 +8,7 @@ import { doctor, baseline, trigger, procmon, overview } from './health.js';
 import { cloud } from './scene3d.js';
 import { image } from './image.js';
 import { map } from './map.js';
+import { turtle } from './turtle.js';
 import { plotlab } from './plotlab.js';
 import { bookmarks, jobs } from './bookmarks.js';
 
@@ -17,7 +18,7 @@ export const Views = {
   setparam, params, lifecycle,
   log, diag,
   doctor, baseline, trigger, procmon, overview,
-  cloud, image, map, plotlab,
+  cloud, image, map, turtle, plotlab,
   teleop, states,
   bookmarks, jobs,
 };
