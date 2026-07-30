@@ -665,6 +665,7 @@ export function cloud(it) {
       el('div', { class: 'hint', style: 'font-size:11px' }, '체크박스로 복수 선택 후 추가'),
       body,
       el('div', { style: 'display:flex;justify-content:flex-end;gap:8px;margin-top:8px' },
+        el('button', { class: 'act', style: 'padding:3px 12px;font-size:12px;margin-right:auto', onclick: () => body.querySelectorAll('input').forEach((c) => { c.checked = true; c.onchange(); }) }, '전체 선택'),
         el('button', { class: 'act', style: 'padding:3px 12px;font-size:12px', onclick: close }, '취소'),
         el('button', { class: 'act', style: 'padding:3px 12px;font-size:12px;border-color:var(--cyan);color:var(--cyan)', onclick: doAdd }, '추가')));
     backdrop = el('div', { style: 'position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center', onclick: close }, panel);
