@@ -118,6 +118,9 @@ export function msgToYaml(o, ind = 0) {
   let s = '';
   for (const k in o) { const v = o[k];
     if (v && typeof v === 'object' && !Array.isArray(v)) s += `${pad}${k}:\n${msgToYaml(v, ind + 1)}`;
+    // 객체 배열(메시지 리스트, 예: GoalStatusArray.status_list) — flow join 하면 [object Object] 로 뭉개져
+    // 필드가 통째로 사라진다. 항목마다 "- " 로 시작해 한 단계 더 들여써 펼친다.
+    else if (Array.isArray(v) && v.length && v[0] && typeof v[0] === 'object') s += `${pad}${k}:\n${v.slice(0, 8).map((item) => `${pad}- \n${msgToYaml(item, ind + 1)}`).join('')}`;
     else if (Array.isArray(v)) s += `${pad}${k}: [${v.slice(0, 8).join(', ')}${v.length > 8 ? ', …' : ''}]\n`;
     else s += `${pad}${k}: ${v}\n`; }
   return s;
