@@ -15,7 +15,11 @@ export function useTopics(ver, measure) {
     const unsub = openStream('events', {}, (d) => {
       let o; try { o = JSON.parse(d); } catch { return; }
       if (o.nomaster) { setConn('nomaster'); return; }   // 마지막 items 유지, 연결 끊김만 표시
-      setConn('ok'); setTopics(o.items || []);
+      // 백엔드가 에러를 보낼 수 있다(rosbridge 미준비 등). 이걸 안 가려내면 items 없는 payload 를
+      // 성공으로 착각해 conn='ok' + topics=[] 가 되고, 빈 트리를 정상처럼 보여준다(실측으로 데임).
+      if (o.error) { setConn('no-rb'); return; }
+      if (!o.items) return;                              // items 없는 payload 는 상태를 건드리지 않는다
+      setConn('ok'); setTopics(o.items);
     });
     return unsub;
   }, [ver]);

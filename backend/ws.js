@@ -3,7 +3,7 @@
 import { WebSocketServer } from 'ws';
 import { be } from './ros.js';
 import { pipeLines, pipeBlocks, pipeCloud } from './http.js';
-import { useRb, rbTelemetryCore, rbEchoOff } from './telemetry.js';
+import { rbTelemetryCore, rbEchoOff } from './telemetry.js';
 
 export function attachWebSocket(server) {
   const wss = new WebSocketServer({ noServer: true });
@@ -52,8 +52,15 @@ function wsStart(ws, m) {
     imstream: () => t && (child = pipeLines(be.imBridge(t), txt)),   // 인터랙티브 마커(양방향: feed→stdin)
     cloudstream: () => t && (child = pipeCloud(be.cloudBridge(t), bin)),
   };
-  if (stream === 'events') { if (useRb()) off = rbTelemetryCore(txt); else txt(JSON.stringify({ error: `rosbridge unavailable: ${be.url}` })); }
-  else if (stream === 'echo') { if (t) { if (useRb()) off = rbEchoOff(t, txt, params.type); else txt(JSON.stringify({ error: `rosbridge unavailable: ${be.url}` })); } }
+  // rosbridge 준비 여부로 게이트하지 않는다 — 예전엔 !ready 면 에러 한 줄만 보내고 구독을 등록하지
+  // 않았고, 그래서 rosbridge 가 나중에 떠도 보낼 대상이 없어 그 클라이언트는 영구히 빈 화면이었다.
+  // TUI 는 항상 이 경쟁에 걸렸다: 백엔드를 spawn 한 뒤 /api/ver(정적 라우트, 0.2초)만 보고 렌더를
+  // 시작하는데 rosbridge(ros2 launch)는 수 초 걸린다. 웹은 사람이 나중에 페이지를 열어 안 걸렸다.
+  //
+  // 등록해두면 복구는 이미 되어 있다: telemTick 은 !rb.ready 동안 {nomaster:true} 를 보내고 준비되면
+  // 실데이터로 넘어가며, rb.subscribe 는 준비 전 요청을 큐에 넣어 open 때 flush + 재연결 때 재구독한다.
+  if (stream === 'events') off = rbTelemetryCore(txt);
+  else if (stream === 'echo') { if (t) off = rbEchoOff(t, txt, params.type); }
   else if (map[stream]) map[stream]();
   return {
     off: () => { if (child) { try { child.kill(); } catch { /* */ } } if (off) { try { off(); } catch { /* */ } } },
