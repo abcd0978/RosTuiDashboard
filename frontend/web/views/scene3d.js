@@ -520,6 +520,7 @@ export function mkScene(cv, labelDiv, info) {
     opts(o) { Object.assign(opt, o); rebuildScene(); },
     view(p) { pan = [0, 0]; if (p === 'top') { yaw = 0; pitch = -1.554; } else if (p === 'front') { yaw = 0; pitch = 0; } else if (p === 'side') { yaw = Math.PI / 2; pitch = 0; } else if (p === 'back') { yaw = Math.PI; pitch = 0; } else { yaw = 0.7; pitch = -0.6; dist = 12; center = [0, 0, 0.5]; } invalidate(); },
     setPointSize(s) { psize = s; invalidate(); },
+    setBg(light) { gl.clearColor(...(light ? [1, 1, 1] : [0.043, 0.055, 0.071]), 1); invalidate(); },
     setPickHandler(fn) { pickHandler = fn; cv.style.cursor = fn ? 'crosshair' : 'grab'; },
     setInspect(fn) { inspectCb = fn; cv.style.cursor = fn ? 'crosshair' : 'grab'; if (!fn) { pin = null; rebuildScene(); } },
     setPin(worldPt, text) { pin = worldPt ? { p: worldPt, t: text || '' } : null; rebuildScene(); },
@@ -673,8 +674,11 @@ export function cloud(it) {
   const ptSize = el('input', { type: 'range', min: '1', max: '6', value: '2.4', step: '0.2', style: 'vertical-align:middle' });
   ptSize.oninput = () => scene.setPointSize(+ptSize.value);
   const vbtn = (t, p) => el('button', { class: 'act', style: 'padding:2px 7px', onclick: () => scene.view(p) }, t);
+  let light = false;
+  const bgBtn = el('button', { class: 'act', style: 'padding:2px 7px', title: '씬 배경 전환', onclick: () => { light = !light; scene.setBg(light); bgBtn.textContent = light ? '☀️' : '🌙'; } }, '🌙');
   const topbar = el('div', { style: 'display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:6px' },
     el('span', { style: 'display:inline-flex;gap:3px' }, vbtn('Top', 'top'), vbtn('Front', 'front'), vbtn('Side', 'side'), vbtn('Iso', 'iso')),
+    bgBtn,
     el('label', { style: 'display:inline-flex;align-items:center;gap:4px' }, el('span', { class: 'hint' }, '점크기'), ptSize));
   // ── ⚙ 최적화 옵션(선택 가능) — LOD 모드/거리/목표FPS/최대점수/점모양 ──
   const O = { lodMode: 'adaptive', lodDist: 60, targetFps: 40, maxPoints: 0, round: true, color: 'auto' };
