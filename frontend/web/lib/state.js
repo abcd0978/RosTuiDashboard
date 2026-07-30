@@ -24,12 +24,13 @@ export function topics() {
 }
 
 // CLI/도구가 만드는 익명 헬퍼 노드/서비스 — rostopic/rosservice/rosparam/rosnode/ros2cli/rqt,
-// RDash 텔레메트리(ros_tui), rosbridge/rosapi, launch가 만든 docker_desktop pid suffix 노드.
+// RDash 텔레메트리(ros_tui), rosbridge/rosapi, launch가 만든 docker_desktop pid suffix 노드,
+// rdash(RDash 자신이 띄우는 브리지 프로세스, 예: rdash_tf_dump — 사용자 노드가 아니다).
 // echo·publish·hz·teleop·rosbridge 등을 돌릴 때 생겨서 그래프를 어지럽힌다 → 기본 숨김.
 export function isAnon(n) {
   const s = String(n || '');
   const base = s.split('/').filter(Boolean)[0] || '';
-  return /^\/(ros_tui|rostopic|rosservice|rosparam|rosnode|rosbag|roslaunch|_?ros2cli|rosbridge_websocket|rosapi|rqt)(?:_|\/|$)/.test(s)
+  return /^\/(ros_tui|rostopic|rosservice|rosparam|rosnode|rosbag|roslaunch|_?ros2cli|rosbridge_websocket|rosapi|rqt|rdash)(?:_|\/|$)/.test(s)
     || /_(?:desktop|docker_desktop|[A-Za-z0-9-]+)_\d{3,}(?:_[A-Za-z0-9]+)?$/.test(base);
 }
 
