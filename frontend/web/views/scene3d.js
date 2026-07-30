@@ -600,6 +600,7 @@ export function cloud(it) {
     renderList();
   };
   const DR = 'display:flex;align-items:center;gap:5px;padding:2px 4px;font-size:11px;cursor:default';
+  const ICON = { cloud: '🌩 ', marker: '📐 ', geom: '🧭 ', im: '🎯 ' };
   function renderList() {
     listBox.innerHTML = '';
     const chk = (label, key, fn) => { const c = el('input', { type: 'checkbox' }); c.checked = builtin[key]; c.onchange = () => { builtin[key] = c.checked; fn(c.checked); }; return el('label', { style: DR }, c, el('span', {}, label)); };
@@ -607,7 +608,6 @@ export function cloud(it) {
     listBox.append(chk('Axes', 'axes', (v) => scene.opts({ axes: v })), chk('TF', 'tf', (v) => subTF(v)), chk('RobotModel (URDF)', 'robot', (v) => subRobot(v)));
     listBox.append(el('div', { class: 'hint', style: 'margin:6px 0 2px;text-transform:uppercase;letter-spacing:.05em' }, '디스플레이'));
     if (!displays.size) listBox.append(el('div', { class: 'hint', style: 'padding:2px 4px' }, '아래에서 토픽 추가'));
-    const ICON = { cloud: '🌩 ', marker: '📐 ', geom: '🧭 ', im: '🎯 ' };
     for (const d of displays.values()) {
       const c = el('input', { type: 'checkbox' });
       c.checked = d.on;
@@ -620,11 +620,55 @@ export function cloud(it) {
       listBox.append(row);
     }
     const avail = [...cloudTopics().map((t) => ['cloud', t, '']), ...markerTopics().map((t) => ['marker', t, '']), ...geomTopics().map(([t, ty]) => ['geom', t, ty]), ...imTopics().map((t) => ['im', t, ''])].filter(([k, t]) => !displays.has(idOf(k, t)));
-    const addSel = el('select', { style: 'width:100%;margin-top:5px;font:11px monospace' });
-    addSel.append(el('option', { value: '' }, '＋ 토픽 추가…'));
-    avail.forEach(([k, t]) => addSel.append(el('option', { value: k + '\0' + t }, (ICON[k] || '') + t)));
-    addSel.onchange = () => { if (!addSel.value) return; const [k, t] = addSel.value.split('\0'); const ty = (geomTopics().find(([n]) => n === t) || [])[1] || ''; addDisplay(k, t, ty); };
-    listBox.append(addSel);
+    const addBtn = el('button', { class: 'act', style: 'width:100%;margin-top:5px;padding:3px;font-size:11px', onclick: () => openTopicPicker(avail) }, '＋ 토픽 추가…');
+    listBox.append(addBtn);
+  }
+  // 토픽 추가 팝업 — 네임스페이스(/) 트리 + 체크박스 복수선택. 3D 모달 위 자체 오버레이(중첩 openModal 불가).
+  function openTopicPicker(avail) {
+    if (!avail || !avail.length) { toast('추가할 토픽이 없음', 'info'); return; }
+    const picked = new Set();   // 체크된 리프({kind,topic,ty}) 집합
+    // 네임스페이스 트리 구성
+    const root = { children: {} };
+    for (const [kind, topic, ty] of avail) {
+      const parts = topic.split('/').filter(Boolean);
+      let cur = root;
+      parts.forEach((p, i) => {
+        cur.children[p] = cur.children[p] || { children: {} };
+        cur = cur.children[p];
+        if (i === parts.length - 1) cur.leaf = { kind, topic, ty };
+      });
+    }
+    const body = el('div', { style: 'max-height:50vh;overflow:auto;margin:8px 0' });
+    const renderNode = (node, depth) => {
+      const frag = document.createDocumentFragment();
+      for (const key of Object.keys(node.children).sort()) {
+        const ch = node.children[key];
+        if (ch.leaf) {
+          const cb = el('input', { type: 'checkbox' });
+          cb.onchange = () => { cb.checked ? picked.add(ch.leaf) : picked.delete(ch.leaf); };
+          frag.append(el('label', { style: `display:flex;align-items:center;gap:6px;padding:2px 4px;margin-left:${depth * 14}px;font:12px monospace;cursor:pointer` }, cb, el('span', {}, (ICON[ch.leaf.kind] || '') + key)));
+        } else {
+          frag.append(el('div', { style: `margin-left:${depth * 14}px;padding:3px 4px;font:12px monospace;color:var(--dim)` }, '📁 ' + key));
+          frag.append(renderNode(ch, depth + 1));
+        }
+      }
+      return frag;
+    };
+    body.append(renderNode(root, 0));
+    let backdrop = null;
+    const close = () => { if (backdrop) { backdrop.remove(); backdrop = null; document.removeEventListener('keydown', onKey); } };
+    const onKey = (e) => { if (e.key === 'Escape') close(); };
+    const doAdd = () => { for (const lf of picked) addDisplay(lf.kind, lf.topic, lf.ty); close(); };
+    const panel = el('div', { style: 'background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px 14px;width:min(420px,92vw);box-shadow:0 8px 32px rgba(0,0,0,.5)', onclick: (e) => e.stopPropagation() },
+      el('div', { style: 'font-weight:600;font-size:13px;margin-bottom:4px' }, '토픽 추가'),
+      el('div', { class: 'hint', style: 'font-size:11px' }, '체크박스로 복수 선택 후 추가'),
+      body,
+      el('div', { style: 'display:flex;justify-content:flex-end;gap:8px;margin-top:8px' },
+        el('button', { class: 'act', style: 'padding:3px 12px;font-size:12px', onclick: close }, '취소'),
+        el('button', { class: 'act', style: 'padding:3px 12px;font-size:12px;border-color:var(--cyan);color:var(--cyan)', onclick: doAdd }, '추가')));
+    backdrop = el('div', { style: 'position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center', onclick: close }, panel);
+    document.body.appendChild(backdrop);
+    document.addEventListener('keydown', onKey);
   }
   const ptSize = el('input', { type: 'range', min: '1', max: '6', value: '2.4', step: '0.2', style: 'vertical-align:middle' });
   ptSize.oninput = () => scene.setPointSize(+ptSize.value);
@@ -678,6 +722,7 @@ export function cloud(it) {
   const toolTopics = { point: '/clicked_point', goal: '/goal_pose', pose: '/initialpose' };
   const FF = 'map';
   let activeTool = null, toolStage = null;
+  let navZ = 0;   // Nav Goal 고도(z, map 기준 m)
   const sph = (id, p, c) => ({ ns: 'tool', id, type: 2, action: 0, frame_id: FF, pose: { p, q: [0, 0, 0, 1] }, scale: [0.2, 0.2, 0.2], color: c, points: [], colors: [], text: '' });
   const arw = (id, p, yaw, c) => ({ ns: 'tool', id, type: 0, action: 0, frame_id: FF, pose: { p, q: [0, 0, Math.sin(yaw / 2), Math.cos(yaw / 2)] }, scale: [0.7, 0.1, 0.15], color: c, points: [], colors: [], text: '' });
   const showTool = (ms) => scene.setMarkersById('__tool__', ms);
@@ -712,8 +757,8 @@ export function cloud(it) {
     if (activeTool === 'goal' || activeTool === 'pose') {
       if (!toolStage) { toolStage = { p1: w }; showTool([sph(1, w, [0.44, 0.6, 0.95, 1])]); return; }
       const p1 = toolStage.p1, yaw = Math.atan2(w[1] - p1[1], w[0] - p1[0]), qz = Math.sin(yaw / 2), qw = Math.cos(yaw / 2);
-      showTool([arw(1, p1, yaw, [0.44, 0.6, 0.95, 1])]);
-      const posy = `position: {x: ${p1[0].toFixed(3)}, y: ${p1[1].toFixed(3)}, z: 0.0}, orientation: {x: 0.0, y: 0.0, z: ${qz.toFixed(4)}, w: ${qw.toFixed(4)}}`;
+      showTool([arw(1, activeTool === 'goal' ? [p1[0], p1[1], navZ] : p1, yaw, [0.44, 0.6, 0.95, 1])]);
+      const posy = `position: {x: ${p1[0].toFixed(3)}, y: ${p1[1].toFixed(3)}, z: ${activeTool === 'goal' ? navZ.toFixed(3) : '0.0'}}, orientation: {x: 0.0, y: 0.0, z: ${qz.toFixed(4)}, w: ${qw.toFixed(4)}}`;
       pub(activeTool === 'goal' ? toolTopics.goal : toolTopics.pose, activeTool === 'goal'
         ? `{header: {frame_id: "${FF}"}, pose: {${posy}}}`
         : `{header: {frame_id: "${FF}"}, pose: {pose: {${posy}}, covariance: [0.25,0,0,0,0,0, 0,0.25,0,0,0,0, 0,0,0,0,0,0, 0,0,0,0,0,0, 0,0,0,0,0,0, 0,0,0,0,0,0.0685]}}`);
@@ -726,6 +771,9 @@ export function cloud(it) {
     const tb = (label, tool) => el('button', { class: 'act', style: 'padding:2px 6px;margin:2px 3px 2px 0;font-size:11px' + (activeTool === tool ? ';border-color:var(--cyan);color:var(--cyan)' : ''), onclick: () => { if (activeTool === tool) { clearTool(); return; } activeTool = tool; toolStage = null; showTool([]); if (tool === 'inspect') { scene.setPickHandler(null); scene.setInspect(onInspect); } else { scene.setInspect(null); scene.setPickHandler(onToolPick); } renderTools(); } }, label);
     toolBox.append(tb('🔍 조회', 'inspect'), tb('📍 Point', 'point'), tb('🎯 Nav Goal', 'goal'), tb('📌 Pose', 'pose'), tb('📏 측정', 'measure'));
     toolBox.append(el('div', { class: 'hint', style: 'margin-top:3px' }, activeTool ? (activeTool === 'inspect' ? '점 클릭 → 좌표·값·프레임 조회' : activeTool === 'point' ? '그라운드 클릭 → 발행' : activeTool === 'measure' ? '두 점 클릭 → 거리(반복)' : '클릭=위치, 다시 클릭=방향') : '도구 선택 후 씬 클릭'));
+    const zin = el('input', { type: 'number', step: '0.1', value: String(navZ), style: 'width:70px;font:11px monospace' });
+    zin.oninput = () => { navZ = +zin.value || 0; };
+    toolBox.append(el('label', { class: 'hint', style: 'display:flex;align-items:center;gap:5px;margin-top:5px' }, el('span', {}, 'Nav Goal 고도 z (m)'), zin));
     if (activeTool === 'inspect') toolBox.append(inspectOut);
   }
   renderTools();
@@ -739,7 +787,7 @@ export function cloud(it) {
     const item = (label, fn) => el('div', { style: 'padding:5px 12px;cursor:pointer;white-space:nowrap', onmouseenter: (ev) => { ev.currentTarget.style.background = 'var(--hover)'; }, onmouseleave: (ev) => { ev.currentTarget.style.background = ''; }, onclick: () => { fn(); closeSceneMenu(); } }, label);
     sceneMenu = el('div', { style: 'position:fixed;z-index:9999;background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:3px 0;font-size:12px;box-shadow:0 4px 16px rgba(0,0,0,.45)' },
       el('div', { class: 'hint', style: 'padding:3px 12px' }, `(${w[0].toFixed(2)}, ${w[1].toFixed(2)}) · ${FF}`),
-      item('🎯 여기로 Nav Goal', () => { pub(toolTopics.goal, `{header: {frame_id: "${FF}"}, pose: {position: {x: ${w[0].toFixed(3)}, y: ${w[1].toFixed(3)}, z: 0.0}, orientation: {x: 0.0, y: 0.0, z: 0.0, w: 1.0}}}`); showTool([arw(1, w, 0, [0.44, 0.6, 0.95, 1])]); }),
+      item('🎯 여기로 Nav Goal', () => { pub(toolTopics.goal, `{header: {frame_id: "${FF}"}, pose: {position: {x: ${w[0].toFixed(3)}, y: ${w[1].toFixed(3)}, z: ${navZ.toFixed(3)}}, orientation: {x: 0.0, y: 0.0, z: 0.0, w: 1.0}}}`); showTool([arw(1, [w[0], w[1], navZ], 0, [0.44, 0.6, 0.95, 1])]); }),
       item('📍 여기로 Point 발행', () => { pub(toolTopics.point, `{header: {frame_id: "${FF}"}, point: {x: ${w[0].toFixed(3)}, y: ${w[1].toFixed(3)}, z: 0.0}}`); showTool([sph(1, w, [0.9, 0.42, 0.42, 1])]); }),
       item('📌 여기로 Pose Estimate', () => { pub(toolTopics.pose, `{header: {frame_id: "${FF}"}, pose: {pose: {position: {x: ${w[0].toFixed(3)}, y: ${w[1].toFixed(3)}, z: 0.0}, orientation: {x: 0.0, y: 0.0, z: 0.0, w: 1.0}}, covariance: [0.25,0,0,0,0,0, 0,0.25,0,0,0,0, 0,0,0,0,0,0, 0,0,0,0,0,0, 0,0,0,0,0,0, 0,0,0,0,0,0.0685]}}`); showTool([arw(1, w, 0, [0.44, 0.6, 0.95, 1])]); }),
       item('📋 좌표 복사', () => { if (navigator.clipboard) navigator.clipboard.writeText(`${w[0].toFixed(3)}, ${w[1].toFixed(3)}, 0.000`); toast('좌표 복사', 'ok'); }));
