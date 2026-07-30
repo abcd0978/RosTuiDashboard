@@ -675,8 +675,9 @@ export function cloud(it) {
   const ptSize = el('input', { type: 'range', min: '1', max: '6', value: '2.4', step: '0.2', style: 'vertical-align:middle' });
   ptSize.oninput = () => scene.setPointSize(+ptSize.value);
   const vbtn = (t, p) => el('button', { class: 'act', style: 'padding:2px 7px', onclick: () => scene.view(p) }, t);
-  let light = false;
-  const bgBtn = el('button', { class: 'act', style: 'padding:2px 7px', title: '씬 배경 전환', onclick: () => { light = !light; scene.setBg(light); bgBtn.textContent = light ? '☀️' : '🌙'; } }, '🌙');
+  let light = localStorage.getItem('rdash-scene-light') === '1';
+  const bgBtn = el('button', { class: 'act', style: 'padding:2px 7px', title: '씬 배경 전환', onclick: () => { light = !light; localStorage.setItem('rdash-scene-light', light ? '1' : '0'); scene.setBg(light); bgBtn.textContent = light ? '☀️' : '🌙'; } }, light ? '☀️' : '🌙');
+  scene.setBg(light);
   const topbar = el('div', { style: 'display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:6px' },
     el('span', { style: 'display:inline-flex;gap:3px' }, vbtn('Top', 'top'), vbtn('Front', 'front'), vbtn('Side', 'side'), vbtn('Iso', 'iso')),
     bgBtn,
@@ -727,7 +728,7 @@ export function cloud(it) {
   const toolTopics = { point: '/clicked_point', goal: '/goal_pose', pose: '/initialpose' };
   const FF = 'map';
   let activeTool = null, toolStage = null;
-  let navZ = 0;   // Nav Goal 고도(z, map 기준 m)
+  let navZ = +localStorage.getItem('rdash-navz') || 0;   // Nav Goal 고도(z, map 기준 m)
   const sph = (id, p, c) => ({ ns: 'tool', id, type: 2, action: 0, frame_id: FF, pose: { p, q: [0, 0, 0, 1] }, scale: [0.2, 0.2, 0.2], color: c, points: [], colors: [], text: '' });
   const arw = (id, p, yaw, c) => ({ ns: 'tool', id, type: 0, action: 0, frame_id: FF, pose: { p, q: [0, 0, Math.sin(yaw / 2), Math.cos(yaw / 2)] }, scale: [0.7, 0.1, 0.15], color: c, points: [], colors: [], text: '' });
   const showTool = (ms) => scene.setMarkersById('__tool__', ms);
@@ -777,7 +778,7 @@ export function cloud(it) {
     toolBox.append(tb('🔍 조회', 'inspect'), tb('📍 Point', 'point'), tb('🎯 Nav Goal', 'goal'), tb('📌 Pose', 'pose'), tb('📏 측정', 'measure'));
     toolBox.append(el('div', { class: 'hint', style: 'margin-top:3px' }, activeTool ? (activeTool === 'inspect' ? '점 클릭 → 좌표·값·프레임 조회' : activeTool === 'point' ? '그라운드 클릭 → 발행' : activeTool === 'measure' ? '두 점 클릭 → 거리(반복)' : '클릭=위치, 다시 클릭=방향') : '도구 선택 후 씬 클릭'));
     const zin = el('input', { type: 'number', step: '0.1', value: String(navZ), style: 'width:70px;font:11px monospace' });
-    zin.oninput = () => { navZ = +zin.value || 0; };
+    zin.oninput = () => { navZ = +zin.value || 0; localStorage.setItem('rdash-navz', navZ); };
     toolBox.append(el('label', { class: 'hint', style: 'display:flex;align-items:center;gap:5px;margin-top:5px' }, el('span', {}, 'Nav Goal 고도 z (m)'), zin));
     if (activeTool === 'inspect') toolBox.append(inspectOut);
   }
