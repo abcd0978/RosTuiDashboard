@@ -11,6 +11,7 @@ import { map } from './map.js';
 import { turtle } from './turtle.js';
 import { plotlab } from './plotlab.js';
 import { bookmarks, jobs } from './bookmarks.js';
+import { overlays } from './overlays.js';
 
 export const Views = {
   msgdef, qos, connections, tftree,
@@ -21,4 +22,5 @@ export const Views = {
   cloud, image, map, turtle, plotlab,
   teleop, states,
   bookmarks, jobs,
+  overlays,
 };

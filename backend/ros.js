@@ -4,6 +4,7 @@ import net from 'net';
 import { spawn } from 'child_process';
 import { makeBackend } from '../shared/backend.js';
 import { VER } from '../shared/ver.js';
+import { sourcePrelude } from '../shared/overlays.js';
 
 export { VER };   // 기존에 './ros.js' 에서 VER 을 받던 곳들 유지 — 감지 자체는 shared/ver.js 로 옮겼다
 export const be = makeBackend(VER);
@@ -44,7 +45,9 @@ async function ensureRosbridge() {
   // 루프백 강제(ROS1) — 전부 한 머신에 있을 때 호스트명 해석 실패를 피한다. 다른 머신이면 RDASH_LOOPBACK=0.
   const ros1Net = (VER === '2' || process.env.RDASH_LOOPBACK === '0')
     ? '' : 'unset ROS_HOSTNAME; export ROS_IP=${ROS_IP:-127.0.0.1}; ';
-  rbProc = spawn('bash', ['-lc', `${ros1Net}source /opt/ros/*/setup.bash 2>/dev/null; exec ${cmd}`], { stdio: 'ignore' });
+  // sourcePrelude(): distro 대신 오버레이까지 소싱해야 rosbridge 가 custom 타입 토픽(액션 피드백 등)을
+  // 역직렬화할 수 있다(검증됨) — 예전엔 distro 만 하드코딩돼 있었다.
+  rbProc = spawn('bash', ['-lc', `${ros1Net}${sourcePrelude()}exec ${cmd}`], { stdio: 'ignore' });
   rbProc.on('error', () => { rbProc = null; });
   rbProc.on('exit', () => { rbProc = null; });
 }
@@ -54,6 +57,14 @@ const killRb = () => { try { if (rbProc) rbProc.kill('SIGINT'); } catch { /* */ 
 process.on('exit', killRb);
 process.on('SIGINT', killRb);
 process.on('SIGTERM', killRb);
+
+// 오버레이 설정이 바뀌었을 때 호출(backend/routes/config.js) — 우리가 띄운 rosbridge 만 죽인다.
+// 재기동은 여기서 직접 하지 않는다: 5초 워치독(ensureRosbridge)이 곧 새 env(바뀐 오버레이 반영)로
+// 다시 띄운다. 그래서 오버레이 변경은 rosbridge 엔 재기동 후(최대 5초)에나 반영되고, CLI 명령(rosSpawn)엔
+// 매번 새 bash 라 즉시 반영된다 — 이 차이를 사용자가 헷갈리지 않도록 프런트 hint 에 적어 둔다.
+export function restartRosbridge() {
+  if (rbProc) { try { rbProc.kill('SIGINT'); } catch { /* */ } rbProc = null; }
+}
 
 export function cleanRosCmd() {
   return String.raw`source /opt/ros/*/setup.bash 2>/dev/null || true
