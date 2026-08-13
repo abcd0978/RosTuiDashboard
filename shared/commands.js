@@ -31,16 +31,22 @@ export const paramGetCmd = (node, name) =>
 export const paramSetCmd = (node, name, val) =>
   `ros2 param set ${shq(node)} ${shq(name)} ${shq(val)} 2>&1`;
 
-// 노드 리소스: 노드명 토큰으로 PID 찾아 /proc·ps 에서 CPU%/RSS/스레드. CPU% 내림차순. (best-effort: 독립 프로세스 노드만)
+// 노드 리소스: 노드명 토큰으로 PID 찾아 /proc/stat 0.6s 델타로 "현재" CPU%/RSS/스레드. CPU% 내림차순. (best-effort: 독립 프로세스 노드만)
 export const resourceCmd = (nodes) => {
   const args = nodes.slice(0, 60).map(shq).join(' ');
-  return `{ for NODE in ${args || "''"}; do TOK=$(basename "$NODE"); `
-    + `for p in $(pgrep -f -- "$TOK" 2>/dev/null | head -4); do `
+  const ticks = `awk '{sub(/.*\\) /,""); print $12+$13}' /proc/$p/stat 2>/dev/null`;
+  return `{ PAIRS=$(for NODE in ${args || "''"}; do TOK=$(basename "$NODE"); `
+    + `for p in $(pgrep -f -- "$TOK" 2>/dev/null | head -4); do echo "$p $NODE"; done; done); `
+    + `HZ=$(getconf CLK_TCK); DT=0.6; `
+    + `T0=$(echo "$PAIRS" | while read p NODE; do [ -n "$p" ] && echo "$p $(${ticks})"; done); `
+    + `sleep $DT; `
+    + `echo "$PAIRS" | while read p NODE; do [ -n "$p" ] || continue; `
     + `rss=$(awk '/VmRSS/{printf "%.0f", $2/1024}' /proc/$p/status 2>/dev/null); `
     + `thr=$(awk '/Threads/{print $2}' /proc/$p/status 2>/dev/null); `
-    + `cpu=$(ps -o %cpu= -p $p 2>/dev/null | tr -d ' '); `
+    + `c1=$(${ticks}); [ -n "$c1" ] || continue; c0=$(echo "$T0" | awk -v p="$p" '$1==p{print $2}'); `
+    + `cpu=$(awk -v a="$c0" -v b="$c1" -v hz="$HZ" -v dt="$DT" 'BEGIN{if(a==""||b=="")print "?";else printf "%.1f",(b-a)/hz/dt*100}'); `
     + `printf '%6s  %-24s  pid %-7s %6s MB  %3s thr\\n' "\${cpu:-0}" "$NODE" "$p" "\${rss:-?}" "\${thr:-?}"; `
-    + `done; done | sort -rn; }; echo '(CPU% 내림차순 · RSS/스레드 · 독립 프로세스 노드만)'`;
+    + `done | sort -rn; }; echo '(현재 CPU% · 0.6s 샘플 · RSS/스레드 · 독립 프로세스 노드만)'`;
 };
 
 // 두 프레임 간 실시간 변환(translation/rotation + 거리). 잠깐 실행 후 openInfo 가 주기 갱신.
