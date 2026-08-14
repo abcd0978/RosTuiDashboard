@@ -1,6 +1,7 @@
 // ROS1/ROS2 감지 · rosbridge_server 자동 기동/유지 · ROS 정리 스크립트.
 // ROS 그래프/echo 는 전적으로 rosbridge 를 통한다 — rosbridge_suite 가 필수다(없으면 여기서 띄운다).
 import net from 'net';
+import http from 'http';
 import { spawn } from 'child_process';
 import { makeBackend } from '../shared/backend.js';
 import { VER } from '../shared/ver.js';
@@ -29,14 +30,38 @@ function tcpOpen(port, timeoutMs = 300) {
   });
 }
 
+// 마스터에 /rosbridge_websocket 이 등록돼 있나(xmlrpc lookupNode) — roscore 재시작 시 rosbridge 는 살아서
+// 포트만 쥔 고아가 되는데, 포트 검사만으로는 영영 못 잡는다. 판단 불가(마스터 무응답 등)면 true — 오판으로 죽이지 않기 위해.
+function rbRegistered() {
+  return new Promise((resolve) => {
+    const body = '<?xml version="1.0"?><methodCall><methodName>lookupNode</methodName><params>'
+      + '<param><value><string>/rdash</string></value></param>'
+      + '<param><value><string>/rosbridge_websocket</string></value></param></params></methodCall>';
+    const req = http.request({ host: '127.0.0.1', port: MASTER_PORT, method: 'POST', timeout: 1000, headers: { 'Content-Type': 'text/xml' } }, (res) => {
+      let out = '';
+      res.on('data', (d) => { out += d; });
+      res.on('end', () => resolve(/<(?:int|i4)>1</.test(out)));
+    });
+    req.on('error', () => resolve(true));
+    req.on('timeout', () => { req.destroy(); resolve(true); });
+    req.end(body);
+  });
+}
+
 // rosbridge_server 자동 기동/유지(launch = websocket + rosapi). 로컬 URL 한정.
 // ROS1 은 마스터가 뜬 뒤에만 — 안 그러면 roslaunch 가 자기 마스터를 띄워 경쟁한다. ROS2 엔 마스터가 없어 이 검사가 없다.
 let rbProc = null;
 async function ensureRosbridge() {
   if (!RB_LOCAL) return;                                  // 원격 rosbridge 는 우리가 띄우지 않는다
+  if (VER !== '2' && !(await tcpOpen(MASTER_PORT))) return;   // ROS1: 마스터 대기
+  if (VER !== '2' && (await tcpOpen(RB_PORT)) && !(await rbRegistered())) {
+    // 고아 rosbridge — 포트 점유자를 SIGINT 로 정리하고 다음 틱(5s)에 재기동
+    if (rbProc) { try { rbProc.kill('SIGINT'); } catch { /* */ } rbProc = null; }
+    else spawn('bash', ['-c', `fuser -k -INT ${RB_PORT}/tcp`], { stdio: 'ignore' });
+    return;
+  }
   if (rbProc && rbProc.exitCode === null) return;         // 기동 중
   if (await tcpOpen(RB_PORT)) return;                     // 이미 떠 있음(공유)
-  if (VER !== '2' && !(await tcpOpen(MASTER_PORT))) return;   // ROS1: 마스터 대기
   // 포트를 반드시 넘긴다. 안 넘기면 launch 파일 기본값(9090)에 바인딩하는데, 우리가 붙는 주소는
   // RDASH_ROSBRIDGE_URL 이라 포트를 바꾼 순간 "9090 에 띄우고 9091 에 붙는" 상태가 되어 영영 못 붙는다.
   // 컨테이너를 host 네트워크로 여러 개 띄우면(같은 네트워크 네임스페이스) 9090 이 하나뿐이라 이게 실제로 필요하다.

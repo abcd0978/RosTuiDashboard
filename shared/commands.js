@@ -32,11 +32,12 @@ export const paramSetCmd = (node, name, val) =>
   `ros2 param set ${shq(node)} ${shq(name)} ${shq(val)} 2>&1`;
 
 // 노드 리소스: 노드명 토큰으로 PID 찾아 /proc/stat 0.6s 델타로 "현재" CPU%/RSS/스레드. CPU% 내림차순. (best-effort: 독립 프로세스 노드만)
+// cmdline 에 rdashresq 가 있으면 이 조회 스크립트 자신(및 서브셸)이므로 제외 — 마커는 아래 grep 명령 자체.
 export const resourceCmd = (nodes) => {
   const args = nodes.slice(0, 60).map(shq).join(' ');
   const ticks = `awk '{sub(/.*\\) /,""); print $12+$13}' /proc/$p/stat 2>/dev/null`;
   return `{ PAIRS=$(for NODE in ${args || "''"}; do TOK=$(basename "$NODE"); `
-    + `for p in $(pgrep -f -- "$TOK" 2>/dev/null | head -4); do echo "$p $NODE"; done; done); `
+    + `for p in $(pgrep -f -- "$TOK" 2>/dev/null); do grep -q rdashresq /proc/$p/cmdline 2>/dev/null || echo "$p $NODE"; done | head -4; done); `
     + `HZ=$(getconf CLK_TCK); DT=0.6; `
     + `T0=$(echo "$PAIRS" | while read p NODE; do [ -n "$p" ] && echo "$p $(${ticks})"; done); `
     + `sleep $DT; `
