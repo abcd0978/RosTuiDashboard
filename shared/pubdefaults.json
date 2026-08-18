@@ -1,0 +1,32 @@
+{
+  "/scanner/camera_ctrl": {
+    "reply": "/scanner/camera_ctrl_result",
+    "presets": [
+      { "data": "list" },
+      { "data": "set exposure_auto 1" },
+      { "data": "set exposure_absolute 156" },
+      { "data": "set exposure_auto 3" },
+      { "data": "set exposure_auto_priority 0" },
+      { "data": "set gain 0" },
+      { "data": "set brightness 0" },
+      { "data": "set contrast 32" },
+      { "data": "set saturation 64" },
+      { "data": "set hue 0" },
+      { "data": "set gamma 100" },
+      { "data": "set sharpness 3" },
+      { "data": "set backlight_compensation 0" },
+      { "data": "set power_line_frequency 2" },
+      { "data": "set white_balance_temperature_auto 1" },
+      { "data": "set white_balance_temperature 4600" },
+      { "data": "set focus_auto 1" },
+      { "data": "set focus_absolute 0" },
+      { "data": "set zoom_absolute 100" },
+      { "data": "set pan_absolute 0" },
+      { "data": "set tilt_absolute 0" },
+      { "data": "set privacy 0" },
+      { "data": "set iris_absolute 0" },
+      { "data": "get exposure_absolute" },
+      { "data": "setn exposure_absolute 0.5" }
+    ]
+  }
+}
