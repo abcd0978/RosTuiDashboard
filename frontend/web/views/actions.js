@@ -99,12 +99,18 @@ export function msgForm(title, url, base, key, protoUrl) {
   const out = el('pre', { class: 'out' });
   const btn = el('button', { class: 'act', onclick: async () => { out.textContent = '전송 중…'; const r = await post(url, { ...base, [key]: ta.value }); out.textContent = r.out; } }, '전송');
   const sel = el('select', { style: 'display:none;width:100%', onchange: () => { ta.value = sel.value; } });   // 프리셋 — 있을 때만 보인다
-  openModal(title, el('div', {}, el('div', { class: 'hint' }, key + ' (YAML/JSON)'), sel, ta, el('div', { class: 'actbtns' }, btn), out));
+  const replyHint = el('div', { class: 'hint', style: 'display:none' });   // 응답 토픽 — 있을 때만 보인다
+  const replyPane = el('pre', { class: 'out', style: 'display:none' });
+  openModal(title, el('div', {}, el('div', { class: 'hint' }, key + ' (YAML/JSON)'), sel, ta, el('div', { class: 'actbtns' }, btn), out, replyHint, replyPane));
   if (protoUrl) api(protoUrl).then((r) => {
     if (r && r.yaml && ta.value.trim() === '{}') ta.value = r.yaml;
     if (r && r.presets && r.presets.length) {   // 프리셋(shared/pubdefaults.js) — 첫 항목으로 프리필, select 로 전환
       for (const p of r.presets) sel.append(el('option', { value: p.yaml }, p.yaml));
       sel.style.display = ''; ta.value = r.presets[0].yaml;
+    }
+    if (r && r.reply) {   // 응답 토픽 — 모달이 떠 있는 동안 구독해 최신 메시지를 아래에 보여준다
+      replyHint.textContent = '↩ ' + r.reply; replyHint.style.display = ''; replyPane.style.display = ''; replyPane.textContent = '(발행 후 응답 대기…)';
+      setModalSub(openStream('/echo?topic=' + encodeURIComponent(r.reply), (d) => { try { replyPane.textContent = String(JSON.parse(d)); } catch (_) { /* */ } }));
     }
   }).catch(() => {});
 }

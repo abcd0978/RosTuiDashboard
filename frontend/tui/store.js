@@ -236,7 +236,7 @@ export function StoreProvider({ children }) {
     }
     const fields = flattenSkeleton(skel);
     const presets = Array.isArray(o.presets) ? o.presets : [];   // 프리셋 있으면 첫 항목으로 프리필(shared/pubdefaults.js), ←→ 로 전환
-    setPubForm({ name: nm, type: (o.type || active.ty || '?'), fields: applyPreset(fields, presets[0]?.values), idx: 0, kind: 'topic', presets, pi: 0 });
+    setPubForm({ name: nm, type: (o.type || active.ty || '?'), fields: applyPreset(fields, presets[0]?.values), idx: 0, kind: 'topic', presets, pi: 0, reply: o.reply || null });
     setStatus(`▲ publish ${nm} — 필드 ${fields.length}개${presets.length ? ` · 프리셋 ${presets.length}개(←→ 전환)` : ''}`);
   };
   // 서비스 호출 폼 — topic 과 같은 패턴(스켈레톤 → 필드 펼침), kind 만 다르다.
@@ -256,7 +256,7 @@ export function StoreProvider({ children }) {
   const submitPubForm = () => {
     const f = pubForm; if (!f) return;
     const msg = buildYaml(f.fields);
-    setPubForm(null);
+    if (!f.reply) setPubForm(null);   // 응답 토픽이 있으면 폼을 유지해 결과를 그 자리에서 본다(Esc 로 닫음)
     if (f.kind === 'service') submitServiceCall(f.name, msg);
     else submitPublish(f.name, msg);
   };

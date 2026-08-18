@@ -1,9 +1,11 @@
 // 토픽 발행 폼 — 메시지 타입에서 뽑은 필드들을 한 줄씩 보여주고 값만 채워 넣게 한다.
 //   ↑↓ 필드 이동 · 입력=현재 필드 편집 · Enter=발행(1회) · Esc=취소.
+//   응답 토픽(reply, shared/pubdefaults.js)이 있으면 Enter 후에도 폼이 남고 그 토픽의 최신 메시지가 하단에 뜬다.
 // (구조를 통째로 외워 YAML 을 손으로 치던 방식 대체)
-import { h } from '../../react.js';
+import { h, useState, useEffect } from '../../react.js';
 import { Box, Text, useInput } from 'ink';
 import { useDashboard } from '../../store.js';
+import { openStream } from '../../lib/api.js';
 import { typable, clamp, pad } from '../../../../shared/util.js';
 import { applyPreset } from '../../../../shared/pubdefaults.js';
 
@@ -12,6 +14,11 @@ export function PublishForm() {
   const f = d.pubForm;
   const fields = f.fields;
   const idx = clamp(f.idx, 0, Math.max(0, fields.length - 1));
+  const [reply, setReply] = useState('');
+  useEffect(() => {   // 응답 토픽 — 폼이 떠 있는 동안만 구독
+    if (!f.reply) return undefined;
+    return openStream('echo', { topic: f.reply }, (d) => { try { setReply(String(JSON.parse(d)).trimEnd()); } catch { /* */ } });
+  }, [f.reply]);
   useInput((ch, key) => {
     if (key.escape) { d.setPubForm(null); return; }
     if (key.return) { d.submitPubForm(); return; }
@@ -39,7 +46,7 @@ export function PublishForm() {
   const nameW = Math.min(28, fields.reduce((m, x) => Math.max(m, x.path.length), 4) + 1);
   const isSvc = f.kind === 'service';   // 서비스 호출도 같은 폼을 쓴다 — 제목/Enter 힌트만 바꾼다
   const titleTxt = isSvc ? `call service  ${f.name}` : `▲ publish  ${f.name}`;
-  const enterHint = isSvc ? 'Enter=호출' : 'Enter=발행(1회)';
+  const enterHint = isSvc ? 'Enter=호출' : f.reply ? 'Enter=발행' : 'Enter=발행(1회)';
   const presetHint = f.presets?.length ? ` · 프리셋 ${f.pi + 1}/${f.presets.length} ←→` : '';
   return h(Box, { flexDirection: 'column', borderStyle: 'round', borderColor: 'yellow', paddingX: 1, width: w + 2 },
     h(Text, { color: 'yellow', bold: true }, ` ${titleTxt} `),
@@ -53,5 +60,9 @@ export function PublishForm() {
             h(Text, { backgroundColor: on ? 'yellow' : undefined, color: on ? 'black' : 'white' }, ` ${val}${on ? '▏' : ''} `),
             h(Text, { dimColor: true }, `  ${x.kind}`));
         })
-      : [h(Text, { dimColor: true }, ' (필드 없음 — 빈 메시지)')]));
+      : [h(Text, { dimColor: true }, ' (필드 없음 — 빈 메시지)')]),
+    ...(f.reply ? [
+      h(Text, { color: 'cyan' }, ` ↩ ${f.reply}`),
+      h(Text, {}, ` ${reply || '(발행 후 응답 대기…)'}`),
+    ] : []));
 }

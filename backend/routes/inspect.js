@@ -23,8 +23,9 @@ router.get('/api/proto', async (req, res) => {
     const skel = parsed.skel || {};
     const fields = flattenSkeleton(skel);
     // 프리셋(shared/pubdefaults.js) — TUI 는 values 로 필드를 채우고, 웹은 yaml 을 textarea 에 넣는다.
-    const presets = (loadPubDefaults()[req.query.name] || []).map((p) => ({ values: p, yaml: buildYaml(applyPreset(fields, p)) || '{}' }));
-    return res.json({ yaml: buildYaml(fields) || '{}', skel, type: parsed.type || '', presets });
+    const cfg = loadPubDefaults()[req.query.name] || { presets: [], reply: null };
+    const presets = cfg.presets.map((p) => ({ values: p, yaml: buildYaml(applyPreset(fields, p)) || '{}' }));
+    return res.json({ yaml: buildYaml(fields) || '{}', skel, type: parsed.type || '', presets, reply: cfg.reply });
   } catch {
     return res.json({ yaml: '{}', skel: null, type: '' });
   }
