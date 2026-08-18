@@ -11,6 +11,7 @@ import { clamp, fuzzy, RATES, LEFT_W } from '../../shared/util.js';
 import { buildTree, flattenTree } from './lib/tree.js';
 import { numericFields } from '../../shared/ros.js';   // 순수 텍스트 파싱(ROS 안 건드림)
 import { flattenSkeleton, buildYaml } from '../../shared/msgform.js';
+import { applyPreset } from '../../shared/pubdefaults.js';
 import { shq } from '../../shared/util.js';
 import { api, post, outOf, openStream } from './lib/api.js';
 import { loadBookmarks, saveBookmarks, activePreset, presetNames, savePreset } from '../../shared/bookmarks.js';
@@ -234,8 +235,9 @@ export function StoreProvider({ children }) {
       return;
     }
     const fields = flattenSkeleton(skel);
-    setPubForm({ name: nm, type: (o.type || active.ty || '?'), fields, idx: 0, kind: 'topic' });
-    setStatus(`▲ publish ${nm} — 필드 ${fields.length}개`);
+    const presets = Array.isArray(o.presets) ? o.presets : [];   // 프리셋 있으면 첫 항목으로 프리필(shared/pubdefaults.js), ←→ 로 전환
+    setPubForm({ name: nm, type: (o.type || active.ty || '?'), fields: applyPreset(fields, presets[0]?.values), idx: 0, kind: 'topic', presets, pi: 0 });
+    setStatus(`▲ publish ${nm} — 필드 ${fields.length}개${presets.length ? ` · 프리셋 ${presets.length}개(←→ 전환)` : ''}`);
   };
   // 서비스 호출 폼 — topic 과 같은 패턴(스켈레톤 → 필드 펼침), kind 만 다르다.
   const openServiceForm = async (nm) => {

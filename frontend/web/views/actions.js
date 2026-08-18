@@ -98,8 +98,15 @@ export function msgForm(title, url, base, key, protoUrl) {
   const ta = el('textarea', { rows: 5, style: 'width:100%', html: '{}' });
   const out = el('pre', { class: 'out' });
   const btn = el('button', { class: 'act', onclick: async () => { out.textContent = '전송 중…'; const r = await post(url, { ...base, [key]: ta.value }); out.textContent = r.out; } }, '전송');
-  openModal(title, el('div', {}, el('div', { class: 'hint' }, key + ' (YAML/JSON)'), ta, el('div', { class: 'actbtns' }, btn), out));
-  if (protoUrl) api(protoUrl).then((r) => { if (r && r.yaml && ta.value.trim() === '{}') ta.value = r.yaml; }).catch(() => {});
+  const sel = el('select', { style: 'display:none;width:100%', onchange: () => { ta.value = sel.value; } });   // 프리셋 — 있을 때만 보인다
+  openModal(title, el('div', {}, el('div', { class: 'hint' }, key + ' (YAML/JSON)'), sel, ta, el('div', { class: 'actbtns' }, btn), out));
+  if (protoUrl) api(protoUrl).then((r) => {
+    if (r && r.yaml && ta.value.trim() === '{}') ta.value = r.yaml;
+    if (r && r.presets && r.presets.length) {   // 프리셋(shared/pubdefaults.js) — 첫 항목으로 프리필, select 로 전환
+      for (const p of r.presets) sel.append(el('option', { value: p.yaml }, p.yaml));
+      sel.style.display = ''; ta.value = r.presets[0].yaml;
+    }
+  }).catch(() => {});
 }
 
 export function teleop() {

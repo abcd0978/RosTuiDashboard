@@ -5,6 +5,7 @@ import { h } from '../../react.js';
 import { Box, Text, useInput } from 'ink';
 import { useDashboard } from '../../store.js';
 import { typable, clamp, pad } from '../../../../shared/util.js';
+import { applyPreset } from '../../../../shared/pubdefaults.js';
 
 export function PublishForm() {
   const d = useDashboard();
@@ -16,6 +17,11 @@ export function PublishForm() {
     if (key.return) { d.submitPubForm(); return; }
     if (key.upArrow) { d.setPubForm((p) => p && ({ ...p, idx: clamp(idx - 1, 0, fields.length - 1) })); return; }
     if (key.downArrow || key.tab) { d.setPubForm((p) => p && ({ ...p, idx: clamp(idx + 1, 0, fields.length - 1) })); return; }
+    if ((key.leftArrow || key.rightArrow) && f.presets?.length > 1) {   // 프리셋 전환 — 값 전부 그 프리셋으로 다시 채움
+      const n = f.presets.length, pi = (f.pi + (key.rightArrow ? 1 : n - 1)) % n;
+      d.setPubForm((p) => p && ({ ...p, pi, fields: applyPreset(p.fields.map((x) => ({ ...x, value: undefined })), p.presets[pi].values) }));
+      return;
+    }
     if (!fields.length) return;
     // 처음 입력하면 기본값(placeholder)을 대체한다 — "0" 에 이어붙어 "01.0" 되는 문제 방지.
     const edit = (fn) => d.setPubForm((p) => {
@@ -34,9 +40,10 @@ export function PublishForm() {
   const isSvc = f.kind === 'service';   // 서비스 호출도 같은 폼을 쓴다 — 제목/Enter 힌트만 바꾼다
   const titleTxt = isSvc ? `call service  ${f.name}` : `▲ publish  ${f.name}`;
   const enterHint = isSvc ? 'Enter=호출' : 'Enter=발행(1회)';
+  const presetHint = f.presets?.length ? ` · 프리셋 ${f.pi + 1}/${f.presets.length} ←→` : '';
   return h(Box, { flexDirection: 'column', borderStyle: 'round', borderColor: 'yellow', paddingX: 1, width: w + 2 },
     h(Text, { color: 'yellow', bold: true }, ` ${titleTxt} `),
-    h(Text, { dimColor: true }, ` type: ${f.type}   ↑↓ 필드 · 입력=값 · ${enterHint} · Esc=취소`),
+    h(Text, { dimColor: true }, ` type: ${f.type}   ↑↓ 필드 · 입력=값 · ${enterHint} · Esc=취소${presetHint}`),
     ...(fields.length
       ? fields.map((x, i) => {
           const on = i === idx;
