@@ -9,7 +9,7 @@ import { readSync } from 'fs';
 const MODS = [['numpy', 'numpy'], ['yaml', 'PyYAML']];
 
 // 설치 로그를 사용자가 확인한 뒤 TUI 로 넘어가도록 Enter 대기(대체 화면 진입 전).
-function waitForEnter() {
+export function waitForEnter() {
   if (!process.stdin.isTTY) return;
   process.stderr.write('\n위 설치 로그 확인 후 Enter 를 누르면 RDash 가 시작됩니다… ');
   try {

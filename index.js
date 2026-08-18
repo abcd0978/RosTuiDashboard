@@ -15,7 +15,8 @@ import { StoreProvider } from './frontend/tui/store.js';
 import { Layout } from './frontend/tui/components/chrome/Layout.js';
 import { enterAltScreen, bindExit } from './frontend/tui/lib/screen.js';
 import { createDiffStdout } from './frontend/tui/lib/diffstdout.js';
-import { ensurePyDeps } from './frontend/tui/lib/pydeps.js';
+import { ensurePyDeps, waitForEnter } from './frontend/tui/lib/pydeps.js';
+import { ensureRosbridgePkg } from './shared/sysdeps.js';
 import { API, waitForBackend } from './frontend/tui/lib/api.js';
 import { VER } from './shared/ver.js';
 import { webPort } from './shared/ports.js';
@@ -28,6 +29,7 @@ try { process.stdin.setMaxListeners(0); process.stdout.setMaxListeners(0); } cat
 process.on('warning', () => {});
 
 ensurePyDeps();   // 파이썬 브리지가 쓰는 패키지 없으면 자동 설치 — 대체 화면 진입 전에.
+if (ensureRosbridgePkg()) waitForEnter();   // rosbridge_server 없으면 apt 자동 설치 — 역시 대체 화면 진입 전에.
 
 // 백엔드 동반 기동 — `npm start` 하나로 TUI + 웹을 함께 띄운다. 백엔드는 TUI 의 데이터 소스이기도 하다.
 // RDASH_API 로 외부(이미 떠 있는/원격) 백엔드를 지정하면 여기서 띄우지 않는다.

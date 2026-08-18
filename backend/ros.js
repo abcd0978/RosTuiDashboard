@@ -6,6 +6,7 @@ import { spawn } from 'child_process';
 import { makeBackend } from '../shared/backend.js';
 import { VER } from '../shared/ver.js';
 import { sourcePrelude } from '../shared/overlays.js';
+import { ensureRosbridgePkg } from '../shared/sysdeps.js';
 
 export { VER };   // 기존에 './ros.js' 에서 VER 을 받던 곳들 유지 — 감지 자체는 shared/ver.js 로 옮겼다
 export const be = makeBackend(VER);
@@ -76,6 +77,7 @@ async function ensureRosbridge() {
   rbProc.on('error', () => { rbProc = null; });
   rbProc.on('exit', () => { rbProc = null; });
 }
+ensureRosbridgePkg();   // 패키지 자체가 없으면 먼저 깐다(npm run web 경로) — 있으면 무동작
 ensureRosbridge();
 setInterval(ensureRosbridge, 5000);
 const killRb = () => { try { if (rbProc) rbProc.kill('SIGINT'); } catch { /* */ } };
